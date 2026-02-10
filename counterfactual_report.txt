@@ -1,0 +1,95 @@
+==========================================================================================
+COUNTERFACTUAL GENERATION REPORT
+TabPFN SCM Prior - Factual/Counterfactual Pair Statistics
+==========================================================================================
+
+Configuration: batch_size=16, seq_len=200, num_features=10, repeats=3
+Total samples per experiment: 9600
+
+------------------------------------------------------------------------------------------
+SECTION 1: STRATEGY COMPARISON (default config)
+------------------------------------------------------------------------------------------
+
+1.1 Validity (label flip rate)
+
+Strategy             | Validity Rate | Samples
+---------------------+---------------+--------
+additive_noise       | 0.0344        | 9600   
+marginal_replacement | 0.0571        | 9600   
+gradient_guided      | 0.0052        | 9600   
+fixed_magnitude      | 0.0481        | 9600   
+uniform_random       | 0.0744        | 9600   
+
+1.2 Proximity Metrics (mean +/- std)
+
+Strategy             | L1                | L2                | Linf              | Cosine Sim        | Sparsity       
+---------------------+-------------------+-------------------+-------------------+-------------------+----------------
+additive_noise       | 21.564 +/- 15.631 | 14.193 +/- 8.984  | 11.978 +/- 7.638  | 0.9305 +/- 0.0872 | 0.301 +/- 0.140
+marginal_replacement | 31.118 +/- 25.131 | 20.252 +/- 14.249 | 16.901 +/- 11.704 | 0.8318 +/- 0.2182 | 0.299 +/- 0.142
+gradient_guided      | 2.736 +/- 1.512   | 1.599 +/- 0.616   | 1.172 +/- 0.380   | 0.9992 +/- 0.0008 | 0.300 +/- 0.140
+fixed_magnitude      | 29.655 +/- 15.611 | 17.095 +/- 6.019  | 12.303 +/- 3.518  | 0.9204 +/- 0.0693 | 0.304 +/- 0.141
+uniform_random       | 42.419 +/- 29.358 | 27.529 +/- 16.042 | 22.920 +/- 13.075 | 0.7486 +/- 0.2541 | 0.302 +/- 0.138
+
+1.3 Per-Feature Mean Absolute Deviation
+
+Strategy             | MAD (mean) | MAD (std) | # Features Perturbed
+---------------------+------------+-----------+---------------------
+additive_noise       | 2.1564     | 0.2381    | 3.01 +/- 1.40       
+marginal_replacement | 3.1118     | 0.2476    | 3.00 +/- 1.41       
+gradient_guided      | 0.2736     | 0.0250    | 3.00 +/- 1.40       
+fixed_magnitude      | 2.9655     | 0.2347    | 3.04 +/- 1.41       
+uniform_random       | 4.2419     | 0.4167    | 3.02 +/- 1.38       
+
+1.4 Timing
+
+Strategy             | Total Time (s) | Time/Sample (ms)
+---------------------+----------------+-----------------
+additive_noise       | 0.122          | 0.0127          
+marginal_replacement | 0.080          | 0.0083          
+gradient_guided      | 0.230          | 0.0239          
+fixed_magnitude      | 0.082          | 0.0086          
+uniform_random       | 0.086          | 0.0090          
+
+------------------------------------------------------------------------------------------
+SECTION 2: CONFIGURATION VARIANT COMPARISON (strategy=fixed_magnitude)
+------------------------------------------------------------------------------------------
+
+Variant             | Validity | L2 dist           | Cosine Sim | Sparsity | Time/Sample (ms)
+--------------------+----------+-------------------+------------+----------+-----------------
+default             | 0.0465   | 16.487 +/- 6.312  | 0.9254     | 0.302    | 0.0086          
+high_perturbation   | 0.1600   | 75.232 +/- 16.134 | 0.4474     | 0.699    | 0.0085          
+low_perturbation    | 0.0177   | 5.972 +/- 2.551   | 0.9879     | 0.171    | 0.0086          
+deep_scm_6layers    | 0.0821   | 26.996 +/- 8.741  | 0.9063     | 0.305    | 0.0200          
+shallow_scm_2layers | 0.0000   | 8.589 +/- 3.893   | 0.9385     | 0.306    | 0.0046          
+many_features_20    | 0.0667   | 23.700 +/- 7.039  | 0.9269     | 0.303    | 0.0112          
+
+------------------------------------------------------------------------------------------
+SECTION 3: AGGREGATE SUMMARY
+------------------------------------------------------------------------------------------
+
+  Highest validity rate:  uniform_random (0.0744)
+  Lowest L2 distance:     gradient_guided (1.5987)
+  Highest cosine sim:     gradient_guided (0.9992)
+  Fastest generation:     marginal_replacement (0.0083 ms/sample)
+  Most sparse changes:    marginal_replacement (sparsity=0.2993)
+
+  Validity vs Proximity tradeoff (per strategy):
+  ------------------------------------------------------------
+  additive_noise            validity: 0.034 |#
+                            L2 dist:  14.193 |########################################
+
+  marginal_replacement      validity: 0.057 |##
+                            L2 dist:  20.252 |########################################
+
+  gradient_guided           validity: 0.005 |
+                            L2 dist:  1.599 |######
+
+  fixed_magnitude           validity: 0.048 |#
+                            L2 dist:  17.095 |########################################
+
+  uniform_random            validity: 0.074 |##
+                            L2 dist:  27.529 |########################################
+
+==========================================================================================
+END OF REPORT
+==========================================================================================
