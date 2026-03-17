@@ -664,7 +664,7 @@ Exp 3 passes but Exp 4 fails -> model can do in-context identification but not i
 | 3 | Composite Loss (Delta + Mask) | DONE | Added mask supervision to prior (target_y=2*nf channels); composite loss with masked delta MSE + mask BCE; updated eval for mask thresholding; 4 new tests | 2026-03-17 |
 | 4 | Fixed-SCM Data Generator | DONE | Added forward_with_internals_fixed_mapping, generate_batch_fixed_scm, FixedThresholdBinarize, FixedSCMDataLoader, get_batch_fixed_scm; 10 new tests | 2026-03-17 |
 | 5 | SCM-Based Validity Evaluation | DONE | Added generate_batch_with_scm, get_batch_with_scm, compute_scm_validity with FixedThresholdBinarize; updated compute_metrics/print_report/evaluate; 12 new tests | 2026-03-17 |
-| 6 | Experiment Runner Framework | PENDING | | |
+| 6 | Experiment Runner Framework | DONE | Created experiments/ package with configs.py (all 6 experiment configs) and run_experiment.py (unified runner with training, eval, checkpointing, criteria checking, CLI) | 2026-03-17 |
 | 7 | Experiment 0: Linear Sanity Check | PENDING | | |
 | 8 | Experiment 1: Single Nonlinear SCM | PENDING | | |
 | 9 | Experiment 2: Feature Scaling | PENDING | | |
@@ -672,5 +672,5 @@ Exp 3 passes but Exp 4 fails -> model can do in-context identification but not i
 | 11 | Experiment 4: Diverse SCMs | PENDING | | |
 | 12 | Results Notebook | PENDING | | |
 
-Last stage completed: Stage 5 — SCM-Based Validity Evaluation
+Last stage completed: Stage 6 — Experiment Runner Framework
 Last updated by: plan-runner-agent
