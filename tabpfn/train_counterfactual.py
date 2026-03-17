@@ -71,6 +71,7 @@ def train_counterfactual(
     epoch_callback=None,
     mask_supervision=True,
     mask_loss_weight=0.5,
+    dataloader=None,
 ):
     """Train a counterfactual generation model.
 
@@ -87,23 +88,26 @@ def train_counterfactual(
     # --- data loader ---
     single_eval_pos = seq_len // 2
 
-    def eval_pos_seq_len_sampler():
-        return single_eval_pos, bptt
+    if dataloader is not None:
+        dl = dataloader
+    else:
+        def eval_pos_seq_len_sampler():
+            return single_eval_pos, bptt
 
-    hp = dict(extra_prior_kwargs or {})
-    hp["mask_supervision"] = mask_supervision
-    prior_kwargs = dict(
-        num_features=num_features,
-        hyperparameters=hp,
-    )
-    dl = CounterfactualDataLoader(
-        num_steps=steps_per_epoch,
-        batch_size=batch_size,
-        eval_pos_seq_len_sampler=eval_pos_seq_len_sampler,
-        seq_len_maximum=bptt,
-        device=device,
-        **prior_kwargs,
-    )
+        hp = dict(extra_prior_kwargs or {})
+        hp["mask_supervision"] = mask_supervision
+        prior_kwargs = dict(
+            num_features=num_features,
+            hyperparameters=hp,
+        )
+        dl = CounterfactualDataLoader(
+            num_steps=steps_per_epoch,
+            batch_size=batch_size,
+            eval_pos_seq_len_sampler=eval_pos_seq_len_sampler,
+            seq_len_maximum=bptt,
+            device=device,
+            **prior_kwargs,
+        )
 
     # --- model ---
     encoder = encoders.Linear(num_features, emsize)

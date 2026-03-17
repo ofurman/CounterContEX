@@ -89,6 +89,7 @@ def get_default_counterfactual_config():
         "perturbation_magnitude": 2.0,  # scale for additive noise / fixed magnitude
         "gradient_step_size": 0.1,  # step size for gradient-guided strategy
         "fixed_magnitude_k": 1.0,  # number of std devs for fixed_magnitude
+        "perturbation_direction": "random",  # "random" (+/-1) or "positive" (+1 only)
         "num_counterfactuals_per_factual": 1,
         # Classification settings
         "num_classes": 2,
@@ -1244,18 +1245,27 @@ class CounterfactualSCMGenerator:
     def _perturb_fixed_magnitude(
         self, x_factual: Tensor, perturb_mask: Tensor, internals: Dict, scm
     ) -> Tensor:
-        """Shift features by k standard deviations in a random direction.
+        """Shift features by k standard deviations.
+
+        Direction is controlled by config["perturbation_direction"]:
+        - "random": random +1 or -1 per sample per feature (default)
+        - "positive": always +1 (deterministic, for sanity checks)
 
         Returns delta tensor (seq_len, num_features).
         """
         k = self.config["fixed_magnitude_k"]
         feat_std = x_factual[:, 0, :].std(dim=0, keepdim=True).clamp(min=1e-6)
 
-        # Random direction: +1 or -1
-        direction = (
-            torch.rand((x_factual.shape[0], x_factual.shape[2]), device=self.device)
-            > 0.5
-        ).float() * 2 - 1
+        direction_mode = self.config.get("perturbation_direction", "random")
+        if direction_mode == "positive":
+            direction = torch.ones(
+                (x_factual.shape[0], x_factual.shape[2]), device=self.device
+            )
+        else:
+            direction = (
+                torch.rand((x_factual.shape[0], x_factual.shape[2]), device=self.device)
+                > 0.5
+            ).float() * 2 - 1
         delta = direction * k * feat_std
         delta[~perturb_mask] = 0.0
         return delta

@@ -380,7 +380,7 @@ class FixedSCMDataLoader:
         self.hyperparameters = hyperparameters or {}
         self.device = device
         self.single_eval_pos = single_eval_pos
-        self.num_outputs = num_outputs
+        self._n_outputs = num_outputs  # avoid "num_outputs" attr (check_compatibility)
         self.num_steps = num_steps
 
         # Build config
@@ -389,7 +389,7 @@ class FixedSCMDataLoader:
 
         # Build SCM
         gen = CounterfactualSCMGenerator(config, device=device)
-        self.scm = gen._sample_scm(seq_len, num_features, num_outputs)
+        self.scm = gen._sample_scm(seq_len, num_features, self._n_outputs)
 
         # Get fixed node permutation
         with torch.no_grad():
@@ -398,7 +398,7 @@ class FixedSCMDataLoader:
         # Calibrate class boundary from a large batch
         with torch.no_grad():
             # Generate calibration data: use a larger seq_len temporarily
-            cal_scm = gen._sample_scm(calibration_size, num_features, num_outputs)
+            cal_scm = gen._sample_scm(calibration_size, num_features, self._n_outputs)
             # We need to reuse the same MLP weights, so rebuild with calibration size
             # Instead, run multiple forward passes and collect y values
             y_values = []
@@ -418,18 +418,21 @@ class FixedSCMDataLoader:
 
     def __iter__(self):
         for _ in range(self.num_steps):
-            yield get_batch_fixed_scm(
+            x, y, target_y = get_batch_fixed_scm(
                 batch_size=self.batch_size,
                 seq_len=self.seq_len,
                 num_features=self.num_features,
                 hyperparameters=self.hyperparameters,
                 device=self.device,
                 single_eval_pos=self.single_eval_pos,
-                num_outputs=self.num_outputs,
+                num_outputs=self._n_outputs,
                 scm=self.scm,
                 fixed_perm=self.fixed_perm,
                 class_assigner=self.class_assigner,
             )
+            # Match the standard DataLoader output format:
+            # ((style, x, y), target_y, single_eval_pos)
+            yield (None, x, y), target_y, self.single_eval_pos
 
     def __len__(self):
         return self.num_steps

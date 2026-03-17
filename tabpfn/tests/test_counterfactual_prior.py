@@ -507,7 +507,9 @@ class TestFixedSCMDataLoader:
         )
         batches = list(dl)
         assert len(batches) == 3
-        x, y, target_y = batches[0]
+        # FixedSCMDataLoader yields ((style, x, y), target_y, single_eval_pos)
+        data, target_y, sep = batches[0]
+        style, x, y = data
         assert x.shape == (SEQ_LEN, BATCH_SIZE, NUM_FEATURES)
         assert y.shape == (SEQ_LEN, BATCH_SIZE)
         assert not torch.isnan(x).any()

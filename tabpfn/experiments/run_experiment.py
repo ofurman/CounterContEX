@@ -21,9 +21,78 @@ from tabpfn.train_counterfactual import train_counterfactual
 from tabpfn.eval_counterfactual import (
     build_model,
     evaluate,
+    run_inference,
+    compute_metrics,
+    print_report,
+    save_examples,
     EvalMetrics,
 )
+from tabpfn.priors.counterfactual_prior import FixedSCMDataLoader
 from tabpfn.experiments.configs import EXPERIMENT_REGISTRY
+
+
+def _evaluate_fixed_scm(model, fixed_dl, num_test_datasets, num_features,
+                        seq_len, save_path=None):
+    """Evaluate a model using the same fixed SCM from training.
+
+    Generates test data from the training SCM and computes SCM-based validity
+    by re-running predicted counterfactuals through the original causal model.
+    """
+    from tabpfn.eval_counterfactual import compute_scm_validity
+
+    test_batches = []
+    single_eval_pos = seq_len // 2
+    test_dl = FixedSCMDataLoader(
+        num_features=num_features,
+        seq_len=seq_len,
+        batch_size=1,
+        hyperparameters=fixed_dl.hyperparameters,
+        device="cpu",
+        single_eval_pos=single_eval_pos,
+        num_steps=num_test_datasets,
+        calibration_size=200,
+    )
+    # Use the SAME SCM and class assigner from training
+    test_dl.scm = fixed_dl.scm
+    test_dl.fixed_perm = fixed_dl.fixed_perm
+    test_dl.class_assigner = fixed_dl.class_assigner
+
+    # Generate test batches and collect SCM internals for each
+    scm_data_list = []
+    for data, target_y, sep in test_dl:
+        style, x, y = data
+        test_batches.append((x, y, target_y))
+        # Get internals from the fixed SCM for SCM validity
+        with torch.no_grad():
+            _, _, internals, _ = fixed_dl.scm.forward_with_internals_fixed_mapping(
+                fixed_dl.fixed_perm
+            )
+        scm_data_list.append({
+            "scm": fixed_dl.scm,
+            "internals": internals,
+            "class_assigner": fixed_dl.class_assigner,
+        })
+
+    print(f"Generated {len(test_batches)} test batches from fixed SCM")
+
+    pred_deltas, true_deltas, query_x, target_labels = run_inference(
+        model, test_batches, single_eval_pos, num_features, "cpu",
+        mask_supervision=True,
+    )
+
+    metrics = compute_metrics(
+        pred_deltas, true_deltas, query_x, target_labels,
+        num_features, "cpu",
+        scm_data_list=scm_data_list,
+        single_eval_pos=single_eval_pos,
+    )
+    metrics.num_test_datasets = num_test_datasets
+
+    print_report(metrics)
+    if save_path:
+        save_examples(pred_deltas, true_deltas, query_x, target_labels, save_path)
+
+    return metrics
 
 
 def run_experiment(
@@ -73,6 +142,23 @@ def run_experiment(
 
     # Prepare prior kwargs from SCM config
     extra_prior_kwargs = dict(scm_config)
+    use_fixed_scm = extra_prior_kwargs.pop("use_fixed_scm", False)
+
+    # Build fixed-SCM data loader if requested
+    fixed_dl = None
+    if use_fixed_scm:
+        hp = dict(extra_prior_kwargs)
+        hp["mask_supervision"] = True
+        fixed_dl = FixedSCMDataLoader(
+            num_features=num_features,
+            seq_len=exp_config["seq_len"],
+            batch_size=exp_config["batch_size"],
+            hyperparameters=hp,
+            device="cpu",
+            single_eval_pos=exp_config["seq_len"] // 2,
+            num_steps=exp_config["steps_per_epoch"],
+        )
+        print(f"  Using FixedSCMDataLoader (single frozen SCM)")
 
     print(f"\n{'=' * 60}")
     print(f"  Running experiment: {num_features} features, {epochs} epochs")
@@ -102,6 +188,7 @@ def run_experiment(
         epoch_callback=epoch_callback,
         mask_supervision=True,
         mask_loss_weight=0.5,
+        dataloader=fixed_dl,
     )
 
     train_time = time.time() - start_time
@@ -132,16 +219,23 @@ def run_experiment(
 
     # ---- Evaluation ----
     print(f"\nEvaluating with {num_test_datasets} test datasets...")
-    metrics = evaluate(
-        model,
-        num_test_datasets=num_test_datasets,
-        num_features=num_features,
-        seq_len=exp_config["seq_len"],
-        device="cpu",
-        save_path=str(out / "example_predictions.json"),
-        mask_supervision=True,
-        with_scm_validity=with_scm_validity,
-    )
+    if use_fixed_scm and fixed_dl is not None:
+        # Generate test data from the same fixed SCM
+        metrics = _evaluate_fixed_scm(
+            model, fixed_dl, num_test_datasets, num_features,
+            exp_config["seq_len"], str(out / "example_predictions.json"),
+        )
+    else:
+        metrics = evaluate(
+            model,
+            num_test_datasets=num_test_datasets,
+            num_features=num_features,
+            seq_len=exp_config["seq_len"],
+            device="cpu",
+            save_path=str(out / "example_predictions.json"),
+            mask_supervision=True,
+            with_scm_validity=with_scm_validity,
+        )
 
     # ---- Compute additional metrics ----
     # Sign accuracy: fraction of deltas with correct sign
@@ -269,6 +363,19 @@ def main():
         passed = training["loss_reduction"] >= criteria["loss_reduction"]
         status = "PASS" if passed else "FAIL"
         print(f"  [{status}] Loss reduction: {training['loss_reduction']:.1%} >= {criteria['loss_reduction']:.0%}")
+        all_passed = all_passed and passed
+
+    if "max_epochs_to_converge" in criteria:
+        # Find the epoch where loss first dropped below 1% of initial
+        threshold = 0.01 * training["initial_loss"] if training["initial_loss"] else 0
+        converge_epoch = training["total_epochs"]
+        for entry in results.get("training_log", []):
+            if entry["loss"] <= threshold:
+                converge_epoch = entry["epoch"]
+                break
+        passed = converge_epoch <= criteria["max_epochs_to_converge"]
+        status = "PASS" if passed else "FAIL"
+        print(f"  [{status}] Converged at epoch {converge_epoch} <= {criteria['max_epochs_to_converge']}")
         all_passed = all_passed and passed
 
     overall = "PASSED" if all_passed else "FAILED"

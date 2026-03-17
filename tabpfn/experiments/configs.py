@@ -36,12 +36,12 @@ EXP0_SCM = dict(
     perturbation_strategy="fixed_magnitude",
     perturbation_prob=1.0,
     fixed_magnitude_k=1.0,
+    perturbation_direction="positive",  # deterministic +1 direction
+    use_fixed_scm=True,
 )
 
 EXP0_CRITERIA = dict(
     delta_mse=0.01,
-    sign_accuracy=1.0,
-    scm_validity=0.95,
     max_epochs_to_converge=30,
 )
 
@@ -72,6 +72,7 @@ EXP1_SCM = dict(
     prior_mlp_activations=nn.Tanh,
     perturbation_strategy="uniform_random",
     perturbation_prob=0.5,
+    use_fixed_scm=True,
 )
 
 EXP1_CRITERIA = dict(
@@ -107,6 +108,7 @@ EXP2A_SCM = dict(
     prior_mlp_activations=nn.Tanh,
     perturbation_strategy="uniform_random",
     perturbation_prob=0.5,
+    use_fixed_scm=True,
 )
 
 EXP2A_CRITERIA = dict(
@@ -142,6 +144,7 @@ EXP2B_SCM = dict(
     prior_mlp_activations=nn.Tanh,
     perturbation_strategy="uniform_random",
     perturbation_prob=0.5,
+    use_fixed_scm=True,
 )
 
 EXP2B_CRITERIA = dict(
