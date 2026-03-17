@@ -363,5 +363,102 @@ class TestGaussianNoiseReplay:
         # We just check it runs without error
 
 
+class TestFixedSCMMapping:
+    """Test forward_with_internals_fixed_mapping and generate_batch_fixed_scm."""
+
+    def test_fixed_perm_returns_consistent_indices(self):
+        """Two calls with same fixed_perm should yield identical feature/target indices."""
+        config = get_default_counterfactual_config()
+        gen = CounterfactualSCMGenerator(config, device=DEVICE)
+        scm = gen._sample_scm(SEQ_LEN, NUM_FEATURES, NUM_OUTPUTS)
+
+        # First call: get a fresh perm
+        _, _, internals1, perm = scm.forward_with_internals_fixed_mapping(None)
+        # Second call: reuse the perm
+        _, _, internals2, perm2 = scm.forward_with_internals_fixed_mapping(perm)
+
+        assert torch.equal(perm, perm2), "Returned perm should be identical when passed in"
+        assert torch.equal(
+            internals1["node_mapping"]["feature_indices"],
+            internals2["node_mapping"]["feature_indices"],
+        ), "Feature indices should be identical with same fixed_perm"
+        assert internals1["node_mapping"]["target_indices"] == internals2["node_mapping"]["target_indices"], \
+            "Target indices should be identical with same fixed_perm"
+
+    def test_fixed_perm_different_data(self):
+        """Two calls with same fixed_perm produce different data points (fresh samples)."""
+        config = get_default_counterfactual_config()
+        gen = CounterfactualSCMGenerator(config, device=DEVICE)
+        scm = gen._sample_scm(SEQ_LEN, NUM_FEATURES, NUM_OUTPUTS)
+
+        x1, _, _, perm = scm.forward_with_internals_fixed_mapping(None)
+        x2, _, _, _ = scm.forward_with_internals_fixed_mapping(perm)
+
+        # Different random causes -> different data (extremely unlikely to be equal)
+        assert not torch.allclose(x1, x2), \
+            "Different calls should produce different data even with same perm"
+
+    def test_generate_batch_fixed_scm_shapes(self):
+        """generate_batch_fixed_scm should produce correct output shapes."""
+        from tabpfn.priors.counterfactual import FixedThresholdBinarize
+
+        config = get_default_counterfactual_config()
+        gen = CounterfactualSCMGenerator(config, device=DEVICE)
+        scm = gen._sample_scm(SEQ_LEN, NUM_FEATURES, NUM_OUTPUTS)
+
+        _, y_cal, _, perm = scm.forward_with_internals_fixed_mapping(None)
+        threshold = torch.median(y_cal).item()
+        class_assigner = FixedThresholdBinarize(threshold)
+
+        batch = gen.generate_batch_fixed_scm(
+            scm=scm, fixed_perm=perm, class_assigner=class_assigner,
+            batch_size=BATCH_SIZE, seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+        )
+
+        assert batch.x_factual.shape == (SEQ_LEN, BATCH_SIZE, NUM_FEATURES)
+        assert batch.y_factual_class.shape == (SEQ_LEN, BATCH_SIZE)
+        assert batch.label_flipped.shape == (SEQ_LEN, BATCH_SIZE)
+
+    def test_fixed_scm_consistent_scales(self):
+        """Fixed SCM should produce data with similar feature scales across batches."""
+        from tabpfn.priors.counterfactual import FixedThresholdBinarize
+
+        config = get_default_counterfactual_config()
+        gen = CounterfactualSCMGenerator(config, device=DEVICE)
+        scm = gen._sample_scm(SEQ_LEN, NUM_FEATURES, NUM_OUTPUTS)
+
+        _, y_cal, _, perm = scm.forward_with_internals_fixed_mapping(None)
+        threshold = torch.median(y_cal).item()
+        class_assigner = FixedThresholdBinarize(threshold)
+
+        batch1 = gen.generate_batch_fixed_scm(
+            scm=scm, fixed_perm=perm, class_assigner=class_assigner,
+            batch_size=1, seq_len=SEQ_LEN, num_features=NUM_FEATURES,
+        )
+        batch2 = gen.generate_batch_fixed_scm(
+            scm=scm, fixed_perm=perm, class_assigner=class_assigner,
+            batch_size=1, seq_len=SEQ_LEN, num_features=NUM_FEATURES,
+        )
+
+        # Feature means should be in the same ballpark
+        mean1 = batch1.x_factual[:, 0, :].mean(dim=0)
+        mean2 = batch2.x_factual[:, 0, :].mean(dim=0)
+        # With same SCM the means should be similar (not identical due to sampling)
+        diff = (mean1 - mean2).abs().max().item()
+        assert diff < 5.0, f"Feature means should be similar across batches, got max diff {diff}"
+
+    def test_fixed_threshold_binarize(self):
+        """FixedThresholdBinarize uses a fixed threshold, not per-batch median."""
+        from tabpfn.priors.counterfactual import FixedThresholdBinarize
+
+        assigner = FixedThresholdBinarize(0.5)
+        x = torch.tensor([[[0.1], [0.6], [0.3], [0.9]]])
+        result = assigner(x)
+        expected = torch.tensor([[[0.0], [1.0], [0.0], [1.0]]])
+        assert torch.equal(result, expected), \
+            f"FixedThresholdBinarize should use fixed threshold, got {result}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

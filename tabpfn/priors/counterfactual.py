@@ -33,6 +33,21 @@ from tabpfn.priors.flexible_categorical import (
 )
 
 
+class FixedThresholdBinarize(nn.Module):
+    """Binarize using a fixed threshold instead of per-batch median.
+
+    For fixed-SCM experiments, the threshold is computed once from a large
+    calibration set and frozen, ensuring consistent class boundaries.
+    """
+
+    def __init__(self, threshold: float):
+        super().__init__()
+        self.threshold = threshold
+
+    def forward(self, x):
+        return (x > self.threshold).float()
+
+
 class PerturbationStrategy(Enum):
     """Available perturbation strategies for counterfactual generation."""
 
@@ -200,6 +215,112 @@ class CounterfactualSCMGenerator:
         y_factual = torch.cat(all_y_f, dim=1).detach()  # (seq_len, batch, num_outputs)
         x_cf = torch.cat(all_x_cf, dim=1).detach()  # (seq_len, batch, num_features)
         y_cf = torch.cat(all_y_cf, dim=1).detach()  # (seq_len, batch, num_outputs)
+        intervention_mask = torch.cat(all_intervention_masks, dim=1).detach()
+        perturbation_delta = torch.cat(all_deltas, dim=1).detach()
+
+        # Squeeze target dim if single output
+        if num_outputs == 1:
+            y_factual = y_factual.squeeze(-1)
+            y_cf = y_cf.squeeze(-1)
+
+        # Apply shared classification
+        y_factual_class = class_assigner(
+            y_factual.unsqueeze(-1) if y_factual.dim() == 2 else y_factual
+        ).float()
+        y_cf_class = class_assigner(
+            y_cf.unsqueeze(-1) if y_cf.dim() == 2 else y_cf
+        ).float()
+
+        # Squeeze back if needed
+        if y_factual_class.dim() > 2:
+            y_factual_class = y_factual_class.squeeze(-1)
+        if y_cf_class.dim() > 2:
+            y_cf_class = y_cf_class.squeeze(-1)
+
+        label_flipped = y_factual_class != y_cf_class
+
+        return CounterfactualBatch(
+            x_factual=x_factual,
+            y_factual=y_factual,
+            y_factual_class=y_factual_class,
+            x_counterfactual=x_cf,
+            y_counterfactual=y_cf,
+            y_counterfactual_class=y_cf_class,
+            label_flipped=label_flipped,
+            intervention_mask=intervention_mask,
+            perturbation_delta=perturbation_delta,
+        )
+
+    def generate_batch_fixed_scm(
+        self,
+        scm,
+        fixed_perm,
+        class_assigner,
+        batch_size: int,
+        seq_len: int,
+        num_features: int,
+        num_outputs: int = 1,
+        perturbation_strategy: Optional[Union[str, PerturbationStrategy]] = None,
+    ) -> CounterfactualBatch:
+        """Generate a batch using a pre-built SCM with fixed node mapping.
+
+        Instead of creating batch_size independent SCMs, this uses the same SCM
+        and fixed_perm for every batch element, getting fresh samples each time
+        but with the same causal structure, node mapping, and class boundary.
+
+        Args:
+            scm: Pre-built _MLP instance (from _sample_scm / _build_mlp)
+            fixed_perm: Fixed node permutation tensor (from forward_with_internals_fixed_mapping)
+            class_assigner: Pre-built class assigner (e.g., FixedThresholdBinarize)
+            batch_size: number of datasets in the batch
+            seq_len: number of samples per dataset
+            num_features: number of observed features
+            num_outputs: number of target dimensions (usually 1)
+            perturbation_strategy: override the config strategy for this batch
+
+        Returns:
+            CounterfactualBatch with all factual and counterfactual data
+        """
+        if perturbation_strategy is not None:
+            if isinstance(perturbation_strategy, PerturbationStrategy):
+                perturbation_strategy = perturbation_strategy.value
+        else:
+            perturbation_strategy = self.config["perturbation_strategy"]
+
+        all_x_f, all_y_f, all_x_cf, all_y_cf = [], [], [], []
+        all_intervention_masks, all_deltas = [], []
+
+        for _ in range(batch_size):
+            x_f, y_f, internals, _ = scm.forward_with_internals_fixed_mapping(fixed_perm)
+
+            # Determine which features to perturb (random subset)
+            perturb_mask = self._select_perturbation_targets(
+                seq_len, num_features
+            )
+
+            # Compute intervention values
+            interventions, deltas = self._compute_interventions(
+                x_f, perturb_mask, internals, perturbation_strategy, scm
+            )
+
+            # Re-propagate with interventions
+            if interventions:
+                x_cf, y_cf = scm.forward_with_intervention(internals, interventions)
+            else:
+                x_cf, y_cf = x_f.clone(), y_f.clone()
+
+            all_x_f.append(x_f)
+            all_y_f.append(y_f)
+            all_x_cf.append(x_cf)
+            all_y_cf.append(y_cf)
+            all_intervention_masks.append(perturb_mask.unsqueeze(1))
+            all_deltas.append(deltas.unsqueeze(1))
+
+        # Concatenate along batch dimension
+        x_factual = torch.cat(all_x_f, dim=1).detach()
+        y_factual = torch.cat(all_y_f, dim=1).detach()
+        x_cf = torch.cat(all_x_cf, dim=1).detach()
+        y_cf = torch.cat(all_y_cf, dim=1).detach()
         intervention_mask = torch.cat(all_intervention_masks, dim=1).detach()
         perturbation_delta = torch.cat(all_deltas, dim=1).detach()
 
@@ -603,6 +724,168 @@ class CounterfactualSCMGenerator:
                 }
 
                 return x, y, internals
+
+            def forward_with_internals_fixed_mapping(self, fixed_perm=None):
+                """Like forward_with_internals but with a fixed node permutation.
+
+                If fixed_perm is None, sample a new permutation and return it.
+                If fixed_perm is provided, reuse it for node selection.
+
+                Returns:
+                    x, y, internals, fixed_perm
+                """
+
+                # --- Sample root causes ---
+                def sample_normal():
+                    if self.pre_sample_causes:
+                        return torch.normal(
+                            self.causes_mean, self.causes_std.abs()
+                        ).float()
+                    else:
+                        return torch.normal(
+                            0.0, 1.0, (seq_len, 1, self.num_causes), device=device
+                        ).float()
+
+                if self.sampling == "normal":
+                    causes = sample_normal()
+                elif self.sampling == "mixed":
+                    zipf_p = pyrandom.random() * 0.66
+                    multi_p = pyrandom.random() * 0.66
+                    normal_p = pyrandom.random() * 0.66
+
+                    def sample_cause(n):
+                        if pyrandom.random() > normal_p:
+                            if self.pre_sample_causes:
+                                return torch.normal(
+                                    self.causes_mean[:, :, n],
+                                    self.causes_std[:, :, n].abs(),
+                                ).float()
+                            else:
+                                return torch.normal(
+                                    0.0, 1.0, (seq_len, 1), device=device
+                                ).float()
+                        elif pyrandom.random() > multi_p:
+                            x = (
+                                torch.multinomial(
+                                    torch.rand((pyrandom.randint(2, 10))),
+                                    seq_len,
+                                    replacement=True,
+                                )
+                                .to(device)
+                                .unsqueeze(-1)
+                                .float()
+                            )
+                            x = (x - torch.mean(x)) / torch.std(x)
+                            return x
+                        else:
+                            x = torch.minimum(
+                                torch.tensor(
+                                    np.random.zipf(
+                                        2.0 + pyrandom.random() * 2, size=(seq_len)
+                                    ),
+                                    device=device,
+                                )
+                                .unsqueeze(-1)
+                                .float(),
+                                torch.tensor(10.0, device=device),
+                            )
+                            return x - torch.mean(x)
+
+                    causes = torch.cat(
+                        [sample_cause(n).unsqueeze(-1) for n in range(self.num_causes)],
+                        -1,
+                    )
+                elif self.sampling == "uniform":
+                    causes = torch.rand((seq_len, 1, self.num_causes), device=device)
+                else:
+                    raise ValueError(f"Invalid sampling: {self.sampling}")
+
+                # --- Forward propagation with noise capture ---
+                layer_noises = []
+                outputs = [causes]
+
+                for layer in self.layers:
+                    layer_input = outputs[-1]
+                    if isinstance(layer, nn.Sequential):
+                        pre_noise_out = layer_input
+                        for sublayer in layer:
+                            if isinstance(sublayer, GaussianNoise):
+                                noise_tensor = sublayer.sample_noise(pre_noise_out)
+                                layer_noises.append(noise_tensor)
+                                pre_noise_out = pre_noise_out + noise_tensor
+                            else:
+                                pre_noise_out = sublayer(pre_noise_out)
+                        outputs.append(pre_noise_out)
+                    else:
+                        outputs.append(layer(layer_input))
+                        layer_noises.append(None)
+
+                outputs_for_selection = outputs[2:]  # skip causes + first hidden
+
+                if self.is_causal:
+                    outputs_flat = torch.cat(outputs_for_selection, -1)
+
+                    # Build layer boundaries
+                    layer_boundaries = []
+                    offset = 0
+                    for i, out in enumerate(outputs_for_selection):
+                        dim = out.shape[-1]
+                        layer_boundaries.append((offset, offset + dim, i))
+                        offset += dim
+
+                    if fixed_perm is None:
+                        if self.in_clique:
+                            fixed_perm = pyrandom.randint(
+                                0, outputs_flat.shape[-1] - num_outputs - num_features
+                            ) + torch.randperm(num_outputs + num_features, device=device)
+                        else:
+                            fixed_perm = torch.randperm(
+                                outputs_flat.shape[-1] - 1, device=device
+                            )
+
+                    random_idx_y = (
+                        list(range(-num_outputs, 0))
+                        if self.y_is_effect
+                        else fixed_perm[0:num_outputs]
+                    )
+                    random_idx = fixed_perm[num_outputs : num_outputs + num_features]
+
+                    if self.sort_features:
+                        random_idx, _ = torch.sort(random_idx)
+
+                    y = outputs_flat[:, :, random_idx_y]
+                    x = outputs_flat[:, :, random_idx]
+                else:
+                    y = outputs_for_selection[-1][:, :, :]
+                    x = causes
+                    outputs_flat = (
+                        torch.cat(outputs_for_selection, -1)
+                        if outputs_for_selection
+                        else causes
+                    )
+                    fixed_perm = fixed_perm if fixed_perm is not None else torch.arange(num_features, device=device)
+                    random_idx = torch.arange(num_features, device=device)
+                    random_idx_y = list(range(-num_outputs, 0))
+                    layer_boundaries = []
+                    offset = 0
+                    for i, out in enumerate(outputs_for_selection):
+                        dim = out.shape[-1]
+                        layer_boundaries.append((offset, offset + dim, i))
+                        offset += dim
+
+                internals = {
+                    "cause_noise": causes,
+                    "layer_noises": layer_noises,
+                    "layer_outputs": outputs,
+                    "outputs_flat": outputs_flat,
+                    "node_mapping": {
+                        "feature_indices": random_idx,
+                        "target_indices": random_idx_y,
+                    },
+                    "layer_boundaries": layer_boundaries,
+                }
+
+                return x, y, internals, fixed_perm
 
             def forward_with_intervention(self, internals, interventions):
                 """Re-propagate through SCM with fixed noise and feature-level interventions.

@@ -16,6 +16,7 @@ from torch import Tensor
 from tabpfn.utils import default_device
 from tabpfn.priors.counterfactual import (
     CounterfactualSCMGenerator,
+    FixedThresholdBinarize,
     get_default_counterfactual_config,
 )
 from tabpfn.priors.utils import get_batch_to_dataloader
@@ -224,3 +225,150 @@ def _reorder_and_encode(batch, single_eval_pos, num_features, device,
 
 
 DataLoader = get_batch_to_dataloader(get_batch)
+
+
+def get_batch_fixed_scm(
+    batch_size: int,
+    seq_len: int,
+    num_features: int,
+    hyperparameters: dict,
+    device: str = "cpu",
+    single_eval_pos: int = 64,
+    num_outputs: int = 1,
+    epoch: int = None,
+    *,
+    scm,
+    fixed_perm,
+    class_assigner,
+    **kwargs,
+):
+    """Generate training data from a single fixed SCM.
+
+    Like get_batch but uses a pre-built SCM with fixed node mapping and
+    frozen class boundary for consistent data generation across batches.
+
+    Args:
+        scm: Pre-built _MLP instance
+        fixed_perm: Fixed node permutation tensor
+        class_assigner: Pre-built class assigner (e.g., FixedThresholdBinarize)
+        (other args same as get_batch)
+
+    Returns (x, y, target_y) with same format as get_batch.
+    """
+    config = dict(get_default_counterfactual_config())
+    if hyperparameters:
+        config.update(hyperparameters)
+
+    flip_only_queries = config.pop("flip_only_queries", True)
+    mask_supervision = config.pop("mask_supervision", True)
+    # Remove retry-related keys (not needed for fixed SCM)
+    config.pop("min_flip_rate", None)
+    config.pop("max_retries", None)
+
+    gen = CounterfactualSCMGenerator(config, device=device)
+
+    batch = gen.generate_batch_fixed_scm(
+        scm=scm,
+        fixed_perm=fixed_perm,
+        class_assigner=class_assigner,
+        batch_size=batch_size,
+        seq_len=seq_len,
+        num_features=num_features,
+        num_outputs=num_outputs,
+    )
+
+    x, y, target_y = _reorder_and_encode(
+        batch, single_eval_pos, num_features, device,
+        flip_only_queries=flip_only_queries,
+        mask_supervision=mask_supervision,
+    )
+
+    normalize = config.get("normalize_features", True)
+    if normalize:
+        x, target_y = _normalize_per_batch(x, target_y)
+
+    return x, y, target_y
+
+
+class FixedSCMDataLoader:
+    """Data loader that pre-creates a single SCM and reuses it for every batch.
+
+    At initialization:
+    1. Builds one SCM with random weights
+    2. Runs forward_with_internals_fixed_mapping to get a fixed node permutation
+    3. Calibrates a FixedThresholdBinarize from a large calibration batch
+
+    Every __iter__ call generates fresh samples from the same SCM structure.
+    """
+
+    def __init__(
+        self,
+        num_features: int,
+        seq_len: int,
+        batch_size: int,
+        hyperparameters: dict = None,
+        device: str = "cpu",
+        single_eval_pos: int = 64,
+        num_outputs: int = 1,
+        num_steps: int = 100,
+        calibration_size: int = 10000,
+    ):
+        self.num_features = num_features
+        self.seq_len = seq_len
+        self.batch_size = batch_size
+        self.hyperparameters = hyperparameters or {}
+        self.device = device
+        self.single_eval_pos = single_eval_pos
+        self.num_outputs = num_outputs
+        self.num_steps = num_steps
+
+        # Build config
+        config = dict(get_default_counterfactual_config())
+        config.update(self.hyperparameters)
+
+        # Build SCM
+        gen = CounterfactualSCMGenerator(config, device=device)
+        self.scm = gen._sample_scm(seq_len, num_features, num_outputs)
+
+        # Get fixed node permutation
+        with torch.no_grad():
+            _, y_cal, _, self.fixed_perm = self.scm.forward_with_internals_fixed_mapping()
+
+        # Calibrate class boundary from a large batch
+        with torch.no_grad():
+            # Generate calibration data: use a larger seq_len temporarily
+            cal_scm = gen._sample_scm(calibration_size, num_features, num_outputs)
+            # We need to reuse the same MLP weights, so rebuild with calibration size
+            # Instead, run multiple forward passes and collect y values
+            y_values = []
+            remaining = calibration_size
+            while remaining > 0:
+                chunk = min(remaining, seq_len)
+                # Use a temporary SCM with the right seq_len
+                _, y_chunk, _, _ = self.scm.forward_with_internals_fixed_mapping(
+                    self.fixed_perm
+                )
+                y_values.append(y_chunk.squeeze(-1) if y_chunk.dim() > 2 else y_chunk)
+                remaining -= chunk
+            y_all = torch.cat(y_values, dim=0)
+            threshold = torch.median(y_all).item()
+
+        self.class_assigner = FixedThresholdBinarize(threshold)
+
+    def __iter__(self):
+        for _ in range(self.num_steps):
+            yield get_batch_fixed_scm(
+                batch_size=self.batch_size,
+                seq_len=self.seq_len,
+                num_features=self.num_features,
+                hyperparameters=self.hyperparameters,
+                device=self.device,
+                single_eval_pos=self.single_eval_pos,
+                num_outputs=self.num_outputs,
+                scm=self.scm,
+                fixed_perm=self.fixed_perm,
+                class_assigner=self.class_assigner,
+            )
+
+    def __len__(self):
+        return self.num_steps

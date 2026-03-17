@@ -472,5 +472,115 @@ class TestDataLoaderIntegration:
         assert single_eval_pos == SINGLE_EVAL_POS
 
 
+class TestFixedSCMDataLoader:
+    """Test FixedSCMDataLoader and get_batch_fixed_scm."""
+
+    def test_fixed_scm_dataloader_creates(self):
+        """FixedSCMDataLoader should initialize without errors."""
+        from tabpfn.priors.counterfactual_prior import FixedSCMDataLoader
+        dl = FixedSCMDataLoader(
+            num_features=NUM_FEATURES,
+            seq_len=SEQ_LEN,
+            batch_size=BATCH_SIZE,
+            hyperparameters=get_default_counterfactual_config(),
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+            num_steps=2,
+            calibration_size=200,
+        )
+        assert dl.scm is not None
+        assert dl.fixed_perm is not None
+        assert dl.class_assigner is not None
+
+    def test_fixed_scm_dataloader_iterates(self):
+        """FixedSCMDataLoader should produce valid batches."""
+        from tabpfn.priors.counterfactual_prior import FixedSCMDataLoader
+        dl = FixedSCMDataLoader(
+            num_features=NUM_FEATURES,
+            seq_len=SEQ_LEN,
+            batch_size=BATCH_SIZE,
+            hyperparameters=get_default_counterfactual_config(),
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+            num_steps=3,
+            calibration_size=200,
+        )
+        batches = list(dl)
+        assert len(batches) == 3
+        x, y, target_y = batches[0]
+        assert x.shape == (SEQ_LEN, BATCH_SIZE, NUM_FEATURES)
+        assert y.shape == (SEQ_LEN, BATCH_SIZE)
+        assert not torch.isnan(x).any()
+        assert not torch.isnan(target_y).any()
+
+    def test_fixed_scm_consistent_feature_indices(self):
+        """FixedSCMDataLoader should use same feature indices across batches."""
+        from tabpfn.priors.counterfactual_prior import FixedSCMDataLoader
+        dl = FixedSCMDataLoader(
+            num_features=NUM_FEATURES,
+            seq_len=SEQ_LEN,
+            batch_size=1,
+            hyperparameters=get_default_counterfactual_config(),
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+            num_steps=2,
+            calibration_size=200,
+        )
+        # Verify the perm is reused
+        _, _, internals1, perm1 = dl.scm.forward_with_internals_fixed_mapping(dl.fixed_perm)
+        _, _, internals2, perm2 = dl.scm.forward_with_internals_fixed_mapping(dl.fixed_perm)
+        assert torch.equal(
+            internals1["node_mapping"]["feature_indices"],
+            internals2["node_mapping"]["feature_indices"],
+        )
+
+    def test_fixed_scm_frozen_threshold(self):
+        """FixedSCMDataLoader should use a frozen class boundary, not per-batch median."""
+        from tabpfn.priors.counterfactual_prior import FixedSCMDataLoader
+        from tabpfn.priors.counterfactual import FixedThresholdBinarize
+        dl = FixedSCMDataLoader(
+            num_features=NUM_FEATURES,
+            seq_len=SEQ_LEN,
+            batch_size=1,
+            hyperparameters=get_default_counterfactual_config(),
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+            num_steps=1,
+            calibration_size=200,
+        )
+        assert isinstance(dl.class_assigner, FixedThresholdBinarize)
+        # Threshold should be a finite number
+        assert isinstance(dl.class_assigner.threshold, float)
+
+    def test_get_batch_fixed_scm_output_format(self):
+        """get_batch_fixed_scm should return same format as get_batch."""
+        from tabpfn.priors.counterfactual_prior import get_batch_fixed_scm, FixedSCMDataLoader
+        dl = FixedSCMDataLoader(
+            num_features=NUM_FEATURES,
+            seq_len=SEQ_LEN,
+            batch_size=BATCH_SIZE,
+            hyperparameters=get_default_counterfactual_config(),
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+            num_steps=1,
+            calibration_size=200,
+        )
+        x, y, target_y = get_batch_fixed_scm(
+            batch_size=BATCH_SIZE,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+            hyperparameters=get_default_counterfactual_config(),
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+            scm=dl.scm,
+            fixed_perm=dl.fixed_perm,
+            class_assigner=dl.class_assigner,
+        )
+        assert x.shape == (SEQ_LEN, BATCH_SIZE, NUM_FEATURES)
+        assert y.shape == (SEQ_LEN, BATCH_SIZE)
+        # Default mask_supervision=True → 2*num_features
+        assert target_y.shape == (SEQ_LEN, BATCH_SIZE, NUM_FEATURES * 2)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
