@@ -215,7 +215,7 @@ docs(eval): add counterfactual evaluation report with full results
 | 1 | Plausibility metrics module | DONE | Added KS, JS, correlation preservation, LOF, Mahalanobis, actionability metrics |
 | 2 | Scalability benchmark script | DONE | Added benchmark with few_scms/many_scms/balanced strategies, strategy comparison, 1M bounds, extrapolations |
 | 3 | Unified evaluation script | DONE | Unified script with CLI (--scale small/medium/large), quality + scalability phases, markdown report with all 6 sections |
-| 4 | Run evaluation and document | NOT_STARTED | |
+| 4 | Run evaluation and document | DONE | Ran medium-scale evaluation, all 6 sections populated, added interpretation with key findings |
 
-Last stage completed: Stage 3 - Unified evaluation script
+Last stage completed: Stage 4 - Run evaluation and document
 Last updated by: plan-runner-agent
