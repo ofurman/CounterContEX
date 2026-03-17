@@ -205,10 +205,10 @@ bptt = 128  # max sequence length
 
 | # | Stage | Status | Notes | Updated |
 |---|-------|--------|-------|---------|
-| 1 | Counterfactual Data Loader | IN_PROGRESS | | 2026-03-17 |
+| 1 | Counterfactual Data Loader | DONE | Data loader, tests, import fixes | 2026-03-17 |
 | 2 | Model Architecture + Training | PENDING | | |
 | 3 | Evaluation | PENDING | | |
 | 4 | Notebook | PENDING | | |
 
-Last stage completed: None
+Last stage completed: Stage 1 - Counterfactual Data Loader
 Last updated by: plan-runner-agent

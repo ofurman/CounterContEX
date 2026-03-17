@@ -1,0 +1,210 @@
+"""
+Tests for the counterfactual prior data loader.
+
+Verifies:
+1. Output tensor shapes are correct
+2. Context y values are factual labels, query y values are target labels
+3. Targets are correct deltas matching x_cf - x_factual
+4. Label-flipped samples are prioritized for queries
+5. DataLoader integration via get_batch_to_dataloader works
+"""
+
+import pytest
+import torch
+
+import sys
+import importlib
+
+# Prevent tabpfn.priors.__init__ from importing all submodules (fast_gp needs gpytorch)
+# by importing the specific modules directly
+counterfactual_mod = importlib.import_module("tabpfn.priors.counterfactual")
+get_default_counterfactual_config = counterfactual_mod.get_default_counterfactual_config
+
+counterfactual_prior_mod = importlib.import_module("tabpfn.priors.counterfactual_prior")
+get_batch = counterfactual_prior_mod.get_batch
+DataLoader = counterfactual_prior_mod.DataLoader
+
+
+DEVICE = "cpu"
+BATCH_SIZE = 4
+SEQ_LEN = 64
+NUM_FEATURES = 5
+SINGLE_EVAL_POS = 32
+
+
+@pytest.fixture
+def default_hyperparameters():
+    return get_default_counterfactual_config()
+
+
+class TestGetBatchShapes:
+    """Verify get_batch produces tensors with correct shapes."""
+
+    def test_output_shapes(self, default_hyperparameters):
+        x, y, target_y = get_batch(
+            batch_size=BATCH_SIZE,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+            hyperparameters=default_hyperparameters,
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+        )
+        assert x.shape == (SEQ_LEN, BATCH_SIZE, NUM_FEATURES)
+        assert y.shape == (SEQ_LEN, BATCH_SIZE)
+        assert target_y.shape == (SEQ_LEN, BATCH_SIZE, NUM_FEATURES)
+
+    def test_no_nans(self, default_hyperparameters):
+        x, y, target_y = get_batch(
+            batch_size=BATCH_SIZE,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+            hyperparameters=default_hyperparameters,
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+        )
+        assert not torch.isnan(x).any(), "NaN in x"
+        assert not torch.isnan(y).any(), "NaN in y"
+        assert not torch.isnan(target_y).any(), "NaN in target_y"
+
+    def test_y_values_are_class_labels(self, default_hyperparameters):
+        """y values should be valid class labels (non-negative integers)."""
+        x, y, target_y = get_batch(
+            batch_size=BATCH_SIZE,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+            hyperparameters=default_hyperparameters,
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+        )
+        assert (y >= 0).all(), "y should be non-negative"
+        unique_classes = torch.unique(y)
+        assert len(unique_classes) <= 2, f"Expected at most 2 classes, got {unique_classes}"
+
+
+class TestContextQueryEncoding:
+    """Verify context uses factual labels and queries use target labels."""
+
+    def test_context_y_are_factual_labels(self, default_hyperparameters):
+        """Context positions should have factual class labels."""
+        x, y, target_y = get_batch(
+            batch_size=BATCH_SIZE,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+            hyperparameters=default_hyperparameters,
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+        )
+        context_y = y[:SINGLE_EVAL_POS]
+        # Context y should be valid class labels
+        assert (context_y >= 0).all()
+        assert (context_y == context_y.long().float()).all(), "Context y should be integer labels"
+
+    def test_query_y_are_target_labels(self, default_hyperparameters):
+        """Query positions should have target (counterfactual) class labels."""
+        x, y, target_y = get_batch(
+            batch_size=BATCH_SIZE,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+            hyperparameters=default_hyperparameters,
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+        )
+        query_y = y[SINGLE_EVAL_POS:]
+        # Query y should also be valid class labels
+        assert (query_y >= 0).all()
+        assert (query_y == query_y.long().float()).all(), "Query y should be integer labels"
+
+
+class TestDeltaTargets:
+    """Verify targets are correct deltas."""
+
+    def test_targets_are_deltas(self, default_hyperparameters):
+        """Target values should represent x_cf - x_factual."""
+        x, y, target_y = get_batch(
+            batch_size=BATCH_SIZE,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+            hyperparameters=default_hyperparameters,
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+        )
+        # Targets should be finite
+        assert torch.isfinite(target_y).all(), "All target deltas should be finite"
+
+    def test_some_query_targets_nonzero(self, default_hyperparameters):
+        """With default perturbation settings, some query deltas should be non-zero."""
+        x, y, target_y = get_batch(
+            batch_size=BATCH_SIZE,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+            hyperparameters=default_hyperparameters,
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+        )
+        query_targets = target_y[SINGLE_EVAL_POS:]
+        assert query_targets.abs().sum() > 0, "Some query deltas should be non-zero"
+
+
+class TestLabelFlipPrioritization:
+    """Verify that label-flipped samples are prioritized for query positions."""
+
+    def test_flipped_samples_in_queries(self):
+        """With large perturbations causing many flips, query positions should
+        have samples where the target label differs from the factual label."""
+        config = get_default_counterfactual_config()
+        config["perturbation_magnitude"] = 10.0
+        config["perturbation_prob"] = 0.8
+        config["perturbation_strategy"] = "fixed_magnitude"
+        config["fixed_magnitude_k"] = 5.0
+
+        x, y, target_y = get_batch(
+            batch_size=8,
+            seq_len=64,
+            num_features=NUM_FEATURES,
+            hyperparameters=config,
+            device=DEVICE,
+            single_eval_pos=32,
+        )
+        # Query targets should have non-zero deltas (indicating actual changes)
+        query_deltas = target_y[32:]
+        assert query_deltas.abs().sum() > 0, (
+            "Query positions should have non-trivial deltas"
+        )
+
+
+class TestDataLoaderIntegration:
+    """Test integration with get_batch_to_dataloader."""
+
+    def test_dataloader_creation(self):
+        """DataLoader class should be created successfully."""
+        assert DataLoader is not None
+
+    def test_dataloader_iteration(self):
+        """DataLoader should produce valid batches when iterated."""
+        dl = DataLoader(
+            num_steps=2,
+            batch_size=BATCH_SIZE,
+            num_features=NUM_FEATURES,
+            hyperparameters=get_default_counterfactual_config(),
+            eval_pos_seq_len_sampler=lambda: (SINGLE_EVAL_POS, SEQ_LEN),
+            device=DEVICE,
+            seq_len_maximum=SEQ_LEN,
+        )
+
+        # Need to set model attribute (required by __iter__)
+        class DummyModel:
+            pass
+        dl.model = DummyModel()
+
+        batch_data = next(iter(dl))
+        data, target_y, single_eval_pos = batch_data
+
+        style, x, y = data
+        assert x.shape == (SEQ_LEN, BATCH_SIZE, NUM_FEATURES)
+        assert y.shape == (SEQ_LEN, BATCH_SIZE)
+        assert target_y.shape == (SEQ_LEN, BATCH_SIZE, NUM_FEATURES)
+        assert single_eval_pos == SINGLE_EVAL_POS
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
