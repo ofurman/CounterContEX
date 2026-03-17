@@ -207,8 +207,8 @@ bptt = 128  # max sequence length
 |---|-------|--------|-------|---------|
 | 1 | Counterfactual Data Loader | DONE | Data loader, tests, import fixes | 2026-03-17 |
 | 2 | Model Architecture + Training | DONE | Training script with multi-dim MSE, all 8 tests pass | 2026-03-17 |
-| 3 | Evaluation | IN_PROGRESS | | 2026-03-17 |
+| 3 | Evaluation | DONE | Eval script with Delta MSE, validity, proximity, sparsity metrics | 2026-03-17 |
 | 4 | Notebook | PENDING | | |
 
-Last stage completed: Stage 2 - Model Architecture + Training
+Last stage completed: Stage 3 - Evaluation
 Last updated by: plan-runner-agent
