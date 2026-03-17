@@ -15,6 +15,7 @@ from contextlib import nullcontext
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 from torch.cuda.amp import autocast, GradScaler
 
 from tabpfn.transformer import TransformerModel
@@ -68,6 +69,8 @@ def train_counterfactual(
     extra_prior_kwargs=None,
     verbose=True,
     epoch_callback=None,
+    mask_supervision=True,
+    mask_loss_weight=0.5,
 ):
     """Train a counterfactual generation model.
 
@@ -78,7 +81,8 @@ def train_counterfactual(
     print(f"Using {device} device")
     using_dist, rank, device = init_dist(device)
 
-    n_out = num_features  # predict delta per feature
+    # predict delta + mask logits when mask_supervision is on
+    n_out = num_features * 2 if mask_supervision else num_features
 
     # --- data loader ---
     single_eval_pos = seq_len // 2
@@ -86,9 +90,11 @@ def train_counterfactual(
     def eval_pos_seq_len_sampler():
         return single_eval_pos, bptt
 
+    hp = dict(extra_prior_kwargs or {})
+    hp["mask_supervision"] = mask_supervision
     prior_kwargs = dict(
         num_features=num_features,
-        hyperparameters=extra_prior_kwargs or {},
+        hyperparameters=hp,
     )
     dl = CounterfactualDataLoader(
         num_steps=steps_per_epoch,
@@ -116,8 +122,11 @@ def train_counterfactual(
         pos_encoder=pos_encoder,
         efficient_eval_masking=True,
     )
-    criterion = nn.MSELoss(reduction="none")
+    criterion = nn.MSELoss(reduction="none")  # used as fallback / inside composite
     model.criterion = criterion
+    _mask_supervision = mask_supervision
+    _mask_loss_weight = mask_loss_weight
+    _num_features = num_features
 
     print(
         f"Using a Transformer with "
@@ -148,6 +157,9 @@ def train_counterfactual(
             epoch_loss = _train_one_epoch(
                 model, dl, criterion, optimizer, single_eval_pos,
                 steps_per_epoch, device, n_out,
+                mask_supervision=_mask_supervision,
+                mask_loss_weight=_mask_loss_weight,
+                num_features=_num_features,
             )
             total_loss = epoch_loss
             loss_history.append(epoch_loss)
@@ -176,13 +188,15 @@ def train_counterfactual(
 
 
 def _train_one_epoch(model, dl, criterion, optimizer, single_eval_pos,
-                     steps_per_epoch, device, n_out):
+                     steps_per_epoch, device, n_out,
+                     mask_supervision=False, mask_loss_weight=0.5,
+                     num_features=None):
     """Run one training epoch, return mean loss."""
     model.train()
     total_loss = 0.0
 
     for batch_idx, (data, targets, sep) in enumerate(dl):
-        # data = (style, x, y), targets = (seq_len, batch, num_features)
+        # data = (style, x, y), targets = (seq_len, batch, target_channels)
         data_device = tuple(
             e.to(device) if torch.is_tensor(e) else e for e in data
         )
@@ -191,12 +205,15 @@ def _train_one_epoch(model, dl, criterion, optimizer, single_eval_pos,
 
         # Slice targets to query positions only
         query_targets = targets[single_eval_pos:].to(device)
-        # query_targets: (num_query, batch, num_features)
 
-        # Compute per-feature MSE, then mean over features for each (pos, batch)
-        losses = criterion(output, query_targets)  # (num_query, batch, num_features)
-        loss_per_pos_batch = losses.mean(dim=-1)  # (num_query, batch)
-        loss = loss_per_pos_batch.mean()
+        if mask_supervision and num_features is not None:
+            loss = _composite_loss(
+                output, query_targets, num_features, mask_loss_weight,
+            )
+        else:
+            # Plain MSE on all features
+            losses = criterion(output, query_targets)
+            loss = losses.mean()
 
         loss.backward()
 
@@ -207,6 +224,39 @@ def _train_one_epoch(model, dl, criterion, optimizer, single_eval_pos,
         total_loss += loss.item()
 
     return total_loss / steps_per_epoch
+
+
+def _composite_loss(output, query_targets, num_features, mask_loss_weight):
+    """Compute composite loss: masked delta MSE + mask BCE.
+
+    Args:
+        output: (num_query, batch, num_features * 2) — first half = pred deltas, second = mask logits
+        query_targets: (num_query, batch, num_features * 2) — first half = true deltas, second = true mask
+        num_features: number of features
+        mask_loss_weight: weight for mask BCE loss
+
+    Returns:
+        scalar loss
+    """
+    pred_delta = output[..., :num_features]
+    pred_mask_logits = output[..., num_features:]
+    true_delta = query_targets[..., :num_features]
+    true_mask = query_targets[..., num_features:]
+
+    # Delta MSE — weighted by true mask (only penalize on actually changed features)
+    delta_sq_err = (pred_delta - true_delta) ** 2  # (num_query, batch, num_features)
+    # Per-sample: mean over perturbed features only
+    mask_sum = true_mask.sum(dim=-1).clamp(min=1)  # (num_query, batch)
+    delta_loss = (delta_sq_err * true_mask).sum(dim=-1) / mask_sum  # (num_query, batch)
+
+    # Mask BCE — learn which features to perturb
+    mask_loss = F.binary_cross_entropy_with_logits(
+        pred_mask_logits, true_mask, reduction='none',
+    ).mean(dim=-1)  # (num_query, batch)
+
+    # Combined
+    loss = (delta_loss + mask_loss_weight * mask_loss).mean()
+    return loss
 
 
 if __name__ == "__main__":

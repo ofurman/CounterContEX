@@ -20,6 +20,9 @@ from tabpfn.priors.counterfactual import (
 )
 from tabpfn.priors.utils import get_batch_to_dataloader
 
+# When mask supervision is enabled, target_y has 2x num_features channels:
+# first num_features = delta values, last num_features = intervention mask (0/1)
+
 
 def get_batch(
     batch_size: int,
@@ -46,6 +49,7 @@ def get_batch(
     flip_only_queries = config.pop("flip_only_queries", True)
     min_flip_rate = config.pop("min_flip_rate", 0.20)
     max_retries = config.pop("max_retries", 5)
+    mask_supervision = config.pop("mask_supervision", True)
 
     gen = CounterfactualSCMGenerator(config, device=device)
 
@@ -69,6 +73,7 @@ def get_batch(
     x, y, target_y = _reorder_and_encode(
         batch, single_eval_pos, num_features, device,
         flip_only_queries=flip_only_queries,
+        mask_supervision=mask_supervision,
     )
 
     # Per-batch-element feature normalization
@@ -83,45 +88,58 @@ def _normalize_per_batch(x, target_y):
     """Normalize features to zero mean / unit variance per batch element.
 
     Also scales deltas by the same standard deviation so they are expressed
-    in units of feature standard deviations.
+    in units of feature standard deviations. If target_y contains mask channels
+    (shape[-1] == 2 * num_features), only the delta channels are scaled.
 
     Args:
         x: (seq_len, batch_size, num_features)
-        target_y: (seq_len, batch_size, num_features) — deltas
+        target_y: (seq_len, batch_size, num_features) or (seq_len, batch_size, num_features*2)
 
     Returns:
         x_norm, target_y_norm with same shapes
     """
+    num_features = x.shape[2]
     batch_size = x.shape[1]
     for b in range(batch_size):
         mean = x[:, b, :].mean(dim=0, keepdim=True)   # (1, num_features)
         std = x[:, b, :].std(dim=0, keepdim=True).clamp(min=1e-6)  # (1, num_features)
         x[:, b, :] = (x[:, b, :] - mean) / std
-        # Scale deltas by the same std so they're in normalized space
-        target_y[:, b, :] = target_y[:, b, :] / std
+        # Scale only the delta channels, not the mask channels
+        target_y[:, b, :num_features] = target_y[:, b, :num_features] / std
     return x, target_y
 
 
 def _reorder_and_encode(batch, single_eval_pos, num_features, device,
-                        flip_only_queries=True):
+                        flip_only_queries=True, mask_supervision=True):
     """Reorder samples so label-flipped ones are prioritized for query positions.
 
     When flip_only_queries=True, all query positions will have label-flipped
     samples. If fewer flipped samples than query slots, flipped samples are
     duplicated with small Gaussian noise to fill remaining query positions.
 
+    When mask_supervision=True, target_y contains 2*num_features channels:
+    first num_features = delta values, last num_features = intervention mask (0/1).
+
     Returns:
         x: (seq_len, batch_size, num_features)
         y: (seq_len, batch_size) — factual labels for context, target labels for queries
-        target_y: (seq_len, batch_size, num_features) — deltas
+        target_y: (seq_len, batch_size, num_features) or (seq_len, batch_size, num_features*2)
     """
     seq_len = batch.x_factual.shape[0]
     batch_size = batch.x_factual.shape[1]
     num_query = seq_len - single_eval_pos
 
+    target_channels = num_features * 2 if mask_supervision else num_features
     x = torch.zeros(seq_len, batch_size, num_features, device=device)
     y = torch.zeros(seq_len, batch_size, device=device)
-    target_y = torch.zeros(seq_len, batch_size, num_features, device=device)
+    target_y = torch.zeros(seq_len, batch_size, target_channels, device=device)
+
+    def _set_target(pos, b, src_i):
+        """Set target_y at (pos, b) with delta and optionally intervention mask."""
+        delta = batch.x_counterfactual[src_i, b] - batch.x_factual[src_i, b]
+        target_y[pos, b, :num_features] = delta
+        if mask_supervision:
+            target_y[pos, b, num_features:] = batch.intervention_mask[src_i, b].float()
 
     for b in range(batch_size):
         flipped_mask = batch.label_flipped[:, b]  # (seq_len,)
@@ -141,18 +159,14 @@ def _reorder_and_encode(batch, single_eval_pos, num_features, device,
             for i, src_i in enumerate(context_idx):
                 x[i, b] = batch.x_factual[src_i, b]
                 y[i, b] = batch.y_factual_class[src_i, b]
-                target_y[i, b] = (
-                    batch.x_counterfactual[src_i, b] - batch.x_factual[src_i, b]
-                )
+                _set_target(i, b, src_i)
 
             # Fill query positions
             for i, src_i in enumerate(query_idx):
                 pos = single_eval_pos + i
                 x[pos, b] = batch.x_factual[src_i, b]
                 y[pos, b] = batch.y_counterfactual_class[src_i, b]
-                target_y[pos, b] = (
-                    batch.x_counterfactual[src_i, b] - batch.x_factual[src_i, b]
-                )
+                _set_target(pos, b, src_i)
         elif flip_only_queries and len(flipped_idx) > 0:
             # Not enough flipped samples but flip_only_queries is on:
             # duplicate flipped samples with small noise to fill query slots
@@ -162,9 +176,7 @@ def _reorder_and_encode(batch, single_eval_pos, num_features, device,
             for i, src_i in enumerate(context_idx):
                 x[i, b] = batch.x_factual[src_i, b]
                 y[i, b] = batch.y_factual_class[src_i, b]
-                target_y[i, b] = (
-                    batch.x_counterfactual[src_i, b] - batch.x_factual[src_i, b]
-                )
+                _set_target(i, b, src_i)
 
             # Fill query positions: cycle through flipped samples
             for i in range(num_query):
@@ -178,9 +190,7 @@ def _reorder_and_encode(batch, single_eval_pos, num_features, device,
                     noise = torch.randn(num_features, device=device) * 0.01
                     x[pos, b] = batch.x_factual[src_i, b] + noise
                 y[pos, b] = batch.y_counterfactual_class[src_i, b]
-                target_y[pos, b] = (
-                    batch.x_counterfactual[src_i, b] - batch.x_factual[src_i, b]
-                )
+                _set_target(pos, b, src_i)
         else:
             # No flipped samples or flip_only_queries is off:
             # fall back to filling queries with non-flipped samples
@@ -201,18 +211,14 @@ def _reorder_and_encode(batch, single_eval_pos, num_features, device,
             for i, src_i in enumerate(context_idx):
                 x[i, b] = batch.x_factual[src_i, b]
                 y[i, b] = batch.y_factual_class[src_i, b]
-                target_y[i, b] = (
-                    batch.x_counterfactual[src_i, b] - batch.x_factual[src_i, b]
-                )
+                _set_target(i, b, src_i)
 
             # Fill query positions
             for i, src_i in enumerate(query_idx):
                 pos = single_eval_pos + i
                 x[pos, b] = batch.x_factual[src_i, b]
                 y[pos, b] = batch.y_counterfactual_class[src_i, b]
-                target_y[pos, b] = (
-                    batch.x_counterfactual[src_i, b] - batch.x_factual[src_i, b]
-                )
+                _set_target(pos, b, src_i)
 
     return x, y, target_y
 

@@ -661,7 +661,7 @@ Exp 3 passes but Exp 4 fails -> model can do in-context identification but not i
 |---|-------|--------|-------|---------|
 | 1 | Increase Flip Rate & Filter | DONE | Fixed _reorder_and_encode to accept flip_only_queries; duplicate flipped samples with noise when insufficient; added 3 new tests | 2026-03-17 |
 | 2 | Per-Dataset Normalization | DONE | Added _normalize_per_batch in counterfactual_prior.py; normalize_features config flag (default True); 4 new tests | 2026-03-17 |
-| 3 | Composite Loss (Delta + Mask) | PENDING | | |
+| 3 | Composite Loss (Delta + Mask) | DONE | Added mask supervision to prior (target_y=2*nf channels); composite loss with masked delta MSE + mask BCE; updated eval for mask thresholding; 4 new tests | 2026-03-17 |
 | 4 | Fixed-SCM Data Generator | PENDING | | |
 | 5 | SCM-Based Validity Evaluation | PENDING | | |
 | 6 | Experiment Runner Framework | PENDING | | |
@@ -672,5 +672,5 @@ Exp 3 passes but Exp 4 fails -> model can do in-context identification but not i
 | 11 | Experiment 4: Diverse SCMs | PENDING | | |
 | 12 | Results Notebook | PENDING | | |
 
-Last stage completed: Stage 2 — Per-Dataset Normalization
+Last stage completed: Stage 3 — Composite Loss (Delta + Mask)
 Last updated by: plan-runner-agent

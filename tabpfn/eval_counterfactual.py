@@ -48,15 +48,16 @@ class EvalMetrics:
 
 def build_model(num_features: int, emsize: int = 64, nhead: int = 2,
                 nhid: int = 128, nlayers: int = 4, dropout: float = 0.0,
-                bptt: int = 128) -> TransformerModel:
+                bptt: int = 128, mask_supervision: bool = True) -> TransformerModel:
     """Reconstruct the model architecture (must match training config)."""
+    n_out = num_features * 2 if mask_supervision else num_features
     encoder = encoders.Linear(num_features, emsize)
     y_encoder = encoders.Linear(1, emsize)
     pos_encoder = positional_encodings.NoPositionalEncoding(emsize, bptt * 2)
 
     model = TransformerModel(
         encoder=encoder,
-        n_out=num_features,
+        n_out=n_out,
         ninp=emsize,
         nhead=nhead,
         nhid=nhid,
@@ -105,8 +106,14 @@ def generate_test_data(num_datasets: int, seq_len: int, num_features: int,
 
 @torch.no_grad()
 def run_inference(model: TransformerModel, test_batches: list,
-                  single_eval_pos: int, device: str = "cpu"):
+                  single_eval_pos: int, num_features: int,
+                  device: str = "cpu", mask_supervision: bool = True):
     """Run inference on test data.
+
+    When mask_supervision=True, the model outputs 2*num_features channels.
+    The first num_features are delta predictions, the last num_features are
+    mask logits. At inference, we threshold sigmoid(mask_logits) > 0.5 and
+    zero out deltas for non-selected features.
 
     Returns:
         predicted_deltas: (total_query_points, num_features)
@@ -130,16 +137,26 @@ def run_inference(model: TransformerModel, test_batches: list,
         # Forward pass: model expects (style, x, y) tuple
         data = (None, x, y)
         output = model(data, single_eval_pos=single_eval_pos)
-        # output: (num_query, batch, num_features)
 
-        query_true_delta = target_y[single_eval_pos:]  # (num_query, batch, nf)
+        if mask_supervision:
+            # Split output into delta predictions and mask logits
+            pred_delta = output[..., :num_features]
+            pred_mask_logits = output[..., num_features:]
+            # Apply mask: threshold at 0.5, zero out non-selected features
+            pred_mask = (torch.sigmoid(pred_mask_logits) > 0.5).float()
+            pred_delta = pred_delta * pred_mask
+            # Extract true deltas (first num_features channels of target_y)
+            query_true_delta = target_y[single_eval_pos:, :, :num_features]
+        else:
+            pred_delta = output
+            query_true_delta = target_y[single_eval_pos:]
 
         # Flatten batch dimension
-        nq = output.shape[0]
-        bs = output.shape[1]
-        nf = output.shape[2]
+        nq = pred_delta.shape[0]
+        bs = pred_delta.shape[1]
+        nf = num_features
 
-        all_pred_deltas.append(output.reshape(nq * bs, nf))
+        all_pred_deltas.append(pred_delta.reshape(nq * bs, nf))
         all_true_deltas.append(query_true_delta.reshape(nq * bs, nf))
         all_query_x.append(x[single_eval_pos:].reshape(nq * bs, nf))
         all_target_labels.append(y[single_eval_pos:].reshape(nq * bs))
@@ -260,7 +277,8 @@ def save_examples(pred_deltas: Tensor, true_deltas: Tensor,
 
 def evaluate(model: TransformerModel, num_test_datasets: int = 100,
              num_features: int = 5, seq_len: int = 128,
-             device: str = "cpu", save_path: str = None) -> EvalMetrics:
+             device: str = "cpu", save_path: str = None,
+             mask_supervision: bool = True) -> EvalMetrics:
     """Full evaluation pipeline.
 
     Args:
@@ -281,7 +299,8 @@ def evaluate(model: TransformerModel, num_test_datasets: int = 100,
 
     print("Running inference...")
     pred_deltas, true_deltas, query_x, target_labels = run_inference(
-        model, test_batches, single_eval_pos, device
+        model, test_batches, single_eval_pos, num_features, device,
+        mask_supervision=mask_supervision,
     )
 
     print("Computing metrics...")

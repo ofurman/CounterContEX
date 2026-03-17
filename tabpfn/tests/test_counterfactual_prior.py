@@ -51,6 +51,22 @@ class TestGetBatchShapes:
         )
         assert x.shape == (SEQ_LEN, BATCH_SIZE, NUM_FEATURES)
         assert y.shape == (SEQ_LEN, BATCH_SIZE)
+        # Default mask_supervision=True → target_y has 2*num_features channels
+        assert target_y.shape == (SEQ_LEN, BATCH_SIZE, NUM_FEATURES * 2)
+
+    def test_output_shapes_no_mask(self, default_hyperparameters):
+        hp = dict(default_hyperparameters)
+        hp["mask_supervision"] = False
+        x, y, target_y = get_batch(
+            batch_size=BATCH_SIZE,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+            hyperparameters=hp,
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+        )
+        assert x.shape == (SEQ_LEN, BATCH_SIZE, NUM_FEATURES)
+        assert y.shape == (SEQ_LEN, BATCH_SIZE)
         assert target_y.shape == (SEQ_LEN, BATCH_SIZE, NUM_FEATURES)
 
     def test_no_nans(self, default_hyperparameters):
@@ -141,8 +157,9 @@ class TestDeltaTargets:
             device=DEVICE,
             single_eval_pos=SINGLE_EVAL_POS,
         )
-        query_targets = target_y[SINGLE_EVAL_POS:]
-        assert query_targets.abs().sum() > 0, "Some query deltas should be non-zero"
+        # Delta channels are first num_features
+        query_deltas = target_y[SINGLE_EVAL_POS:, :, :NUM_FEATURES]
+        assert query_deltas.abs().sum() > 0, "Some query deltas should be non-zero"
 
 
 class TestLabelFlipPrioritization:
@@ -166,7 +183,7 @@ class TestLabelFlipPrioritization:
             single_eval_pos=32,
         )
         # Query targets should have non-zero deltas (indicating actual changes)
-        query_deltas = target_y[32:]
+        query_deltas = target_y[32:, :, :NUM_FEATURES]
         assert query_deltas.abs().sum() > 0, (
             "Query positions should have non-trivial deltas"
         )
@@ -192,7 +209,7 @@ class TestFlipOnlyQueries:
             device=DEVICE,
             single_eval_pos=32,
         )
-        query_deltas = target_y[32:]  # (num_query, batch, num_features)
+        query_deltas = target_y[32:, :, :NUM_FEATURES]  # (num_query, batch, num_features)
         # Each query position should have at least one non-zero delta feature
         for b in range(4):
             per_sample_norm = query_deltas[:, b, :].abs().sum(dim=-1)  # (num_query,)
@@ -329,6 +346,97 @@ class TestFeatureNormalization:
         assert torch.isfinite(target_y).all(), "Non-finite in normalized target_y"
 
 
+class TestMaskSupervision:
+    """Verify mask supervision adds correct intervention mask channels to target_y."""
+
+    def test_mask_channels_are_binary(self):
+        """Mask channels should contain only 0s and 1s."""
+        config = get_default_counterfactual_config()
+        config["mask_supervision"] = True
+
+        x, y, target_y = get_batch(
+            batch_size=BATCH_SIZE,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+            hyperparameters=config,
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+        )
+        mask_channels = target_y[:, :, NUM_FEATURES:]
+        unique_vals = torch.unique(mask_channels)
+        assert all(v in (0.0, 1.0) for v in unique_vals), (
+            f"Mask channels should be 0/1, got unique values: {unique_vals}"
+        )
+
+    def test_mask_consistent_with_nonzero_deltas(self):
+        """Where mask=1, the delta should generally be non-zero (intervention was applied)."""
+        config = get_default_counterfactual_config()
+        config["mask_supervision"] = True
+        config["perturbation_magnitude"] = 5.0
+
+        x, y, target_y = get_batch(
+            batch_size=BATCH_SIZE,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+            hyperparameters=config,
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+        )
+        deltas = target_y[:, :, :NUM_FEATURES]
+        masks = target_y[:, :, NUM_FEATURES:]
+        # Where mask=1, the raw perturbation delta is nonzero
+        # (after causal propagation the full delta might differ, but masked features
+        # should have received a nonzero perturbation)
+        # At least some masked features should have nonzero delta
+        masked_deltas = deltas[masks > 0.5]
+        assert masked_deltas.abs().sum() > 0, (
+            "Masked (intervened) features should have nonzero deltas"
+        )
+
+    def test_query_masks_have_interventions(self):
+        """Query positions should have at least one intervened feature per sample."""
+        config = get_default_counterfactual_config()
+        config["mask_supervision"] = True
+        config["flip_only_queries"] = True
+        config["perturbation_magnitude"] = 5.0
+        config["perturbation_prob"] = 0.8
+        config["perturbation_strategy"] = "fixed_magnitude"
+        config["fixed_magnitude_k"] = 3.0
+
+        x, y, target_y = get_batch(
+            batch_size=BATCH_SIZE,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+            hyperparameters=config,
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+        )
+        query_masks = target_y[SINGLE_EVAL_POS:, :, NUM_FEATURES:]
+        for b in range(BATCH_SIZE):
+            per_sample_mask_sum = query_masks[:, b, :].sum(dim=-1)
+            assert (per_sample_mask_sum > 0).all(), (
+                f"Batch {b}: every query should have at least one intervened feature"
+            )
+
+    def test_composite_loss_computes(self):
+        """The composite loss function should compute without errors."""
+        import torch.nn.functional as F
+
+        num_features = NUM_FEATURES
+        num_query, batch = 10, 4
+        output = torch.randn(num_query, batch, num_features * 2)
+        target = torch.cat([
+            torch.randn(num_query, batch, num_features),
+            torch.randint(0, 2, (num_query, batch, num_features)).float(),
+        ], dim=-1)
+
+        # Import the composite loss
+        train_mod = importlib.import_module("tabpfn.train_counterfactual")
+        loss = train_mod._composite_loss(output, target, num_features, 0.5)
+        assert loss.shape == ()
+        assert torch.isfinite(loss)
+
+
 class TestDataLoaderIntegration:
     """Test integration with get_batch_to_dataloader."""
 
@@ -359,7 +467,8 @@ class TestDataLoaderIntegration:
         style, x, y = data
         assert x.shape == (SEQ_LEN, BATCH_SIZE, NUM_FEATURES)
         assert y.shape == (SEQ_LEN, BATCH_SIZE)
-        assert target_y.shape == (SEQ_LEN, BATCH_SIZE, NUM_FEATURES)
+        # Default mask_supervision=True → 2*num_features channels
+        assert target_y.shape == (SEQ_LEN, BATCH_SIZE, NUM_FEATURES * 2)
         assert single_eval_pos == SINGLE_EVAL_POS
 
 
