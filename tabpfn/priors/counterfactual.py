@@ -69,9 +69,9 @@ def get_default_counterfactual_config():
     """Returns default configuration for counterfactual pair generation."""
     return {
         # Perturbation settings
-        "perturbation_strategy": "additive_noise",
-        "perturbation_prob": 0.3,  # probability each feature is perturbed
-        "perturbation_magnitude": 1.0,  # scale for additive noise / fixed magnitude
+        "perturbation_strategy": "uniform_random",
+        "perturbation_prob": 0.5,  # probability each feature is perturbed
+        "perturbation_magnitude": 2.0,  # scale for additive noise / fixed magnitude
         "gradient_step_size": 0.1,  # step size for gradient-guided strategy
         "fixed_magnitude_k": 1.0,  # number of std devs for fixed_magnitude
         "num_counterfactuals_per_factual": 1,

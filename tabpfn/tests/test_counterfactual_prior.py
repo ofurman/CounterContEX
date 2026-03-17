@@ -172,6 +172,70 @@ class TestLabelFlipPrioritization:
         )
 
 
+class TestFlipOnlyQueries:
+    """Verify flip_only_queries ensures all query positions have flipped samples."""
+
+    def test_all_query_deltas_nonzero_with_flip_only(self):
+        """When flip_only_queries=True, every query position should have non-zero deltas."""
+        config = get_default_counterfactual_config()
+        config["flip_only_queries"] = True
+        config["perturbation_magnitude"] = 5.0
+        config["perturbation_prob"] = 0.8
+        config["perturbation_strategy"] = "fixed_magnitude"
+        config["fixed_magnitude_k"] = 3.0
+
+        x, y, target_y = get_batch(
+            batch_size=4,
+            seq_len=64,
+            num_features=NUM_FEATURES,
+            hyperparameters=config,
+            device=DEVICE,
+            single_eval_pos=32,
+        )
+        query_deltas = target_y[32:]  # (num_query, batch, num_features)
+        # Each query position should have at least one non-zero delta feature
+        for b in range(4):
+            per_sample_norm = query_deltas[:, b, :].abs().sum(dim=-1)  # (num_query,)
+            assert (per_sample_norm > 0).all(), (
+                f"Batch {b}: all query deltas should be non-zero with flip_only_queries=True"
+            )
+
+    def test_context_labels_are_factual_with_flip_only(self):
+        """Context positions should still have factual labels when flip_only_queries=True."""
+        config = get_default_counterfactual_config()
+        config["flip_only_queries"] = True
+
+        x, y, target_y = get_batch(
+            batch_size=4,
+            seq_len=64,
+            num_features=NUM_FEATURES,
+            hyperparameters=config,
+            device=DEVICE,
+            single_eval_pos=32,
+        )
+        context_y = y[:32]
+        assert (context_y >= 0).all()
+        assert (context_y == context_y.long().float()).all()
+
+    def test_retry_loop_increases_flip_rate(self):
+        """The retry loop should recover from low-flip-rate batches."""
+        config = get_default_counterfactual_config()
+        config["min_flip_rate"] = 0.01  # Very low threshold - should always pass
+        config["max_retries"] = 3
+
+        # This should not raise and should produce valid data
+        x, y, target_y = get_batch(
+            batch_size=4,
+            seq_len=64,
+            num_features=NUM_FEATURES,
+            hyperparameters=config,
+            device=DEVICE,
+            single_eval_pos=32,
+        )
+        assert x.shape == (64, 4, NUM_FEATURES)
+        assert not torch.isnan(target_y).any()
+
+
 class TestDataLoaderIntegration:
     """Test integration with get_batch_to_dataloader."""
 

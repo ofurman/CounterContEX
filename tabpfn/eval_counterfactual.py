@@ -332,7 +332,9 @@ def main():
 
     if args.train_and_eval:
         print("Training a quick model for evaluation...")
-        config = dict(TOY_CONFIG)
+        import inspect
+        valid_params = set(inspect.signature(train_counterfactual).parameters.keys())
+        config = {k: v for k, v in TOY_CONFIG.items() if k in valid_params}
         config["epochs"] = 10
         config["steps_per_epoch"] = 50
         _, model, _, _ = train_counterfactual(**config)

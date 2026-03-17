@@ -193,6 +193,42 @@ bptt = 128  # max sequence length
 
 ---
 
+## Stage 5: Execute Notebook and Verify Results
+
+**Goal**: Run the experiment notebook end-to-end, verify that training converges, evaluate metrics, and capture results.
+
+**File**: `tabpfn/CounterfactualGenerationExperiment.ipynb`
+
+### Steps
+
+1. Read the notebook to understand its current cell structure
+2. Execute the notebook end-to-end using `jupyter nbconvert --execute` (or `papermill`)
+3. Inspect the executed notebook outputs:
+   - Verify training loss decreases across epochs (convergence)
+   - Check evaluation metrics: Delta MSE, validity rate, proximity, sparsity
+   - Look for any errors, warnings, or NaN values
+4. If any cell fails:
+   - Diagnose the root cause (import errors, shape mismatches, etc.)
+   - Fix the notebook or underlying modules as needed
+   - Re-execute
+5. Save the executed notebook with outputs in place
+6. Create a brief results summary in `docs/results/counterfactual_generation_toy.md` capturing:
+   - Training loss curve summary (initial loss → final loss)
+   - All 4 evaluation metrics
+   - Whether the experiment "works" (loss decreasing, validity > 0)
+   - Key observations and next steps
+
+### Verification
+- [ ] Notebook executes without errors from start to finish
+- [ ] Training loss decreases (convergence)
+- [ ] All 4 evaluation metrics are computed and non-NaN
+- [ ] Results summary document is created
+
+### Commit
+`feat(experiment): execute counterfactual generation notebook and capture results`
+
+---
+
 ## Execution Protocol
 
 ### For each stage:
@@ -209,6 +245,7 @@ bptt = 128  # max sequence length
 | 2 | Model Architecture + Training | DONE | Training script with multi-dim MSE, all 8 tests pass | 2026-03-17 |
 | 3 | Evaluation | DONE | Eval script with Delta MSE, validity, proximity, sparsity metrics | 2026-03-17 |
 | 4 | Notebook | DONE | End-to-end notebook with data viz, training, eval, analysis | 2026-03-17 |
+| 5 | Execute Notebook & Verify | DONE | Notebook runs E2E, model doesn't learn yet (near-zero deltas), results captured | 2026-03-17 |
 
-Last stage completed: Stage 4 - Notebook
-Last updated by: plan-runner-agent
+Last stage completed: Stage 5 - Execute Notebook & Verify
+Last updated by: manual execution

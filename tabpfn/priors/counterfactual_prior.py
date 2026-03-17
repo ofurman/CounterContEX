@@ -43,24 +43,44 @@ def get_batch(
     if hyperparameters:
         config.update(hyperparameters)
 
+    flip_only_queries = config.pop("flip_only_queries", True)
+    min_flip_rate = config.pop("min_flip_rate", 0.20)
+    max_retries = config.pop("max_retries", 5)
+
     gen = CounterfactualSCMGenerator(config, device=device)
-    batch = gen.generate_batch(
-        batch_size=batch_size,
-        seq_len=seq_len,
-        num_features=num_features,
-        num_outputs=num_outputs,
-    )
+
+    # Retry loop: regenerate if flip rate is too low
+    batch = None
+    for attempt in range(max_retries):
+        batch = gen.generate_batch(
+            batch_size=batch_size,
+            seq_len=seq_len,
+            num_features=num_features,
+            num_outputs=num_outputs,
+        )
+        flip_rate = batch.label_flipped.float().mean().item()
+        if flip_rate >= min_flip_rate:
+            break
+        # Retry with uniform_random strategy and increased magnitude
+        gen.config["perturbation_strategy"] = "uniform_random"
+        gen.config["perturbation_magnitude"] = gen.config["perturbation_magnitude"] * 1.5
 
     # Reorder samples per batch element: label-flipped → query, non-flipped → context
     x, y, target_y = _reorder_and_encode(
-        batch, single_eval_pos, num_features, device
+        batch, single_eval_pos, num_features, device,
+        flip_only_queries=flip_only_queries,
     )
 
     return x, y, target_y
 
 
-def _reorder_and_encode(batch, single_eval_pos, num_features, device):
+def _reorder_and_encode(batch, single_eval_pos, num_features, device,
+                        flip_only_queries=True):
     """Reorder samples so label-flipped ones are prioritized for query positions.
+
+    When flip_only_queries=True, all query positions will have label-flipped
+    samples. If fewer flipped samples than query slots, flipped samples are
+    duplicated with small Gaussian noise to fill remaining query positions.
 
     Returns:
         x: (seq_len, batch_size, num_features)
@@ -88,37 +108,83 @@ def _reorder_and_encode(batch, single_eval_pos, num_features, device):
             remaining_flipped = flipped_idx[num_query:]
             context_pool = torch.cat([non_flipped_idx, remaining_flipped])
             context_idx = context_pool[:single_eval_pos]
+
+            # Fill context positions
+            for i, src_i in enumerate(context_idx):
+                x[i, b] = batch.x_factual[src_i, b]
+                y[i, b] = batch.y_factual_class[src_i, b]
+                target_y[i, b] = (
+                    batch.x_counterfactual[src_i, b] - batch.x_factual[src_i, b]
+                )
+
+            # Fill query positions
+            for i, src_i in enumerate(query_idx):
+                pos = single_eval_pos + i
+                x[pos, b] = batch.x_factual[src_i, b]
+                y[pos, b] = batch.y_counterfactual_class[src_i, b]
+                target_y[pos, b] = (
+                    batch.x_counterfactual[src_i, b] - batch.x_factual[src_i, b]
+                )
+        elif flip_only_queries and len(flipped_idx) > 0:
+            # Not enough flipped samples but flip_only_queries is on:
+            # duplicate flipped samples with small noise to fill query slots
+            context_idx = non_flipped_idx[:single_eval_pos]
+
+            # Fill context positions
+            for i, src_i in enumerate(context_idx):
+                x[i, b] = batch.x_factual[src_i, b]
+                y[i, b] = batch.y_factual_class[src_i, b]
+                target_y[i, b] = (
+                    batch.x_counterfactual[src_i, b] - batch.x_factual[src_i, b]
+                )
+
+            # Fill query positions: cycle through flipped samples
+            for i in range(num_query):
+                src_i = flipped_idx[i % len(flipped_idx)]
+                pos = single_eval_pos + i
+                if i < len(flipped_idx):
+                    # Original flipped sample
+                    x[pos, b] = batch.x_factual[src_i, b]
+                else:
+                    # Duplicated flipped sample with small noise
+                    noise = torch.randn(num_features, device=device) * 0.01
+                    x[pos, b] = batch.x_factual[src_i, b] + noise
+                y[pos, b] = batch.y_counterfactual_class[src_i, b]
+                target_y[pos, b] = (
+                    batch.x_counterfactual[src_i, b] - batch.x_factual[src_i, b]
+                )
         else:
-            # Not enough flipped: use all flipped for queries, fill rest with non-flipped
+            # No flipped samples or flip_only_queries is off:
+            # fall back to filling queries with non-flipped samples
             fill_count = num_query - len(flipped_idx)
             if len(non_flipped_idx) >= fill_count + single_eval_pos:
                 query_idx = torch.cat([
                     flipped_idx,
                     non_flipped_idx[:fill_count],
-                ])
-                context_idx = non_flipped_idx[fill_count:fill_count + single_eval_pos]
+                ]) if len(flipped_idx) > 0 else non_flipped_idx[:num_query]
+                context_idx = non_flipped_idx[fill_count:fill_count + single_eval_pos] if len(flipped_idx) > 0 else non_flipped_idx[num_query:num_query + single_eval_pos]
             else:
                 # Edge case: not enough samples overall, just split sequentially
                 all_idx = torch.arange(seq_len, device=device)
                 context_idx = all_idx[:single_eval_pos]
                 query_idx = all_idx[single_eval_pos:]
 
-        # Fill context positions (0..single_eval_pos-1)
-        for i, src_i in enumerate(context_idx):
-            x[i, b] = batch.x_factual[src_i, b]
-            y[i, b] = batch.y_factual_class[src_i, b]
-            target_y[i, b] = (
-                batch.x_counterfactual[src_i, b] - batch.x_factual[src_i, b]
-            )
+            # Fill context positions
+            for i, src_i in enumerate(context_idx):
+                x[i, b] = batch.x_factual[src_i, b]
+                y[i, b] = batch.y_factual_class[src_i, b]
+                target_y[i, b] = (
+                    batch.x_counterfactual[src_i, b] - batch.x_factual[src_i, b]
+                )
 
-        # Fill query positions (single_eval_pos..seq_len-1)
-        for i, src_i in enumerate(query_idx):
-            pos = single_eval_pos + i
-            x[pos, b] = batch.x_factual[src_i, b]
-            y[pos, b] = batch.y_counterfactual_class[src_i, b]  # target label
-            target_y[pos, b] = (
-                batch.x_counterfactual[src_i, b] - batch.x_factual[src_i, b]
-            )
+            # Fill query positions
+            for i, src_i in enumerate(query_idx):
+                pos = single_eval_pos + i
+                x[pos, b] = batch.x_factual[src_i, b]
+                y[pos, b] = batch.y_counterfactual_class[src_i, b]
+                target_y[pos, b] = (
+                    batch.x_counterfactual[src_i, b] - batch.x_factual[src_i, b]
+                )
 
     return x, y, target_y
 
