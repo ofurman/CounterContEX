@@ -663,7 +663,7 @@ Exp 3 passes but Exp 4 fails -> model can do in-context identification but not i
 | 2 | Per-Dataset Normalization | DONE | Added _normalize_per_batch in counterfactual_prior.py; normalize_features config flag (default True); 4 new tests | 2026-03-17 |
 | 3 | Composite Loss (Delta + Mask) | DONE | Added mask supervision to prior (target_y=2*nf channels); composite loss with masked delta MSE + mask BCE; updated eval for mask thresholding; 4 new tests | 2026-03-17 |
 | 4 | Fixed-SCM Data Generator | DONE | Added forward_with_internals_fixed_mapping, generate_batch_fixed_scm, FixedThresholdBinarize, FixedSCMDataLoader, get_batch_fixed_scm; 10 new tests | 2026-03-17 |
-| 5 | SCM-Based Validity Evaluation | PENDING | | |
+| 5 | SCM-Based Validity Evaluation | DONE | Added generate_batch_with_scm, get_batch_with_scm, compute_scm_validity with FixedThresholdBinarize; updated compute_metrics/print_report/evaluate; 12 new tests | 2026-03-17 |
 | 6 | Experiment Runner Framework | PENDING | | |
 | 7 | Experiment 0: Linear Sanity Check | PENDING | | |
 | 8 | Experiment 1: Single Nonlinear SCM | PENDING | | |
@@ -672,5 +672,5 @@ Exp 3 passes but Exp 4 fails -> model can do in-context identification but not i
 | 11 | Experiment 4: Diverse SCMs | PENDING | | |
 | 12 | Results Notebook | PENDING | | |
 
-Last stage completed: Stage 4 — Fixed-SCM Data Generator
+Last stage completed: Stage 5 — SCM-Based Validity Evaluation
 Last updated by: plan-runner-agent

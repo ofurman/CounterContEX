@@ -251,6 +251,109 @@ class CounterfactualSCMGenerator:
             perturbation_delta=perturbation_delta,
         )
 
+    def generate_batch_with_scm(
+        self,
+        batch_size: int,
+        seq_len: int,
+        num_features: int,
+        num_outputs: int = 1,
+        perturbation_strategy: Optional[Union[str, PerturbationStrategy]] = None,
+    ) -> tuple:
+        """Generate a batch and return the SCM data for ground-truth validity.
+
+        Like generate_batch but also returns a list of (scm, internals,
+        class_assigner) tuples — one per batch element — so that predicted
+        counterfactuals can be validated by re-feeding them through the
+        original causal model.
+
+        Returns:
+            (batch, scm_data_list) where:
+            - batch: CounterfactualBatch
+            - scm_data_list: list of dicts with keys 'scm', 'internals',
+              'class_assigner', each corresponding to one batch element
+        """
+        if perturbation_strategy is not None:
+            if isinstance(perturbation_strategy, PerturbationStrategy):
+                perturbation_strategy = perturbation_strategy.value
+        else:
+            perturbation_strategy = self.config["perturbation_strategy"]
+
+        class_assigner = self._build_class_assigner()
+
+        all_x_f, all_y_f, all_x_cf, all_y_cf = [], [], [], []
+        all_intervention_masks, all_deltas = [], []
+        scm_data_list = []
+
+        for _ in range(batch_size):
+            scm = self._sample_scm(seq_len, num_features, num_outputs)
+            x_f, y_f, internals = scm.forward_with_internals()
+
+            perturb_mask = self._select_perturbation_targets(
+                seq_len, num_features
+            )
+
+            interventions, deltas = self._compute_interventions(
+                x_f, perturb_mask, internals, perturbation_strategy, scm
+            )
+
+            if interventions:
+                x_cf, y_cf = scm.forward_with_intervention(internals, interventions)
+            else:
+                x_cf, y_cf = x_f.clone(), y_f.clone()
+
+            all_x_f.append(x_f)
+            all_y_f.append(y_f)
+            all_x_cf.append(x_cf)
+            all_y_cf.append(y_cf)
+            all_intervention_masks.append(perturb_mask.unsqueeze(1))
+            all_deltas.append(deltas.unsqueeze(1))
+
+            scm_data_list.append({
+                "scm": scm,
+                "internals": internals,
+                "class_assigner": class_assigner,
+            })
+
+        # Concatenate along batch dimension
+        x_factual = torch.cat(all_x_f, dim=1).detach()
+        y_factual = torch.cat(all_y_f, dim=1).detach()
+        x_cf = torch.cat(all_x_cf, dim=1).detach()
+        y_cf = torch.cat(all_y_cf, dim=1).detach()
+        intervention_mask = torch.cat(all_intervention_masks, dim=1).detach()
+        perturbation_delta = torch.cat(all_deltas, dim=1).detach()
+
+        if num_outputs == 1:
+            y_factual = y_factual.squeeze(-1)
+            y_cf = y_cf.squeeze(-1)
+
+        y_factual_class = class_assigner(
+            y_factual.unsqueeze(-1) if y_factual.dim() == 2 else y_factual
+        ).float()
+        y_cf_class = class_assigner(
+            y_cf.unsqueeze(-1) if y_cf.dim() == 2 else y_cf
+        ).float()
+
+        if y_factual_class.dim() > 2:
+            y_factual_class = y_factual_class.squeeze(-1)
+        if y_cf_class.dim() > 2:
+            y_cf_class = y_cf_class.squeeze(-1)
+
+        label_flipped = y_factual_class != y_cf_class
+
+        batch = CounterfactualBatch(
+            x_factual=x_factual,
+            y_factual=y_factual,
+            y_factual_class=y_factual_class,
+            x_counterfactual=x_cf,
+            y_counterfactual=y_cf,
+            y_counterfactual_class=y_cf_class,
+            label_flipped=label_flipped,
+            intervention_mask=intervention_mask,
+            perturbation_delta=perturbation_delta,
+        )
+
+        return batch, scm_data_list
+
     def generate_batch_fixed_scm(
         self,
         scm,

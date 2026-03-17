@@ -227,6 +227,67 @@ def _reorder_and_encode(batch, single_eval_pos, num_features, device,
 DataLoader = get_batch_to_dataloader(get_batch)
 
 
+def get_batch_with_scm(
+    batch_size: int,
+    seq_len: int,
+    num_features: int,
+    hyperparameters: dict,
+    device: str = default_device,
+    single_eval_pos: int = 64,
+    num_outputs: int = 1,
+    epoch: int = None,
+    **kwargs,
+):
+    """Generate a batch of counterfactual data plus SCM objects for validity evaluation.
+
+    Like get_batch but also returns a list of SCM data dicts (one per batch
+    element) containing the SCM, internals, and class_assigner needed for
+    ground-truth validity checking.
+
+    Returns:
+        (x, y, target_y, scm_data_list) where the first three have the same
+        format as get_batch, and scm_data_list is a list of dicts with keys
+        'scm', 'internals', 'class_assigner'.
+    """
+    config = dict(get_default_counterfactual_config())
+    if hyperparameters:
+        config.update(hyperparameters)
+
+    flip_only_queries = config.pop("flip_only_queries", True)
+    min_flip_rate = config.pop("min_flip_rate", 0.20)
+    max_retries = config.pop("max_retries", 5)
+    mask_supervision = config.pop("mask_supervision", True)
+
+    gen = CounterfactualSCMGenerator(config, device=device)
+
+    batch = None
+    scm_data_list = None
+    for attempt in range(max_retries):
+        batch, scm_data_list = gen.generate_batch_with_scm(
+            batch_size=batch_size,
+            seq_len=seq_len,
+            num_features=num_features,
+            num_outputs=num_outputs,
+        )
+        flip_rate = batch.label_flipped.float().mean().item()
+        if flip_rate >= min_flip_rate:
+            break
+        gen.config["perturbation_strategy"] = "uniform_random"
+        gen.config["perturbation_magnitude"] = gen.config["perturbation_magnitude"] * 1.5
+
+    x, y, target_y = _reorder_and_encode(
+        batch, single_eval_pos, num_features, device,
+        flip_only_queries=flip_only_queries,
+        mask_supervision=mask_supervision,
+    )
+
+    normalize = config.get("normalize_features", True)
+    if normalize:
+        x, target_y = _normalize_per_batch(x, target_y)
+
+    return x, y, target_y, scm_data_list
+
+
 def get_batch_fixed_scm(
     batch_size: int,
     seq_len: int,

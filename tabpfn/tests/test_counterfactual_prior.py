@@ -582,5 +582,66 @@ class TestFixedSCMDataLoader:
         assert target_y.shape == (SEQ_LEN, BATCH_SIZE, NUM_FEATURES * 2)
 
 
+class TestGetBatchWithSCM:
+    """Tests for get_batch_with_scm that returns SCM data for validity."""
+
+    def test_returns_four_values(self):
+        """get_batch_with_scm returns (x, y, target_y, scm_data_list)."""
+        get_batch_with_scm = counterfactual_prior_mod.get_batch_with_scm
+        x, y, target_y, scm_data_list = get_batch_with_scm(
+            batch_size=2,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+            hyperparameters={},
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+        )
+        assert x.shape == (SEQ_LEN, 2, NUM_FEATURES)
+        assert y.shape == (SEQ_LEN, 2)
+        assert target_y.shape[0] == SEQ_LEN
+        assert target_y.shape[1] == 2
+        assert len(scm_data_list) == 2
+
+    def test_scm_data_list_has_required_keys(self):
+        """Each SCM data dict has scm, internals, class_assigner."""
+        get_batch_with_scm = counterfactual_prior_mod.get_batch_with_scm
+        _, _, _, scm_data_list = get_batch_with_scm(
+            batch_size=1,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+            hyperparameters={},
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+        )
+        sd = scm_data_list[0]
+        assert "scm" in sd
+        assert "internals" in sd
+        assert "class_assigner" in sd
+        assert "node_mapping" in sd["internals"]
+
+    def test_tensor_shapes_match_get_batch(self):
+        """Tensor outputs from get_batch_with_scm match those from get_batch."""
+        get_batch_with_scm = counterfactual_prior_mod.get_batch_with_scm
+        x_with, y_with, ty_with, _ = get_batch_with_scm(
+            batch_size=BATCH_SIZE,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+            hyperparameters={},
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+        )
+        x_reg, y_reg, ty_reg = get_batch(
+            batch_size=BATCH_SIZE,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+            hyperparameters={},
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+        )
+        assert x_with.shape == x_reg.shape
+        assert y_with.shape == y_reg.shape
+        assert ty_with.shape == ty_reg.shape
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

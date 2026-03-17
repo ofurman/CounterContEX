@@ -27,6 +27,7 @@ from tabpfn.priors.counterfactual import (
     get_default_counterfactual_config,
 )
 from tabpfn.priors.counterfactual_prior import get_batch as cf_get_batch
+from tabpfn.priors.counterfactual_prior import get_batch_with_scm as cf_get_batch_with_scm
 from tabpfn.train_counterfactual import train_counterfactual, TOY_CONFIG
 from tabpfn.transformer import TransformerModel
 import tabpfn.encoders as encoders
@@ -44,6 +45,7 @@ class EvalMetrics:
     sparsity: float
     num_test_datasets: int
     num_query_points: int
+    scm_validity: float = -1.0  # SCM-based validity (-1 = not computed)
 
 
 def build_model(num_features: int, emsize: int = 64, nhead: int = 2,
@@ -71,35 +73,44 @@ def build_model(num_features: int, emsize: int = 64, nhead: int = 2,
 
 
 def generate_test_data(num_datasets: int, seq_len: int, num_features: int,
-                       device: str = "cpu"):
+                       device: str = "cpu", with_scm: bool = False):
     """Generate test batches from CounterfactualSCMGenerator.
 
+    Args:
+        num_datasets: number of test datasets to generate
+        seq_len: sequence length per dataset
+        num_features: number of features
+        device: compute device
+        with_scm: if True, also return SCM data for ground-truth validity
+
     Returns:
-        List of (x, y, target_y, batch_obj) tuples where:
-          - x, y, target_y are the formatted tensors from the prior data loader
-          - batch_obj is the raw CounterfactualBatch for ground-truth comparison
+        (test_batches, single_eval_pos) where test_batches is a list of
+        (x, y, target_y) tuples (or (x, y, target_y, scm_data_list) if with_scm).
     """
-    config = get_default_counterfactual_config()
-    gen = CounterfactualSCMGenerator(config, device=device)
     single_eval_pos = seq_len // 2
 
     test_batches = []
     for _ in range(num_datasets):
-        batch = gen.generate_batch(
-            batch_size=1,
-            seq_len=seq_len,
-            num_features=num_features,
-        )
-        # Also get the formatted data as the model expects it
-        x, y, target_y = cf_get_batch(
-            batch_size=1,
-            seq_len=seq_len,
-            num_features=num_features,
-            hyperparameters={},
-            device=device,
-            single_eval_pos=single_eval_pos,
-        )
-        test_batches.append((x, y, target_y))
+        if with_scm:
+            x, y, target_y, scm_data_list = cf_get_batch_with_scm(
+                batch_size=1,
+                seq_len=seq_len,
+                num_features=num_features,
+                hyperparameters={},
+                device=device,
+                single_eval_pos=single_eval_pos,
+            )
+            test_batches.append((x, y, target_y, scm_data_list))
+        else:
+            x, y, target_y = cf_get_batch(
+                batch_size=1,
+                seq_len=seq_len,
+                num_features=num_features,
+                hyperparameters={},
+                device=device,
+                single_eval_pos=single_eval_pos,
+            )
+            test_batches.append((x, y, target_y))
 
     return test_batches, single_eval_pos
 
@@ -129,7 +140,9 @@ def run_inference(model: TransformerModel, test_batches: list,
     all_query_x = []
     all_target_labels = []
 
-    for x, y, target_y in test_batches:
+    for batch_tuple in test_batches:
+        # Support both (x, y, target_y) and (x, y, target_y, scm_data_list)
+        x, y, target_y = batch_tuple[0], batch_tuple[1], batch_tuple[2]
         x = x.to(device)
         y = y.to(device)
         target_y = target_y.to(device)
@@ -195,9 +208,105 @@ def compute_validity(query_x: Tensor, pred_deltas: Tensor,
     return valid.float().mean().item()
 
 
+def compute_scm_validity(
+    query_x: Tensor,
+    pred_deltas: Tensor,
+    target_labels: Tensor,
+    scm_data_list: list,
+    single_eval_pos: int,
+    num_features: int,
+) -> float:
+    """Compute true validity by feeding predicted CFs through original SCMs.
+
+    For each query point:
+    1. x_cf_pred = query_x + pred_delta
+    2. Build interventions: set all feature nodes to x_cf_pred values
+    3. Re-propagate through SCM
+    4. Classify using a fixed threshold (median of original y) and compare
+       to target label
+
+    Note: We use FixedThresholdBinarize instead of the original BalancedBinarize
+    because BalancedBinarize recomputes the median from the current batch. When
+    we only evaluate single CF points, the median would be degenerate. Instead,
+    we compute the median from the original factual y values and freeze it.
+
+    Args:
+        query_x: (total_query_points, num_features) original query features
+        pred_deltas: (total_query_points, num_features) predicted deltas
+        target_labels: (total_query_points,) target class labels
+        scm_data_list: list of dicts (one per test batch), each with keys
+            'scm', 'internals', 'class_assigner'
+        single_eval_pos: number of context positions
+        num_features: number of features
+
+    Returns:
+        validity_rate: fraction of predictions that achieve the target label
+    """
+    from tabpfn.priors.counterfactual import FixedThresholdBinarize
+
+    x_cf_pred = query_x + pred_deltas
+
+    total_valid = 0
+    total_points = 0
+
+    num_query_per_batch = x_cf_pred.shape[0] // len(scm_data_list)
+
+    for batch_idx, scm_data in enumerate(scm_data_list):
+        scm = scm_data["scm"]
+        internals = scm_data["internals"]
+        feature_indices = internals["node_mapping"]["feature_indices"]
+        target_indices = internals["node_mapping"]["target_indices"]
+        outputs_flat = internals["outputs_flat"]
+
+        # Compute a fixed threshold from the original y values
+        y_original = outputs_flat[:, :, target_indices]
+        if y_original.dim() > 2:
+            y_original = y_original.squeeze(-1)
+        threshold = torch.median(y_original).item()
+        fixed_assigner = FixedThresholdBinarize(threshold)
+
+        start = batch_idx * num_query_per_batch
+        end = start + num_query_per_batch
+        batch_x_cf = x_cf_pred[start:end]  # (num_query, num_features)
+        batch_target = target_labels[start:end]  # (num_query,)
+
+        # For each query point, set interventions on all feature nodes
+        for q in range(batch_x_cf.shape[0]):
+            interventions = {}
+            for feat_idx in range(num_features):
+                flat_idx = feature_indices[feat_idx].item()
+                new_val = outputs_flat[:, :, flat_idx].clone()
+                new_val[:, :] = batch_x_cf[q, feat_idx]
+                interventions[flat_idx] = new_val
+
+            # Re-propagate through SCM
+            _, y_cf_scm = scm.forward_with_intervention(
+                internals, interventions
+            )
+
+            # Classify using the fixed threshold
+            y_cf_class = fixed_assigner(
+                y_cf_scm.unsqueeze(-1) if y_cf_scm.dim() == 2 else y_cf_scm
+            ).float()
+            if y_cf_class.dim() > 2:
+                y_cf_class = y_cf_class.squeeze(-1)
+
+            # Use the first sample position as representative
+            pred_class = y_cf_class[0, 0].item()
+            target_class = batch_target[q].item()
+
+            if pred_class == target_class:
+                total_valid += 1
+            total_points += 1
+
+    return total_valid / max(total_points, 1)
+
+
 def compute_metrics(pred_deltas: Tensor, true_deltas: Tensor,
                     query_x: Tensor, target_labels: Tensor,
-                    num_features: int, device: str = "cpu") -> EvalMetrics:
+                    num_features: int, device: str = "cpu",
+                    scm_data_list: list = None,
+                    single_eval_pos: int = None) -> EvalMetrics:
     """Compute all evaluation metrics.
 
     Args:
@@ -206,13 +315,15 @@ def compute_metrics(pred_deltas: Tensor, true_deltas: Tensor,
         query_x: (N, num_features) original query features
         target_labels: (N,) target class labels
         num_features: number of features
+        scm_data_list: optional list of SCM data dicts for ground-truth validity
+        single_eval_pos: number of context positions (required if scm_data_list given)
     """
     N = pred_deltas.shape[0]
 
     # 1. Delta MSE
     delta_mse = ((pred_deltas - true_deltas) ** 2).mean().item()
 
-    # 2. Validity (approximate)
+    # 2. Validity (heuristic)
     validity = compute_validity(
         query_x, pred_deltas, target_labels, num_features, device
     )
@@ -228,6 +339,14 @@ def compute_metrics(pred_deltas: Tensor, true_deltas: Tensor,
     near_zero = pred_deltas.abs() < sparse_threshold
     sparsity = near_zero.float().mean().item()
 
+    # 5. SCM validity (ground-truth, if SCM data available)
+    scm_val = -1.0
+    if scm_data_list is not None and single_eval_pos is not None:
+        scm_val = compute_scm_validity(
+            query_x, pred_deltas, target_labels,
+            scm_data_list, single_eval_pos, num_features,
+        )
+
     return EvalMetrics(
         delta_mse=delta_mse,
         validity_rate=validity,
@@ -236,6 +355,7 @@ def compute_metrics(pred_deltas: Tensor, true_deltas: Tensor,
         sparsity=sparsity,
         num_test_datasets=N,  # will be overridden by caller
         num_query_points=N,
+        scm_validity=scm_val,
     )
 
 
@@ -248,7 +368,9 @@ def print_report(metrics: EvalMetrics):
     print(f"  Total query points:{metrics.num_query_points}")
     print("-" * 60)
     print(f"  Delta MSE:         {metrics.delta_mse:.6f}")
-    print(f"  Validity rate:     {metrics.validity_rate:.4f}")
+    print(f"  Heuristic validity:{metrics.validity_rate:.4f}")
+    if metrics.scm_validity >= 0:
+        print(f"  SCM validity:      {metrics.scm_validity:.4f}")
     print(f"  Proximity (L2):    {metrics.proximity_mean:.4f} +/- {metrics.proximity_std:.4f}")
     print(f"  Sparsity:          {metrics.sparsity:.4f}")
     print("=" * 60)
@@ -278,7 +400,8 @@ def save_examples(pred_deltas: Tensor, true_deltas: Tensor,
 def evaluate(model: TransformerModel, num_test_datasets: int = 100,
              num_features: int = 5, seq_len: int = 128,
              device: str = "cpu", save_path: str = None,
-             mask_supervision: bool = True) -> EvalMetrics:
+             mask_supervision: bool = True,
+             with_scm_validity: bool = False) -> EvalMetrics:
     """Full evaluation pipeline.
 
     Args:
@@ -288,13 +411,15 @@ def evaluate(model: TransformerModel, num_test_datasets: int = 100,
         seq_len: sequence length per dataset
         device: compute device
         save_path: optional path to save example predictions
+        with_scm_validity: if True, compute ground-truth SCM-based validity
 
     Returns:
         EvalMetrics with all computed metrics
     """
     print(f"Generating {num_test_datasets} test datasets...")
     test_batches, single_eval_pos = generate_test_data(
-        num_test_datasets, seq_len, num_features, device
+        num_test_datasets, seq_len, num_features, device,
+        with_scm=with_scm_validity,
     )
 
     print("Running inference...")
@@ -303,10 +428,20 @@ def evaluate(model: TransformerModel, num_test_datasets: int = 100,
         mask_supervision=mask_supervision,
     )
 
+    # Collect SCM data from all batches if available
+    scm_data_list = None
+    if with_scm_validity:
+        scm_data_list = []
+        for batch_tuple in test_batches:
+            # Each batch_tuple is (x, y, target_y, scm_data_list_for_batch)
+            scm_data_list.extend(batch_tuple[3])
+
     print("Computing metrics...")
     metrics = compute_metrics(
         pred_deltas, true_deltas, query_x, target_labels,
-        num_features, device
+        num_features, device,
+        scm_data_list=scm_data_list,
+        single_eval_pos=single_eval_pos,
     )
     metrics.num_test_datasets = num_test_datasets
 

@@ -460,5 +460,120 @@ class TestFixedSCMMapping:
             f"FixedThresholdBinarize should use fixed threshold, got {result}"
 
 
+class TestGenerateBatchWithSCM:
+    """Tests for generate_batch_with_scm returning SCM data for validity evaluation."""
+
+    def test_returns_batch_and_scm_data(self, default_generator):
+        """generate_batch_with_scm returns (batch, scm_data_list)."""
+        batch, scm_data_list = default_generator.generate_batch_with_scm(
+            batch_size=BATCH_SIZE,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+        )
+        assert isinstance(batch, CounterfactualBatch)
+        assert len(scm_data_list) == BATCH_SIZE
+        for sd in scm_data_list:
+            assert "scm" in sd
+            assert "internals" in sd
+            assert "class_assigner" in sd
+
+    def test_scm_data_contains_valid_internals(self, default_generator):
+        """Each scm_data entry has internals with node_mapping and outputs_flat."""
+        _, scm_data_list = default_generator.generate_batch_with_scm(
+            batch_size=2,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+        )
+        for sd in scm_data_list:
+            internals = sd["internals"]
+            assert "node_mapping" in internals
+            assert "feature_indices" in internals["node_mapping"]
+            assert "target_indices" in internals["node_mapping"]
+            assert "outputs_flat" in internals
+            assert "layer_boundaries" in internals
+
+    def test_scm_can_rerun_intervention(self, default_generator):
+        """SCMs returned can be used for forward_with_intervention."""
+        batch, scm_data_list = default_generator.generate_batch_with_scm(
+            batch_size=1,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+        )
+        sd = scm_data_list[0]
+        scm = sd["scm"]
+        internals = sd["internals"]
+
+        # Re-running with empty interventions should succeed
+        x_cf, y_cf = scm.forward_with_intervention(internals, {})
+        assert x_cf.shape == batch.x_factual[:, 0:1, :].shape
+
+    def test_true_cf_through_scm_matches_original_label(self, default_generator):
+        """True counterfactuals re-fed through SCM should produce the same class."""
+        from tabpfn.priors.counterfactual import FixedThresholdBinarize
+
+        batch, scm_data_list = default_generator.generate_batch_with_scm(
+            batch_size=1,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+        )
+        sd = scm_data_list[0]
+        scm = sd["scm"]
+        internals = sd["internals"]
+        feature_indices = internals["node_mapping"]["feature_indices"]
+        target_indices = internals["node_mapping"]["target_indices"]
+        outputs_flat = internals["outputs_flat"]
+
+        # Compute a fixed threshold from the original y values (same as used
+        # during batch generation by BalancedBinarize)
+        y_original = outputs_flat[:, :, target_indices]
+        if y_original.dim() > 2:
+            y_original = y_original.squeeze(-1)
+        threshold = torch.median(y_original).item()
+        fixed_assigner = FixedThresholdBinarize(threshold)
+
+        # Take a flipped sample and re-feed its true CF through the SCM
+        flipped_mask = batch.label_flipped[:, 0]
+        if not flipped_mask.any():
+            pytest.skip("No flipped samples in this batch")
+
+        flipped_idx = torch.where(flipped_mask)[0][0].item()
+        x_cf_true = batch.x_counterfactual[flipped_idx, 0]  # (num_features,)
+
+        # Set all feature nodes to CF values
+        interventions = {}
+        for feat_idx in range(NUM_FEATURES):
+            flat_idx = feature_indices[feat_idx].item()
+            new_val = outputs_flat[:, :, flat_idx].clone()
+            new_val[:, :] = x_cf_true[feat_idx]
+            interventions[flat_idx] = new_val
+
+        _, y_cf_scm = scm.forward_with_intervention(internals, interventions)
+        y_cf_class = fixed_assigner(
+            y_cf_scm.unsqueeze(-1) if y_cf_scm.dim() == 2 else y_cf_scm
+        ).float()
+        if y_cf_class.dim() > 2:
+            y_cf_class = y_cf_class.squeeze(-1)
+
+        # The class from re-feeding should match the original CF class
+        pred_class = y_cf_class[0, 0].item()
+        expected_class = batch.y_counterfactual_class[flipped_idx, 0].item()
+        assert pred_class == expected_class, \
+            f"Re-feeding true CF should reproduce class: got {pred_class}, expected {expected_class}"
+
+    def test_batch_data_matches_regular_generate(self, default_config):
+        """The batch from generate_batch_with_scm should have same structure as generate_batch."""
+        gen = CounterfactualSCMGenerator(default_config, device=DEVICE)
+        batch_with, _ = gen.generate_batch_with_scm(
+            batch_size=2, seq_len=SEQ_LEN, num_features=NUM_FEATURES,
+        )
+        batch_regular = gen.generate_batch(
+            batch_size=2, seq_len=SEQ_LEN, num_features=NUM_FEATURES,
+        )
+        # Same shapes
+        assert batch_with.x_factual.shape == batch_regular.x_factual.shape
+        assert batch_with.y_factual.shape == batch_regular.y_factual.shape
+        assert batch_with.intervention_mask.shape == batch_regular.intervention_mask.shape
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
