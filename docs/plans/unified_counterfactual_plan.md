@@ -660,7 +660,7 @@ Exp 3 passes but Exp 4 fails -> model can do in-context identification but not i
 | # | Stage | Status | Notes | Updated |
 |---|-------|--------|-------|---------|
 | 1 | Increase Flip Rate & Filter | DONE | Fixed _reorder_and_encode to accept flip_only_queries; duplicate flipped samples with noise when insufficient; added 3 new tests | 2026-03-17 |
-| 2 | Per-Dataset Normalization | PENDING | | |
+| 2 | Per-Dataset Normalization | DONE | Added _normalize_per_batch in counterfactual_prior.py; normalize_features config flag (default True); 4 new tests | 2026-03-17 |
 | 3 | Composite Loss (Delta + Mask) | PENDING | | |
 | 4 | Fixed-SCM Data Generator | PENDING | | |
 | 5 | SCM-Based Validity Evaluation | PENDING | | |
@@ -672,5 +672,5 @@ Exp 3 passes but Exp 4 fails -> model can do in-context identification but not i
 | 11 | Experiment 4: Diverse SCMs | PENDING | | |
 | 12 | Results Notebook | PENDING | | |
 
-Last stage completed: Stage 1 — Increase Flip Rate & Filter
+Last stage completed: Stage 2 — Per-Dataset Normalization
 Last updated by: plan-runner-agent

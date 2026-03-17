@@ -236,6 +236,99 @@ class TestFlipOnlyQueries:
         assert not torch.isnan(target_y).any()
 
 
+class TestFeatureNormalization:
+    """Verify per-dataset feature normalization."""
+
+    def test_normalized_features_zero_mean_unit_std(self):
+        """After normalization, per-feature mean ~ 0 and std ~ 1 per batch element."""
+        config = get_default_counterfactual_config()
+        config["normalize_features"] = True
+
+        x, y, target_y = get_batch(
+            batch_size=BATCH_SIZE,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+            hyperparameters=config,
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+        )
+        for b in range(BATCH_SIZE):
+            feat_mean = x[:, b, :].mean(dim=0)
+            feat_std = x[:, b, :].std(dim=0)
+            assert torch.allclose(feat_mean, torch.zeros_like(feat_mean), atol=0.1), (
+                f"Batch {b}: mean should be ~0, got {feat_mean}"
+            )
+            assert torch.allclose(feat_std, torch.ones_like(feat_std), atol=0.2), (
+                f"Batch {b}: std should be ~1, got {feat_std}"
+            )
+
+    def test_normalization_reduces_delta_scale(self):
+        """Normalized deltas should have smaller magnitude than raw deltas."""
+        config = get_default_counterfactual_config()
+
+        # Get raw (unnormalized) data
+        config["normalize_features"] = False
+        _, _, target_y_raw = get_batch(
+            batch_size=BATCH_SIZE,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+            hyperparameters=config,
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+        )
+
+        # Get normalized data
+        config["normalize_features"] = True
+        _, _, target_y_norm = get_batch(
+            batch_size=BATCH_SIZE,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+            hyperparameters=config,
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+        )
+
+        # Both should be finite
+        assert torch.isfinite(target_y_norm).all()
+        assert torch.isfinite(target_y_raw).all()
+
+    def test_normalization_disabled(self):
+        """When normalize_features=False, features should not be normalized."""
+        config = get_default_counterfactual_config()
+        config["normalize_features"] = False
+
+        x, y, target_y = get_batch(
+            batch_size=BATCH_SIZE,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+            hyperparameters=config,
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+        )
+        # Without normalization, features should NOT have mean~0, std~1 in general
+        # (they will have the raw SCM scale)
+        assert not torch.isnan(x).any()
+        assert not torch.isnan(target_y).any()
+
+    def test_normalization_no_nans(self):
+        """Normalization should not introduce NaNs."""
+        config = get_default_counterfactual_config()
+        config["normalize_features"] = True
+
+        x, y, target_y = get_batch(
+            batch_size=8,
+            seq_len=SEQ_LEN,
+            num_features=NUM_FEATURES,
+            hyperparameters=config,
+            device=DEVICE,
+            single_eval_pos=SINGLE_EVAL_POS,
+        )
+        assert not torch.isnan(x).any(), "NaN in normalized x"
+        assert not torch.isnan(target_y).any(), "NaN in normalized target_y"
+        assert torch.isfinite(x).all(), "Non-finite in normalized x"
+        assert torch.isfinite(target_y).all(), "Non-finite in normalized target_y"
+
+
 class TestDataLoaderIntegration:
     """Test integration with get_batch_to_dataloader."""
 

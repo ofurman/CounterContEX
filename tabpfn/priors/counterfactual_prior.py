@@ -71,7 +71,35 @@ def get_batch(
         flip_only_queries=flip_only_queries,
     )
 
+    # Per-batch-element feature normalization
+    normalize = config.get("normalize_features", True)
+    if normalize:
+        x, target_y = _normalize_per_batch(x, target_y)
+
     return x, y, target_y
+
+
+def _normalize_per_batch(x, target_y):
+    """Normalize features to zero mean / unit variance per batch element.
+
+    Also scales deltas by the same standard deviation so they are expressed
+    in units of feature standard deviations.
+
+    Args:
+        x: (seq_len, batch_size, num_features)
+        target_y: (seq_len, batch_size, num_features) — deltas
+
+    Returns:
+        x_norm, target_y_norm with same shapes
+    """
+    batch_size = x.shape[1]
+    for b in range(batch_size):
+        mean = x[:, b, :].mean(dim=0, keepdim=True)   # (1, num_features)
+        std = x[:, b, :].std(dim=0, keepdim=True).clamp(min=1e-6)  # (1, num_features)
+        x[:, b, :] = (x[:, b, :] - mean) / std
+        # Scale deltas by the same std so they're in normalized space
+        target_y[:, b, :] = target_y[:, b, :] / std
+    return x, target_y
 
 
 def _reorder_and_encode(batch, single_eval_pos, num_features, device,
