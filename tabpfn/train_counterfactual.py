@@ -1,0 +1,219 @@
+"""
+Training script for counterfactual generation with TabPFN.
+
+Adapts the TabPFN transformer to output continuous delta vectors instead of
+class logits. The model receives (context_x, context_y, query_x, target_y)
+and predicts delta = x_counterfactual - x_factual for query positions.
+
+Usage:
+    python -m tabpfn.train_counterfactual
+"""
+
+import time
+import itertools
+from contextlib import nullcontext
+
+import torch
+from torch import nn
+from torch.cuda.amp import autocast, GradScaler
+
+from tabpfn.transformer import TransformerModel
+from tabpfn.priors.counterfactual_prior import DataLoader as CounterfactualDataLoader
+import tabpfn.encoders as encoders
+import tabpfn.positional_encodings as positional_encodings
+import tabpfn.utils as utils
+from tabpfn.utils import get_cosine_schedule_with_warmup, init_dist
+
+
+# ---------- default toy-experiment config ----------
+
+TOY_CONFIG = dict(
+    # SCM settings
+    num_features=5,
+    num_classes=2,
+    seq_len=128,
+    batch_size=16,
+    # Model settings
+    emsize=64,
+    nlayers=4,
+    nhead=2,
+    nhid=128,
+    dropout=0.0,
+    # Training settings
+    epochs=50,
+    steps_per_epoch=100,
+    lr=0.001,
+    bptt=128,
+    warmup_epochs=5,
+    weight_decay=0.0,
+)
+
+
+def train_counterfactual(
+    num_features=5,
+    seq_len=128,
+    batch_size=16,
+    emsize=64,
+    nlayers=4,
+    nhead=2,
+    nhid=128,
+    dropout=0.0,
+    epochs=50,
+    steps_per_epoch=100,
+    lr=0.001,
+    bptt=128,
+    warmup_epochs=5,
+    weight_decay=0.0,
+    gpu_device="cuda:0",
+    extra_prior_kwargs=None,
+    verbose=True,
+    epoch_callback=None,
+):
+    """Train a counterfactual generation model.
+
+    Returns:
+        (total_loss, model, dataloader)
+    """
+    device = gpu_device if torch.cuda.is_available() else "cpu:0"
+    print(f"Using {device} device")
+    using_dist, rank, device = init_dist(device)
+
+    n_out = num_features  # predict delta per feature
+
+    # --- data loader ---
+    single_eval_pos = seq_len // 2
+
+    def eval_pos_seq_len_sampler():
+        return single_eval_pos, bptt
+
+    prior_kwargs = dict(
+        num_features=num_features,
+        hyperparameters=extra_prior_kwargs or {},
+    )
+    dl = CounterfactualDataLoader(
+        num_steps=steps_per_epoch,
+        batch_size=batch_size,
+        eval_pos_seq_len_sampler=eval_pos_seq_len_sampler,
+        seq_len_maximum=bptt,
+        device=device,
+        **prior_kwargs,
+    )
+
+    # --- model ---
+    encoder = encoders.Linear(num_features, emsize)
+    y_encoder = encoders.Linear(1, emsize)
+    pos_encoder = positional_encodings.NoPositionalEncoding(emsize, bptt * 2)
+
+    model = TransformerModel(
+        encoder=encoder,
+        n_out=n_out,
+        ninp=emsize,
+        nhead=nhead,
+        nhid=nhid,
+        nlayers=nlayers,
+        dropout=dropout,
+        y_encoder=y_encoder,
+        pos_encoder=pos_encoder,
+        efficient_eval_masking=True,
+    )
+    criterion = nn.MSELoss(reduction="none")
+    model.criterion = criterion
+
+    print(
+        f"Using a Transformer with "
+        f"{sum(p.numel() for p in model.parameters()) / 1e6:.2f} M parameters"
+    )
+
+    model.to(device)
+    if using_dist:
+        model = torch.nn.parallel.DistributedDataParallel(
+            model, device_ids=[rank], output_device=rank, broadcast_buffers=False
+        )
+    dl.model = model
+    utils.check_compatibility(dl)
+
+    # --- optimizer & scheduler ---
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    scheduler = get_cosine_schedule_with_warmup(
+        optimizer, warmup_epochs, epochs if epochs else 100
+    )
+
+    # --- training loop ---
+    total_loss = float("inf")
+    loss_history = []
+
+    try:
+        for epoch in range(1, epochs + 1) if epochs else itertools.count(1):
+            epoch_start = time.time()
+            epoch_loss = _train_one_epoch(
+                model, dl, criterion, optimizer, single_eval_pos,
+                steps_per_epoch, device, n_out,
+            )
+            total_loss = epoch_loss
+            loss_history.append(epoch_loss)
+
+            if verbose:
+                elapsed = time.time() - epoch_start
+                print(
+                    f"| epoch {epoch:3d} | time {elapsed:5.2f}s "
+                    f"| MSE loss {epoch_loss:.4f} "
+                    f"| lr {scheduler.get_last_lr()[0]:.6f}"
+                )
+
+            if epoch_callback is not None and rank == 0:
+                epoch_callback(model, epoch / epochs)
+
+            scheduler.step()
+    except KeyboardInterrupt:
+        pass
+
+    if rank == 0:
+        if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+            model = model.module
+        return total_loss, model.to("cpu"), dl, loss_history
+
+    return total_loss, model, dl, loss_history
+
+
+def _train_one_epoch(model, dl, criterion, optimizer, single_eval_pos,
+                     steps_per_epoch, device, n_out):
+    """Run one training epoch, return mean loss."""
+    model.train()
+    total_loss = 0.0
+
+    for batch_idx, (data, targets, sep) in enumerate(dl):
+        # data = (style, x, y), targets = (seq_len, batch, num_features)
+        data_device = tuple(
+            e.to(device) if torch.is_tensor(e) else e for e in data
+        )
+        output = model(data_device, single_eval_pos=single_eval_pos)
+        # output: (num_query, batch, n_out)
+
+        # Slice targets to query positions only
+        query_targets = targets[single_eval_pos:].to(device)
+        # query_targets: (num_query, batch, num_features)
+
+        # Compute per-feature MSE, then mean over features for each (pos, batch)
+        losses = criterion(output, query_targets)  # (num_query, batch, num_features)
+        loss_per_pos_batch = losses.mean(dim=-1)  # (num_query, batch)
+        loss = loss_per_pos_batch.mean()
+
+        loss.backward()
+
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
+        optimizer.zero_grad()
+
+        total_loss += loss.item()
+
+    return total_loss / steps_per_epoch
+
+
+if __name__ == "__main__":
+    total_loss, model, dl, history = train_counterfactual(**TOY_CONFIG)
+    print(f"\nFinal MSE loss: {total_loss:.4f}")
+
+    # Save model
+    save_path = "counterfactual_model.pt"
+    torch.save(model.state_dict(), save_path)
+    print(f"Model saved to {save_path}")
