@@ -203,29 +203,34 @@ EXP3_CRITERIA = dict(
 
 EXP4_CONFIG = dict(
     num_features=5,
-    seq_len=256,
-    batch_size=8,
-    emsize=256,
-    nlayers=8,
+    seq_len=128,
+    batch_size=4,
+    emsize=128,
+    nlayers=6,
     nhead=4,
-    nhid=512,
+    nhid=256,
     dropout=0.1,
     epochs=200,
-    steps_per_epoch=200,
-    lr=0.0001,
+    steps_per_epoch=100,
+    lr=0.0003,
     warmup_epochs=20,
     weight_decay=1e-4,
 )
 
 EXP4_SCM = dict(
-    num_layers=3,
     num_causes=5,
     noise_std=0.05,
-    prior_mlp_hidden_dim=16,
     prior_mlp_dropout_prob=0.2,
-    prior_mlp_activations=nn.Tanh,
     perturbation_strategy="uniform_random",
     perturbation_prob=0.5,
+    # Diverse SCM structure — these are base params; the DiverseSCMDataLoader
+    # will randomize num_layers, prior_mlp_hidden_dim, and activations per batch.
+    num_layers=3,  # base (overridden per batch)
+    prior_mlp_hidden_dim=16,  # base (overridden per batch)
+    prior_mlp_activations=nn.Tanh,  # base (overridden per batch)
+    diverse_scm=True,  # flag for DiverseSCMDataLoader
+    layer_range=(2, 5),  # 2-4 layers (inclusive)
+    hidden_dim_range=(8, 33),  # 8-32 hidden dim (inclusive)
 )
 
 EXP4_CRITERIA = dict(

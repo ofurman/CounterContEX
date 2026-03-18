@@ -27,7 +27,9 @@ from tabpfn.eval_counterfactual import (
     save_examples,
     EvalMetrics,
 )
-from tabpfn.priors.counterfactual_prior import FixedSCMDataLoader, SCMFamilyDataLoader
+from tabpfn.priors.counterfactual_prior import (
+    FixedSCMDataLoader, SCMFamilyDataLoader, DiverseSCMDataLoader,
+)
 from tabpfn.experiments.configs import EXPERIMENT_REGISTRY
 
 
@@ -286,6 +288,136 @@ def _context_ablation(model, family_dl, num_features, seq_len,
     return results
 
 
+def _evaluate_diverse_scm(model, diverse_dl, num_test_datasets, num_features,
+                          seq_len, save_path=None, mask_supervision=True):
+    """Evaluate a model trained on diverse SCMs.
+
+    Generates test data from new random SCMs (unseen at training time),
+    computes metrics with SCM-based validity, and runs context ablation.
+    """
+    from tabpfn.eval_counterfactual import compute_scm_validity
+    from tabpfn.priors.counterfactual_prior import get_batch_with_scm
+
+    single_eval_pos = seq_len // 2
+
+    # Generate test batches from new random SCMs (diverse structure)
+    test_batches = []
+    scm_data_list = []
+    for t in range(num_test_datasets):
+        hp = diverse_dl._random_hp()
+        x, y, target_y, batch_scm_data = get_batch_with_scm(
+            batch_size=1,
+            seq_len=seq_len,
+            num_features=num_features,
+            hyperparameters=hp,
+            device="cpu",
+            single_eval_pos=single_eval_pos,
+        )
+        test_batches.append((x, y, target_y))
+        scm_data_list.extend(batch_scm_data)
+
+    print(f"Generated {len(test_batches)} test batches from diverse SCMs")
+
+    pred_deltas, true_deltas, query_x, target_labels = run_inference(
+        model, test_batches, single_eval_pos, num_features, "cpu",
+        mask_supervision=mask_supervision,
+    )
+
+    metrics = compute_metrics(
+        pred_deltas, true_deltas, query_x, target_labels,
+        num_features, "cpu",
+        scm_data_list=scm_data_list,
+        single_eval_pos=single_eval_pos,
+    )
+    metrics.num_test_datasets = num_test_datasets
+
+    print_report(metrics)
+    if save_path:
+        save_examples(pred_deltas, true_deltas, query_x, target_labels, save_path)
+
+    # --- Context ablation diagnostic ---
+    print("\n--- Context Ablation Diagnostic ---")
+    ablation_results = _context_ablation_diverse(
+        model, diverse_dl, num_features, seq_len, single_eval_pos,
+        mask_supervision, num_test=min(num_test_datasets, 20),
+    )
+    for key, val in ablation_results.items():
+        print(f"  {key}: SCM validity = {val:.4f}")
+
+    return metrics, ablation_results
+
+
+def _context_ablation_diverse(model, diverse_dl, num_features, seq_len,
+                              single_eval_pos, mask_supervision, num_test=20):
+    """Run context ablation for diverse-SCM model.
+
+    Three conditions:
+    1. Correct context: context and query from same SCM (normal)
+    2. Wrong context: context from a different SCM than query
+    3. No context: zero out context y values
+
+    Returns dict of condition -> SCM validity.
+    """
+    from tabpfn.eval_counterfactual import compute_scm_validity
+    from tabpfn.priors.counterfactual_prior import get_batch_with_scm
+
+    results = {}
+    correct_batches, correct_scm = [], []
+    wrong_batches, wrong_scm = [], []
+    no_ctx_batches, no_ctx_scm = [], []
+
+    for t in range(num_test):
+        # Generate query data from one random SCM
+        hp_q = diverse_dl._random_hp()
+        x, y, target_y, scm_data = get_batch_with_scm(
+            batch_size=1, seq_len=seq_len, num_features=num_features,
+            hyperparameters=hp_q, device="cpu",
+            single_eval_pos=single_eval_pos,
+        )
+        scm_entry = scm_data[0]
+
+        # 1. Correct context (normal)
+        correct_batches.append((x, y, target_y))
+        correct_scm.append(scm_entry)
+
+        # 2. Wrong context — context from a different SCM
+        hp_w = diverse_dl._random_hp()
+        x_w, y_w, _, _ = get_batch_with_scm(
+            batch_size=1, seq_len=seq_len, num_features=num_features,
+            hyperparameters=hp_w, device="cpu",
+            single_eval_pos=single_eval_pos,
+        )
+        x_wrong = x.clone()
+        y_wrong = y.clone()
+        x_wrong[:single_eval_pos] = x_w[:single_eval_pos]
+        y_wrong[:single_eval_pos] = y_w[:single_eval_pos]
+        wrong_batches.append((x_wrong, y_wrong, target_y))
+        wrong_scm.append(scm_entry)
+
+        # 3. No context — zero out context y
+        y_no = y.clone()
+        y_no[:single_eval_pos] = 0.0
+        no_ctx_batches.append((x, y_no, target_y))
+        no_ctx_scm.append(scm_entry)
+
+    for name, batches, scm_data in [
+        ("correct_context", correct_batches, correct_scm),
+        ("wrong_context", wrong_batches, wrong_scm),
+        ("no_context", no_ctx_batches, no_ctx_scm),
+    ]:
+        pred_deltas, true_deltas, query_x, target_labels = run_inference(
+            model, batches, single_eval_pos, num_features, "cpu",
+            mask_supervision=mask_supervision,
+        )
+        scm_val = compute_scm_validity(
+            query_x, pred_deltas, target_labels,
+            scm_data, single_eval_pos, num_features,
+        )
+        results[name] = scm_val
+
+    return results
+
+
 def run_experiment(
     exp_config: dict,
     scm_config: dict,
@@ -336,11 +468,30 @@ def run_experiment(
     use_fixed_scm = extra_prior_kwargs.pop("use_fixed_scm", False)
     use_mask_supervision = extra_prior_kwargs.pop("mask_supervision", True)
     num_scms = extra_prior_kwargs.pop("num_scms", None)
+    use_diverse_scm = extra_prior_kwargs.pop("diverse_scm", False)
+    layer_range = extra_prior_kwargs.pop("layer_range", (2, 5))
+    hidden_dim_range = extra_prior_kwargs.pop("hidden_dim_range", (8, 33))
 
     # Build data loader based on config
     fixed_dl = None
     family_dl = None
-    if num_scms is not None and num_scms > 1:
+    diverse_dl = None
+    if use_diverse_scm:
+        hp = dict(extra_prior_kwargs)
+        hp["mask_supervision"] = use_mask_supervision
+        diverse_dl = DiverseSCMDataLoader(
+            num_features=num_features,
+            seq_len=exp_config["seq_len"],
+            batch_size=exp_config["batch_size"],
+            hyperparameters=hp,
+            device="cpu",
+            single_eval_pos=exp_config["seq_len"] // 2,
+            num_steps=exp_config["steps_per_epoch"],
+            layer_range=layer_range,
+            hidden_dim_range=hidden_dim_range,
+        )
+        print(f"  Using DiverseSCMDataLoader (new random SCM per batch element)")
+    elif num_scms is not None and num_scms > 1:
         # SCM family mode (Exp 3+)
         hp = dict(extra_prior_kwargs)
         hp["mask_supervision"] = use_mask_supervision
@@ -397,7 +548,7 @@ def run_experiment(
         epoch_callback=epoch_callback,
         mask_supervision=use_mask_supervision,
         mask_loss_weight=0.5,
-        dataloader=family_dl or fixed_dl,
+        dataloader=diverse_dl or family_dl or fixed_dl,
     )
 
     train_time = time.time() - start_time
@@ -429,7 +580,14 @@ def run_experiment(
     # ---- Evaluation ----
     print(f"\nEvaluating with {num_test_datasets} test datasets...")
     ablation_results = None
-    if family_dl is not None:
+    if diverse_dl is not None:
+        # Diverse SCM evaluation with context ablation
+        metrics, ablation_results = _evaluate_diverse_scm(
+            model, diverse_dl, num_test_datasets, num_features,
+            exp_config["seq_len"], str(out / "example_predictions.json"),
+            mask_supervision=use_mask_supervision,
+        )
+    elif family_dl is not None:
         # SCM family evaluation with context ablation
         metrics, ablation_results = _evaluate_scm_family(
             model, family_dl, num_test_datasets, num_features,

@@ -654,3 +654,107 @@ class SCMFamilyDataLoader:
 
     def __len__(self):
         return self.num_steps
+
+
+class DiverseSCMDataLoader:
+    """Data loader that creates a new random SCM per batch element with diverse structure.
+
+    Unlike the standard DataLoader which uses fixed SCM config, this varies:
+    - num_layers: randomly sampled from a range
+    - prior_mlp_hidden_dim: randomly sampled from a range
+    - prior_mlp_activations: randomly chosen from a set
+
+    Used for Experiment 4 (meta-learning across diverse causal structures).
+    Each batch element gets a completely new SCM with potentially different
+    architecture, so the model must do in-context causal inference.
+    """
+
+    def __init__(
+        self,
+        num_features: int,
+        seq_len: int,
+        batch_size: int,
+        hyperparameters: dict = None,
+        device: str = "cpu",
+        single_eval_pos: int = 64,
+        num_outputs: int = 1,
+        num_steps: int = 100,
+        layer_range: tuple = (2, 5),
+        hidden_dim_range: tuple = (8, 33),
+        activations: list = None,
+    ):
+        from torch import nn
+
+        self.num_features = num_features
+        self.seq_len = seq_len
+        self.batch_size = batch_size
+        self.hyperparameters = hyperparameters or {}
+        self.device = device
+        self.single_eval_pos = single_eval_pos
+        self._n_outputs = num_outputs
+        self.num_steps = num_steps
+        self.return_internals = False
+        self.layer_range = layer_range
+        self.hidden_dim_range = hidden_dim_range
+        self.activations = activations or [nn.Tanh, nn.ReLU]
+
+        print(f"  DiverseSCMDataLoader: layers={layer_range}, hidden={hidden_dim_range}, "
+              f"activations={[a.__name__ for a in self.activations]}")
+
+    def _random_hp(self):
+        """Sample random SCM hyperparameters for one batch element."""
+        import random as pyrandom
+
+        hp = dict(self.hyperparameters)
+        hp["num_layers"] = pyrandom.randint(self.layer_range[0], self.layer_range[1])
+        hp["prior_mlp_hidden_dim"] = pyrandom.randint(
+            self.hidden_dim_range[0], self.hidden_dim_range[1] - 1
+        )
+        hp["prior_mlp_activations"] = pyrandom.choice(self.activations)
+        return hp
+
+    def __iter__(self):
+        for _ in range(self.num_steps):
+            all_x, all_y, all_target_y = [], [], []
+            all_internals = [] if self.return_internals else None
+
+            for b in range(self.batch_size):
+                hp = self._random_hp()
+
+                if self.return_internals:
+                    x, y, target_y, scm_data_list = get_batch_with_scm(
+                        batch_size=1,
+                        seq_len=self.seq_len,
+                        num_features=self.num_features,
+                        hyperparameters=hp,
+                        device=self.device,
+                        single_eval_pos=self.single_eval_pos,
+                        num_outputs=self._n_outputs,
+                    )
+                    all_internals.extend(scm_data_list)
+                else:
+                    x, y, target_y = get_batch(
+                        batch_size=1,
+                        seq_len=self.seq_len,
+                        num_features=self.num_features,
+                        hyperparameters=hp,
+                        device=self.device,
+                        single_eval_pos=self.single_eval_pos,
+                        num_outputs=self._n_outputs,
+                    )
+
+                all_x.append(x)
+                all_y.append(y)
+                all_target_y.append(target_y)
+
+            x = torch.cat(all_x, dim=1)
+            y = torch.cat(all_y, dim=1)
+            target_y = torch.cat(all_target_y, dim=1)
+
+            if self.return_internals:
+                yield (None, x, y), target_y, self.single_eval_pos, all_internals
+            else:
+                yield (None, x, y), target_y, self.single_eval_pos
+
+    def __len__(self):
+        return self.num_steps
