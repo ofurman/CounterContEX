@@ -509,7 +509,11 @@ class TestGenerateBatchWithSCM:
         assert x_cf.shape == batch.x_factual[:, 0:1, :].shape
 
     def test_true_cf_through_scm_matches_original_label(self, default_generator):
-        """True counterfactuals re-fed through SCM should produce the same class."""
+        """True counterfactuals re-fed through SCM should produce the same class.
+
+        Uses the correct sample position when setting interventions and
+        reading results, so the matched exogenous noise is preserved.
+        """
         from tabpfn.priors.counterfactual import FixedThresholdBinarize
 
         batch, scm_data_list = default_generator.generate_batch_with_scm(
@@ -540,12 +544,12 @@ class TestGenerateBatchWithSCM:
         flipped_idx = torch.where(flipped_mask)[0][0].item()
         x_cf_true = batch.x_counterfactual[flipped_idx, 0]  # (num_features,)
 
-        # Set all feature nodes to CF values
+        # Set feature nodes to CF values at the correct sample position
         interventions = {}
         for feat_idx in range(NUM_FEATURES):
             flat_idx = feature_indices[feat_idx].item()
             new_val = outputs_flat[:, :, flat_idx].clone()
-            new_val[:, :] = x_cf_true[feat_idx]
+            new_val[flipped_idx, :] = x_cf_true[feat_idx]
             interventions[flat_idx] = new_val
 
         _, y_cf_scm = scm.forward_with_intervention(internals, interventions)
@@ -555,8 +559,8 @@ class TestGenerateBatchWithSCM:
         if y_cf_class.dim() > 2:
             y_cf_class = y_cf_class.squeeze(-1)
 
-        # The class from re-feeding should match the original CF class
-        pred_class = y_cf_class[0, 0].item()
+        # Read the result from the correct sample position
+        pred_class = y_cf_class[flipped_idx, 0].item()
         expected_class = batch.y_counterfactual_class[flipped_idx, 0].item()
         assert pred_class == expected_class, \
             f"Re-feeding true CF should reproduce class: got {pred_class}, expected {expected_class}"

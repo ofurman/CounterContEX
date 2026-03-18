@@ -266,12 +266,16 @@ def compute_scm_validity(
         target_indices = internals["node_mapping"]["target_indices"]
         outputs_flat = internals["outputs_flat"]
 
-        # Compute a fixed threshold from the original y values
-        y_original = outputs_flat[:, :, target_indices]
-        if y_original.dim() > 2:
-            y_original = y_original.squeeze(-1)
-        threshold = torch.median(y_original).item()
-        fixed_assigner = FixedThresholdBinarize(threshold)
+        # Use the class assigner from data generation if available,
+        # otherwise fall back to a threshold from this batch's y values
+        if "class_assigner" in scm_data and scm_data["class_assigner"] is not None:
+            fixed_assigner = scm_data["class_assigner"]
+        else:
+            y_original = outputs_flat[:, :, target_indices]
+            if y_original.dim() > 2:
+                y_original = y_original.squeeze(-1)
+            threshold = torch.median(y_original).item()
+            fixed_assigner = FixedThresholdBinarize(threshold)
 
         start = batch_idx * num_query_per_batch
         end = start + num_query_per_batch

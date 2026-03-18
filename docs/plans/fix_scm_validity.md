@@ -167,7 +167,7 @@ The correct flow: when `get_batch_fixed_scm()` calls `generate_batch_fixed_scm()
 |---|-------|--------|-------|---------|
 | 1 | Return Per-Sample Internals | DONE | generate_batch_fixed_scm returns (batch, internals), get_batch_fixed_scm supports return_internals flag, FixedSCMDataLoader yields internals when requested | 2026-03-18 |
 | 2 | Fix compute_scm_validity | DONE | _evaluate_fixed_scm uses matched internals from FixedSCMDataLoader; _reorder_and_encode returns query_source_indices; compute_scm_validity uses per-sample positions | 2026-03-18 |
-| 3 | Sanity Test & Re-run | PENDING | | |
+| 3 | Sanity Test & Re-run | DONE | Added test_true_cf_scm_validity_is_near_100; fixed existing test to use correct sample position; fixed compute_scm_validity to use passed class_assigner; re-ran Exp1 — SCM validity 95.7%, all criteria PASSED | 2026-03-18 |
 
-Last stage completed: Stage 2 — Fix compute_scm_validity
+Last stage completed: Stage 3 — Sanity Test & Re-run
 Last updated by: plan-runner-agent

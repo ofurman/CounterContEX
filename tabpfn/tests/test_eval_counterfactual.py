@@ -112,6 +112,76 @@ class TestComputeSCMValidity:
             f"True CF validity ({true_validity}) should be >= zero-delta ({zero_validity})"
 
 
+class TestTrueCFSCMValidityNear100:
+    """Sanity test: true counterfactual deltas through matched internals ≈ 100%."""
+
+    def test_true_cf_scm_validity_is_near_100(self):
+        """Generate data from a fixed SCM, compute SCM validity of true deltas.
+
+        Uses FixedSCMDataLoader with return_internals=True so that the
+        exact exogenous noise from data generation is reused in the
+        validity check.  True CF deltas should achieve validity > 95%.
+        """
+        from tabpfn.priors.counterfactual_prior import FixedSCMDataLoader
+
+        seq_len = 128
+        num_features = NUM_FEATURES
+        single_eval_pos = seq_len // 2
+        num_query = seq_len - single_eval_pos
+
+        dl = FixedSCMDataLoader(
+            num_features=num_features,
+            seq_len=seq_len,
+            batch_size=1,
+            hyperparameters={},
+            device=DEVICE,
+            single_eval_pos=single_eval_pos,
+            num_steps=10,
+            calibration_size=200,
+        )
+        dl.return_internals = True
+
+        all_query_x = []
+        all_true_deltas = []
+        all_target_labels = []
+        scm_data_list = []
+
+        for data, target_y, sep, batch_internals in dl:
+            style, x, y = data
+            # Query positions: single_eval_pos onwards
+            query_x = x[single_eval_pos:]  # (num_query, 1, num_features)
+            true_delta = target_y[single_eval_pos:, :, :num_features]
+            target_label = y[single_eval_pos:]  # (num_query, 1)
+
+            # Flatten batch dim
+            nq = query_x.shape[0]
+            all_query_x.append(query_x.reshape(nq, num_features))
+            all_true_deltas.append(true_delta.reshape(nq, num_features))
+            all_target_labels.append(target_label.reshape(nq))
+
+            for internals in batch_internals:
+                scm_data_list.append({
+                    "scm": dl.scm,
+                    "internals": internals,
+                    "class_assigner": dl.class_assigner,
+                })
+
+        query_x = torch.cat(all_query_x, dim=0)
+        true_deltas = torch.cat(all_true_deltas, dim=0)
+        target_labels = torch.cat(all_target_labels, dim=0)
+
+        # Un-normalize: the data is normalized with cached stats
+        norm_stats = (dl._cached_mean, dl._cached_std)
+
+        validity = compute_scm_validity(
+            query_x, true_deltas, target_labels,
+            scm_data_list, single_eval_pos, num_features,
+            norm_stats=norm_stats,
+        )
+        assert validity > 0.95, \
+            f"True CF validity with matched internals should be > 0.95, got {validity}"
+
+
 class TestGenerateTestDataWithSCM:
     """Tests for generate_test_data with with_scm=True."""
 
