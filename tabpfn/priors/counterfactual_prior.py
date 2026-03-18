@@ -329,6 +329,7 @@ def get_batch_fixed_scm(
     fixed_perm,
     class_assigner,
     cached_norm_stats=None,
+    return_internals: bool = False,
     **kwargs,
 ):
     """Generate training data from a single fixed SCM.
@@ -343,9 +344,13 @@ def get_batch_fixed_scm(
         cached_norm_stats: Optional (mean, std) tuple from calibration data.
             When provided, uses these fixed stats instead of per-batch stats,
             ensuring stationary normalization across batches.
+        return_internals: If True, also return the per-batch-element internals
+            from data generation (for SCM validity checking).
         (other args same as get_batch)
 
-    Returns (x, y, target_y) with same format as get_batch.
+    Returns:
+        (x, y, target_y) when return_internals=False (default).
+        (x, y, target_y, batch_internals) when return_internals=True.
     """
     config = dict(get_default_counterfactual_config())
     if hyperparameters:
@@ -359,7 +364,7 @@ def get_batch_fixed_scm(
 
     gen = CounterfactualSCMGenerator(config, device=device)
 
-    batch = gen.generate_batch_fixed_scm(
+    batch, batch_internals = gen.generate_batch_fixed_scm(
         scm=scm,
         fixed_perm=fixed_perm,
         class_assigner=class_assigner,
@@ -385,6 +390,8 @@ def get_batch_fixed_scm(
         else:
             x, target_y = _normalize_per_batch(x, target_y)
 
+    if return_internals:
+        return x, y, target_y, batch_internals
     return x, y, target_y
 
 
@@ -421,6 +428,7 @@ class FixedSCMDataLoader:
         self.single_eval_pos = single_eval_pos
         self._n_outputs = num_outputs  # avoid "num_outputs" attr (check_compatibility)
         self.num_steps = num_steps
+        self.return_internals = False
 
         # Build config
         config = dict(get_default_counterfactual_config())
@@ -459,7 +467,7 @@ class FixedSCMDataLoader:
 
     def __iter__(self):
         for _ in range(self.num_steps):
-            x, y, target_y = get_batch_fixed_scm(
+            result = get_batch_fixed_scm(
                 batch_size=self.batch_size,
                 seq_len=self.seq_len,
                 num_features=self.num_features,
@@ -471,10 +479,16 @@ class FixedSCMDataLoader:
                 fixed_perm=self.fixed_perm,
                 class_assigner=self.class_assigner,
                 cached_norm_stats=(self._cached_mean, self._cached_std),
+                return_internals=self.return_internals,
             )
-            # Match the standard DataLoader output format:
-            # ((style, x, y), target_y, single_eval_pos)
-            yield (None, x, y), target_y, self.single_eval_pos
+            if self.return_internals:
+                x, y, target_y, batch_internals = result
+                yield (None, x, y), target_y, self.single_eval_pos, batch_internals
+            else:
+                x, y, target_y = result
+                # Match the standard DataLoader output format:
+                # ((style, x, y), target_y, single_eval_pos)
+                yield (None, x, y), target_y, self.single_eval_pos
 
     def __len__(self):
         return self.num_steps

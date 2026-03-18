@@ -365,7 +365,7 @@ class CounterfactualSCMGenerator:
         num_features: int,
         num_outputs: int = 1,
         perturbation_strategy: Optional[Union[str, PerturbationStrategy]] = None,
-    ) -> CounterfactualBatch:
+    ) -> tuple:
         """Generate a batch using a pre-built SCM with fixed node mapping.
 
         Instead of creating batch_size independent SCMs, this uses the same SCM
@@ -383,7 +383,8 @@ class CounterfactualSCMGenerator:
             perturbation_strategy: override the config strategy for this batch
 
         Returns:
-            CounterfactualBatch with all factual and counterfactual data
+            (CounterfactualBatch, all_internals) where all_internals is a list
+            of per-batch-element internals dicts from the factual forward pass.
         """
         if perturbation_strategy is not None:
             if isinstance(perturbation_strategy, PerturbationStrategy):
@@ -393,9 +394,11 @@ class CounterfactualSCMGenerator:
 
         all_x_f, all_y_f, all_x_cf, all_y_cf = [], [], [], []
         all_intervention_masks, all_deltas = [], []
+        all_internals = []
 
         for _ in range(batch_size):
             x_f, y_f, internals, _ = scm.forward_with_internals_fixed_mapping(fixed_perm)
+            all_internals.append(internals)
 
             # Determine which features to perturb (random subset)
             perturb_mask = self._select_perturbation_targets(
@@ -449,7 +452,7 @@ class CounterfactualSCMGenerator:
 
         label_flipped = y_factual_class != y_cf_class
 
-        return CounterfactualBatch(
+        batch = CounterfactualBatch(
             x_factual=x_factual,
             y_factual=y_factual,
             y_factual_class=y_factual_class,
@@ -460,6 +463,7 @@ class CounterfactualSCMGenerator:
             intervention_mask=intervention_mask,
             perturbation_delta=perturbation_delta,
         )
+        return batch, all_internals
 
     def _build_class_assigner(self) -> nn.Module:
         """Build a class assigner that will be shared between factual and counterfactual."""

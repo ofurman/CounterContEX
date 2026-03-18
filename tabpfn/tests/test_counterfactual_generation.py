@@ -410,13 +410,14 @@ class TestFixedSCMMapping:
         threshold = torch.median(y_cal).item()
         class_assigner = FixedThresholdBinarize(threshold)
 
-        batch = gen.generate_batch_fixed_scm(
+        batch, batch_internals = gen.generate_batch_fixed_scm(
             scm=scm, fixed_perm=perm, class_assigner=class_assigner,
             batch_size=BATCH_SIZE, seq_len=SEQ_LEN,
             num_features=NUM_FEATURES,
         )
 
         assert batch.x_factual.shape == (SEQ_LEN, BATCH_SIZE, NUM_FEATURES)
+        assert len(batch_internals) == BATCH_SIZE
         assert batch.y_factual_class.shape == (SEQ_LEN, BATCH_SIZE)
         assert batch.label_flipped.shape == (SEQ_LEN, BATCH_SIZE)
 
@@ -432,11 +433,11 @@ class TestFixedSCMMapping:
         threshold = torch.median(y_cal).item()
         class_assigner = FixedThresholdBinarize(threshold)
 
-        batch1 = gen.generate_batch_fixed_scm(
+        batch1, _ = gen.generate_batch_fixed_scm(
             scm=scm, fixed_perm=perm, class_assigner=class_assigner,
             batch_size=1, seq_len=SEQ_LEN, num_features=NUM_FEATURES,
         )
-        batch2 = gen.generate_batch_fixed_scm(
+        batch2, _ = gen.generate_batch_fixed_scm(
             scm=scm, fixed_perm=perm, class_assigner=class_assigner,
             batch_size=1, seq_len=SEQ_LEN, num_features=NUM_FEATURES,
         )
