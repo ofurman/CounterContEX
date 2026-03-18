@@ -278,13 +278,22 @@ def compute_scm_validity(
         batch_x_cf = x_cf_pred[start:end]  # (num_query, num_features)
         batch_target = target_labels[start:end]  # (num_query,)
 
+        # Get query-to-original-sample mapping if available
+        query_source_indices = internals.get("query_source_indices", None)
+
         # For each query point, set interventions on all feature nodes
         for q in range(batch_x_cf.shape[0]):
+            # Determine the original sample position in internals
+            if query_source_indices is not None:
+                sample_pos = query_source_indices[q].item()
+            else:
+                sample_pos = 0  # fallback for legacy callers
+
             interventions = {}
             for feat_idx in range(num_features):
                 flat_idx = feature_indices[feat_idx].item()
                 new_val = outputs_flat[:, :, flat_idx].clone()
-                new_val[:, :] = batch_x_cf[q, feat_idx]
+                new_val[sample_pos, :] = batch_x_cf[q, feat_idx]
                 interventions[flat_idx] = new_val
 
             # Re-propagate through SCM
@@ -299,8 +308,8 @@ def compute_scm_validity(
             if y_cf_class.dim() > 2:
                 y_cf_class = y_cf_class.squeeze(-1)
 
-            # Use the first sample position as representative
-            pred_class = y_cf_class[0, 0].item()
+            # Read result from the correct sample position
+            pred_class = y_cf_class[sample_pos, 0].item()
             target_class = batch_target[q].item()
 
             if pred_class == target_class:

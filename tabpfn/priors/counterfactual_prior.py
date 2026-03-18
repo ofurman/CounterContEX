@@ -138,7 +138,8 @@ def _normalize_with_cached_stats(x, target_y, cached_mean, cached_std):
 
 
 def _reorder_and_encode(batch, single_eval_pos, num_features, device,
-                        flip_only_queries=True, mask_supervision=True):
+                        flip_only_queries=True, mask_supervision=True,
+                        return_query_indices=False):
     """Reorder samples so label-flipped ones are prioritized for query positions.
 
     When flip_only_queries=True, all query positions will have label-flipped
@@ -161,6 +162,8 @@ def _reorder_and_encode(batch, single_eval_pos, num_features, device,
     x = torch.zeros(seq_len, batch_size, num_features, device=device)
     y = torch.zeros(seq_len, batch_size, device=device)
     target_y = torch.zeros(seq_len, batch_size, target_channels, device=device)
+    if return_query_indices:
+        query_source_indices = torch.zeros(num_query, batch_size, dtype=torch.long, device=device)
 
     def _set_target(pos, b, src_i):
         """Set target_y at (pos, b) with delta and optionally intervention mask."""
@@ -195,6 +198,8 @@ def _reorder_and_encode(batch, single_eval_pos, num_features, device,
                 x[pos, b] = batch.x_factual[src_i, b]
                 y[pos, b] = batch.y_counterfactual_class[src_i, b]
                 _set_target(pos, b, src_i)
+                if return_query_indices:
+                    query_source_indices[i, b] = src_i
         elif flip_only_queries and len(flipped_idx) > 0:
             # Not enough flipped samples but flip_only_queries is on:
             # duplicate flipped samples with small noise to fill query slots
@@ -219,6 +224,8 @@ def _reorder_and_encode(batch, single_eval_pos, num_features, device,
                     x[pos, b] = batch.x_factual[src_i, b] + noise
                 y[pos, b] = batch.y_counterfactual_class[src_i, b]
                 _set_target(pos, b, src_i)
+                if return_query_indices:
+                    query_source_indices[i, b] = src_i
         else:
             # No flipped samples or flip_only_queries is off:
             # fall back to filling queries with non-flipped samples
@@ -247,7 +254,11 @@ def _reorder_and_encode(batch, single_eval_pos, num_features, device,
                 x[pos, b] = batch.x_factual[src_i, b]
                 y[pos, b] = batch.y_counterfactual_class[src_i, b]
                 _set_target(pos, b, src_i)
+                if return_query_indices:
+                    query_source_indices[i, b] = src_i
 
+    if return_query_indices:
+        return x, y, target_y, query_source_indices
     return x, y, target_y
 
 
@@ -374,11 +385,19 @@ def get_batch_fixed_scm(
         num_outputs=num_outputs,
     )
 
-    x, y, target_y = _reorder_and_encode(
+    reorder_result = _reorder_and_encode(
         batch, single_eval_pos, num_features, device,
         flip_only_queries=flip_only_queries,
         mask_supervision=mask_supervision,
+        return_query_indices=return_internals,
     )
+    if return_internals:
+        x, y, target_y, query_source_indices = reorder_result
+        # Attach query source indices to each batch element's internals
+        for b, internals in enumerate(batch_internals):
+            internals["query_source_indices"] = query_source_indices[:, b]
+    else:
+        x, y, target_y = reorder_result
 
     normalize = config.get("normalize_features", True)
     if normalize:

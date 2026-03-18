@@ -60,21 +60,19 @@ def _evaluate_fixed_scm(model, fixed_dl, num_test_datasets, num_features,
     test_dl._cached_mean = fixed_dl._cached_mean
     test_dl._cached_std = fixed_dl._cached_std
 
-    # Generate test batches and collect SCM internals for each
+    # Generate test batches and collect matched SCM internals for each
+    test_dl.return_internals = True
     scm_data_list = []
-    for data, target_y, sep in test_dl:
+    for data, target_y, sep, batch_internals in test_dl:
         style, x, y = data
         test_batches.append((x, y, target_y))
-        # Get internals from the fixed SCM for SCM validity
-        with torch.no_grad():
-            _, _, internals, _ = fixed_dl.scm.forward_with_internals_fixed_mapping(
-                fixed_dl.fixed_perm
-            )
-        scm_data_list.append({
-            "scm": fixed_dl.scm,
-            "internals": internals,
-            "class_assigner": fixed_dl.class_assigner,
-        })
+        # Use the exact internals from data generation (matched noise)
+        for internals in batch_internals:
+            scm_data_list.append({
+                "scm": fixed_dl.scm,
+                "internals": internals,
+                "class_assigner": fixed_dl.class_assigner,
+            })
 
     print(f"Generated {len(test_batches)} test batches from fixed SCM")
 
