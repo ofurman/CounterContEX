@@ -32,7 +32,7 @@ from tabpfn.experiments.configs import EXPERIMENT_REGISTRY
 
 
 def _evaluate_fixed_scm(model, fixed_dl, num_test_datasets, num_features,
-                        seq_len, save_path=None):
+                        seq_len, save_path=None, mask_supervision=True):
     """Evaluate a model using the same fixed SCM from training.
 
     Generates test data from the training SCM and computes SCM-based validity
@@ -56,6 +56,9 @@ def _evaluate_fixed_scm(model, fixed_dl, num_test_datasets, num_features,
     test_dl.scm = fixed_dl.scm
     test_dl.fixed_perm = fixed_dl.fixed_perm
     test_dl.class_assigner = fixed_dl.class_assigner
+    # Also share cached normalization stats
+    test_dl._cached_mean = fixed_dl._cached_mean
+    test_dl._cached_std = fixed_dl._cached_std
 
     # Generate test batches and collect SCM internals for each
     scm_data_list = []
@@ -77,14 +80,20 @@ def _evaluate_fixed_scm(model, fixed_dl, num_test_datasets, num_features,
 
     pred_deltas, true_deltas, query_x, target_labels = run_inference(
         model, test_batches, single_eval_pos, num_features, "cpu",
-        mask_supervision=True,
+        mask_supervision=mask_supervision,
     )
+
+    # Pass normalization stats so SCM validity can un-normalize predictions
+    norm_stats = None
+    if hasattr(fixed_dl, '_cached_mean') and fixed_dl._cached_mean is not None:
+        norm_stats = (fixed_dl._cached_mean, fixed_dl._cached_std)
 
     metrics = compute_metrics(
         pred_deltas, true_deltas, query_x, target_labels,
         num_features, "cpu",
         scm_data_list=scm_data_list,
         single_eval_pos=single_eval_pos,
+        norm_stats=norm_stats,
     )
     metrics.num_test_datasets = num_test_datasets
 
@@ -143,12 +152,13 @@ def run_experiment(
     # Prepare prior kwargs from SCM config
     extra_prior_kwargs = dict(scm_config)
     use_fixed_scm = extra_prior_kwargs.pop("use_fixed_scm", False)
+    use_mask_supervision = extra_prior_kwargs.pop("mask_supervision", True)
 
     # Build fixed-SCM data loader if requested
     fixed_dl = None
     if use_fixed_scm:
         hp = dict(extra_prior_kwargs)
-        hp["mask_supervision"] = True
+        hp["mask_supervision"] = use_mask_supervision
         fixed_dl = FixedSCMDataLoader(
             num_features=num_features,
             seq_len=exp_config["seq_len"],
@@ -186,7 +196,7 @@ def run_experiment(
         extra_prior_kwargs=extra_prior_kwargs,
         verbose=True,
         epoch_callback=epoch_callback,
-        mask_supervision=True,
+        mask_supervision=use_mask_supervision,
         mask_loss_weight=0.5,
         dataloader=fixed_dl,
     )
@@ -224,6 +234,7 @@ def run_experiment(
         metrics = _evaluate_fixed_scm(
             model, fixed_dl, num_test_datasets, num_features,
             exp_config["seq_len"], str(out / "example_predictions.json"),
+            mask_supervision=use_mask_supervision,
         )
     else:
         metrics = evaluate(

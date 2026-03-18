@@ -110,6 +110,33 @@ def _normalize_per_batch(x, target_y):
     return x, target_y
 
 
+def _normalize_with_cached_stats(x, target_y, cached_mean, cached_std):
+    """Normalize features using pre-computed (cached) mean and std.
+
+    Unlike _normalize_per_batch which computes stats from the current batch,
+    this uses fixed stats from a calibration set. This ensures stationary
+    normalization across batches for fixed-SCM experiments.
+
+    Args:
+        x: (seq_len, batch_size, num_features)
+        target_y: (seq_len, batch_size, num_features) or (seq_len, batch_size, num_features*2)
+        cached_mean: (1, 1, num_features) mean from calibration data
+        cached_std: (1, 1, num_features) std from calibration data
+
+    Returns:
+        x_norm, target_y_norm with same shapes
+    """
+    num_features = x.shape[2]
+    # cached_mean/std have shape (1, 1, num_features) — broadcast over seq_len and batch
+    mean = cached_mean.squeeze(0)  # (1, num_features)
+    std = cached_std.squeeze(0)    # (1, num_features)
+    x = (x - mean) / std
+    # Scale only the delta channels, not the mask channels
+    target_y = target_y.clone()
+    target_y[..., :num_features] = target_y[..., :num_features] / std
+    return x, target_y
+
+
 def _reorder_and_encode(batch, single_eval_pos, num_features, device,
                         flip_only_queries=True, mask_supervision=True):
     """Reorder samples so label-flipped ones are prioritized for query positions.
@@ -301,6 +328,7 @@ def get_batch_fixed_scm(
     scm,
     fixed_perm,
     class_assigner,
+    cached_norm_stats=None,
     **kwargs,
 ):
     """Generate training data from a single fixed SCM.
@@ -312,6 +340,9 @@ def get_batch_fixed_scm(
         scm: Pre-built _MLP instance
         fixed_perm: Fixed node permutation tensor
         class_assigner: Pre-built class assigner (e.g., FixedThresholdBinarize)
+        cached_norm_stats: Optional (mean, std) tuple from calibration data.
+            When provided, uses these fixed stats instead of per-batch stats,
+            ensuring stationary normalization across batches.
         (other args same as get_batch)
 
     Returns (x, y, target_y) with same format as get_batch.
@@ -346,7 +377,13 @@ def get_batch_fixed_scm(
 
     normalize = config.get("normalize_features", True)
     if normalize:
-        x, target_y = _normalize_per_batch(x, target_y)
+        if cached_norm_stats is not None:
+            # Use fixed normalization stats for stationary targets
+            x, target_y = _normalize_with_cached_stats(
+                x, target_y, cached_norm_stats[0], cached_norm_stats[1]
+            )
+        else:
+            x, target_y = _normalize_per_batch(x, target_y)
 
     return x, y, target_y
 
@@ -358,8 +395,10 @@ class FixedSCMDataLoader:
     1. Builds one SCM with random weights
     2. Runs forward_with_internals_fixed_mapping to get a fixed node permutation
     3. Calibrates a FixedThresholdBinarize from a large calibration batch
+    4. Computes and caches normalization stats (mean/std) from calibration data
 
-    Every __iter__ call generates fresh samples from the same SCM structure.
+    Every __iter__ call generates fresh samples from the same SCM structure,
+    using cached normalization stats for consistency across batches.
     """
 
     def __init__(
@@ -397,22 +436,24 @@ class FixedSCMDataLoader:
 
         # Calibrate class boundary from a large batch
         with torch.no_grad():
-            # Generate calibration data: use a larger seq_len temporarily
-            cal_scm = gen._sample_scm(calibration_size, num_features, self._n_outputs)
-            # We need to reuse the same MLP weights, so rebuild with calibration size
-            # Instead, run multiple forward passes and collect y values
             y_values = []
+            x_values = []
             remaining = calibration_size
             while remaining > 0:
                 chunk = min(remaining, seq_len)
-                # Use a temporary SCM with the right seq_len
-                _, y_chunk, _, _ = self.scm.forward_with_internals_fixed_mapping(
+                x_chunk, y_chunk, _, _ = self.scm.forward_with_internals_fixed_mapping(
                     self.fixed_perm
                 )
                 y_values.append(y_chunk.squeeze(-1) if y_chunk.dim() > 2 else y_chunk)
+                x_values.append(x_chunk)
                 remaining -= chunk
             y_all = torch.cat(y_values, dim=0)
             threshold = torch.median(y_all).item()
+
+            # Cache normalization stats from calibration data
+            x_all = torch.cat(x_values, dim=0)  # (total_samples, 1, num_features)
+            self._cached_mean = x_all.mean(dim=0, keepdim=True)  # (1, 1, num_features)
+            self._cached_std = x_all.std(dim=0, keepdim=True).clamp(min=1e-6)
 
         self.class_assigner = FixedThresholdBinarize(threshold)
 
@@ -429,6 +470,7 @@ class FixedSCMDataLoader:
                 scm=self.scm,
                 fixed_perm=self.fixed_perm,
                 class_assigner=self.class_assigner,
+                cached_norm_stats=(self._cached_mean, self._cached_std),
             )
             # Match the standard DataLoader output format:
             # ((style, x, y), target_y, single_eval_pos)

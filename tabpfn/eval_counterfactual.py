@@ -216,20 +216,16 @@ def compute_scm_validity(
     scm_data_list: list,
     single_eval_pos: int,
     num_features: int,
+    norm_stats: tuple = None,
 ) -> float:
     """Compute true validity by feeding predicted CFs through original SCMs.
 
     For each query point:
-    1. x_cf_pred = query_x + pred_delta
-    2. Build interventions: set all feature nodes to x_cf_pred values
-    3. Re-propagate through SCM
-    4. Classify using a fixed threshold (median of original y) and compare
-       to target label
-
-    Note: We use FixedThresholdBinarize instead of the original BalancedBinarize
-    because BalancedBinarize recomputes the median from the current batch. When
-    we only evaluate single CF points, the median would be degenerate. Instead,
-    we compute the median from the original factual y values and freeze it.
+    1. x_cf_pred = query_x + pred_delta (in normalized space)
+    2. Un-normalize x_cf_pred to raw space (if norm_stats provided)
+    3. Build interventions: set all feature nodes to x_cf_pred values
+    4. Re-propagate through SCM
+    5. Classify using a fixed threshold and compare to target label
 
     Args:
         query_x: (total_query_points, num_features) original query features
@@ -239,6 +235,9 @@ def compute_scm_validity(
             'scm', 'internals', 'class_assigner'
         single_eval_pos: number of context positions
         num_features: number of features
+        norm_stats: optional (mean, std) tensors for un-normalizing predictions
+            back to raw SCM space before feeding through the causal model.
+            Both have shape (1, 1, num_features).
 
     Returns:
         validity_rate: fraction of predictions that achieve the target label
@@ -246,6 +245,14 @@ def compute_scm_validity(
     from tabpfn.priors.counterfactual import FixedThresholdBinarize
 
     x_cf_pred = query_x + pred_deltas
+
+    # Un-normalize from normalized space back to raw SCM space
+    if norm_stats is not None:
+        mean, std = norm_stats
+        # Squeeze to (num_features,) for broadcasting with (N, num_features)
+        mean = mean.squeeze()
+        std = std.squeeze()
+        x_cf_pred = x_cf_pred * std + mean
 
     total_valid = 0
     total_points = 0
@@ -307,7 +314,8 @@ def compute_metrics(pred_deltas: Tensor, true_deltas: Tensor,
                     query_x: Tensor, target_labels: Tensor,
                     num_features: int, device: str = "cpu",
                     scm_data_list: list = None,
-                    single_eval_pos: int = None) -> EvalMetrics:
+                    single_eval_pos: int = None,
+                    norm_stats: tuple = None) -> EvalMetrics:
     """Compute all evaluation metrics.
 
     Args:
@@ -318,6 +326,7 @@ def compute_metrics(pred_deltas: Tensor, true_deltas: Tensor,
         num_features: number of features
         scm_data_list: optional list of SCM data dicts for ground-truth validity
         single_eval_pos: number of context positions (required if scm_data_list given)
+        norm_stats: optional (mean, std) for un-normalizing before SCM validity check
     """
     N = pred_deltas.shape[0]
 
@@ -355,6 +364,7 @@ def compute_metrics(pred_deltas: Tensor, true_deltas: Tensor,
         scm_val = compute_scm_validity(
             query_x, pred_deltas, target_labels,
             scm_data_list, single_eval_pos, num_features,
+            norm_stats=norm_stats,
         )
 
     return EvalMetrics(
