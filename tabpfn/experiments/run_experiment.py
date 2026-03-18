@@ -284,6 +284,8 @@ def run_experiment(
         print(f"  Loss reduction:    {reduction:.1%}")
     print(f"  Delta MSE:         {metrics.delta_mse:.6f}")
     print(f"  Heuristic validity:{metrics.validity_rate:.4f}")
+    if metrics.sign_accuracy >= 0:
+        print(f"  Sign accuracy:     {metrics.sign_accuracy:.4f}")
     if metrics.scm_validity >= 0:
         print(f"  SCM validity:      {metrics.scm_validity:.4f}")
     print(f"{'=' * 60}")
@@ -350,6 +352,13 @@ def main():
         passed = metrics["delta_mse"] < criteria["delta_mse"]
         status = "PASS" if passed else "FAIL"
         print(f"  [{status}] Delta MSE: {metrics['delta_mse']:.6f} < {criteria['delta_mse']}")
+        all_passed = all_passed and passed
+
+    if "sign_accuracy" in criteria:
+        val = metrics.get("sign_accuracy", -1)
+        passed = val >= criteria["sign_accuracy"]
+        status = "PASS" if passed else "FAIL"
+        print(f"  [{status}] Sign accuracy: {val:.4f} >= {criteria['sign_accuracy']}")
         all_passed = all_passed and passed
 
     if "scm_validity" in criteria:

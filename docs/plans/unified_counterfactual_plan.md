@@ -666,11 +666,11 @@ Exp 3 passes but Exp 4 fails -> model can do in-context identification but not i
 | 5 | SCM-Based Validity Evaluation | DONE | Added generate_batch_with_scm, get_batch_with_scm, compute_scm_validity with FixedThresholdBinarize; updated compute_metrics/print_report/evaluate; 12 new tests | 2026-03-17 |
 | 6 | Experiment Runner Framework | DONE | Created experiments/ package with configs.py (all 6 experiment configs) and run_experiment.py (unified runner with training, eval, checkpointing, criteria checking, CLI) | 2026-03-17 |
 | 7 | Experiment 0: Linear Sanity Check | DONE | Fixed: FixedSCMDataLoader output format, train_counterfactual accepts custom DL, deterministic perturbation_direction, fixed-SCM evaluation. Delta MSE=0.000001, converged epoch 4 | 2026-03-17 |
-| 8 | Experiment 1: Single Nonlinear SCM | PENDING | | |
-| 9 | Experiment 2: Feature Scaling | PENDING | | |
+| 8 | Experiment 1: Single Nonlinear SCM | DONE | FAILED criteria: delta_mse=1.73 (need<0.1), scm_validity=0.70 (need≥0.70), loss_reduction=70.5% (need≥80%). Sign accuracy=0.896 PASSED. Model config upgraded (emsize=128, nlayers=6, 500 epochs) but loss plateaued ~1.29. Added sign_accuracy metric to eval. | 2026-03-18 |
+| 9 | Experiment 2: Feature Scaling | BLOCKED | Exp 1 failed criteria — must fix before proceeding | 2026-03-18 |
 | 10 | Experiment 3: SCM Family (ICL) | PENDING | | |
 | 11 | Experiment 4: Diverse SCMs | PENDING | | |
 | 12 | Results Notebook | PENDING | | |
 
-Last stage completed: Stage 7 — Experiment 0: Linear Sanity Check
+Last stage completed: Stage 8 — Experiment 1: Single Nonlinear SCM (FAILED criteria)
 Last updated by: plan-runner-agent

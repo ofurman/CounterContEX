@@ -46,6 +46,7 @@ class EvalMetrics:
     num_test_datasets: int
     num_query_points: int
     scm_validity: float = -1.0  # SCM-based validity (-1 = not computed)
+    sign_accuracy: float = -1.0  # Fraction of deltas with correct sign (-1 = not computed)
 
 
 def build_model(num_features: int, emsize: int = 64, nhead: int = 2,
@@ -339,7 +340,16 @@ def compute_metrics(pred_deltas: Tensor, true_deltas: Tensor,
     near_zero = pred_deltas.abs() < sparse_threshold
     sparsity = near_zero.float().mean().item()
 
-    # 5. SCM validity (ground-truth, if SCM data available)
+    # 5. Sign accuracy: fraction of non-zero true deltas with correct sign
+    nonzero_mask = true_deltas.abs() > 1e-6
+    if nonzero_mask.any():
+        pred_sign = (pred_deltas[nonzero_mask] > 0).float()
+        true_sign = (true_deltas[nonzero_mask] > 0).float()
+        sign_acc = (pred_sign == true_sign).float().mean().item()
+    else:
+        sign_acc = -1.0
+
+    # 6. SCM validity (ground-truth, if SCM data available)
     scm_val = -1.0
     if scm_data_list is not None and single_eval_pos is not None:
         scm_val = compute_scm_validity(
@@ -356,6 +366,7 @@ def compute_metrics(pred_deltas: Tensor, true_deltas: Tensor,
         num_test_datasets=N,  # will be overridden by caller
         num_query_points=N,
         scm_validity=scm_val,
+        sign_accuracy=sign_acc,
     )
 
 
@@ -369,6 +380,8 @@ def print_report(metrics: EvalMetrics):
     print("-" * 60)
     print(f"  Delta MSE:         {metrics.delta_mse:.6f}")
     print(f"  Heuristic validity:{metrics.validity_rate:.4f}")
+    if metrics.sign_accuracy >= 0:
+        print(f"  Sign accuracy:     {metrics.sign_accuracy:.4f}")
     if metrics.scm_validity >= 0:
         print(f"  SCM validity:      {metrics.scm_validity:.4f}")
     print(f"  Proximity (L2):    {metrics.proximity_mean:.4f} +/- {metrics.proximity_std:.4f}")
