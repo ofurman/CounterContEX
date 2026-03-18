@@ -670,7 +670,7 @@ Exp 3 passes but Exp 4 fails -> model can do in-context identification but not i
 | 9 | Experiment 2: Feature Scaling | DONE | 2A (5f): MSE=0.003, sign=1.0, scm_val=0.97. 2B (10f): MSE=0.003, sign=1.0, scm_val=0.99. Both deterministic perturbation. Added zero_feature_accuracy metric. | 2026-03-18 |
 | 10 | Experiment 3: SCM Family (ICL) | DONE | SCMFamilyDataLoader (10 SCMs), context ablation. MSE=0.71 (stochastic), scm_val=0.97, ablation gap=0.35. | 2026-03-18 |
 | 11 | Experiment 4: Diverse SCMs | DONE | DiverseSCMDataLoader (random depth/width/activation per batch). MSE=2.22 (FAIL), scm_val=0.51 (PASS), ablation_gap=0.0 (FAIL). Model generalizes partially but no ICL. | 2026-03-18 |
-| 12 | Results Notebook | PENDING | | |
+| 12 | Results Notebook | DONE | Created ExperimentProgression.ipynb with summary table, loss curves, SCM validity bars, context ablation, feature scaling, convergence analysis, conclusions | 2026-03-18 |
 
-Last stage completed: Stage 11 — Experiment 4: Diverse SCMs
+Last stage completed: Stage 12 — Results Notebook
 Last updated by: plan-runner-agent
