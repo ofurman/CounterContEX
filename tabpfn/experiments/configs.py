@@ -239,6 +239,51 @@ EXP4_CRITERIA = dict(
     context_ablation_gap=0.15,
 )
 
+# ---------- Medium Model Base Config (~5M params) ----------
+
+MEDIUM_MODEL = dict(
+    emsize=256,
+    nlayers=6,
+    nhead=4,
+    nhid=512,
+    dropout=0.1,
+    weight_decay=1e-4,
+)
+
+# ---------- Experiment 3S: SCM Family, Medium Scale ----------
+
+EXP3S_CONFIG = dict(
+    **MEDIUM_MODEL,
+    num_features=5,
+    seq_len=256,
+    batch_size=16,
+    epochs=200,
+    steps_per_epoch=200,
+    lr=0.0001,
+    warmup_epochs=20,
+)
+
+EXP3S_SCM = dict(EXP3_SCM)  # same SCM config
+
+EXP3S_CRITERIA = dict(scm_validity=0.70, delta_mse=0.5)
+
+# ---------- Experiment 4S: Diverse SCMs, Medium Scale ----------
+
+EXP4S_CONFIG = dict(
+    **MEDIUM_MODEL,
+    num_features=5,
+    seq_len=256,
+    batch_size=16,
+    epochs=200,
+    steps_per_epoch=200,
+    lr=0.0001,
+    warmup_epochs=20,
+)
+
+EXP4S_SCM = dict(EXP4_SCM)  # same SCM config
+
+EXP4S_CRITERIA = dict(scm_validity=0.40, context_ablation_gap=0.10)
+
 # Registry for CLI lookup
 EXPERIMENT_REGISTRY = {
     "exp0": (EXP0_CONFIG, EXP0_SCM, EXP0_CRITERIA),
@@ -247,4 +292,6 @@ EXPERIMENT_REGISTRY = {
     "exp2b": (EXP2B_CONFIG, EXP2B_SCM, EXP2B_CRITERIA),
     "exp3": (EXP3_CONFIG, EXP3_SCM, EXP3_CRITERIA),
     "exp4": (EXP4_CONFIG, EXP4_SCM, EXP4_CRITERIA),
+    "exp3s": (EXP3S_CONFIG, EXP3S_SCM, EXP3S_CRITERIA),
+    "exp4s": (EXP4S_CONFIG, EXP4S_SCM, EXP4S_CRITERIA),
 }
