@@ -1065,6 +1065,86 @@ class CounterfactualSCMGenerator:
 
                 return x_cf, y_cf
 
+            def differentiable_forward(self, x_cf, internals, feature_indices,
+                                       sample_indices=None):
+                """Re-propagate through SCM with counterfactual features, keeping gradients.
+
+                Unlike forward_with_intervention which takes intervention values by index,
+                this takes predicted CF features and places them at the correct positions
+                in the causal graph, maintaining gradient flow through x_cf.
+
+                Args:
+                    x_cf: (N, 1, num_features) counterfactual feature values (raw space)
+                    internals: dict from forward_with_internals
+                    feature_indices: tensor mapping feature idx to outputs_flat column
+                    sample_indices: optional (N,) indices into original seq_len to
+                        select which samples to process
+
+                Returns:
+                    y_cf: (N, 1, num_outputs) raw target value before classification
+                """
+                causes = internals["cause_noise"]
+                layer_noises = internals["layer_noises"]
+                layer_boundaries = internals["layer_boundaries"]
+                target_indices = internals["node_mapping"]["target_indices"]
+
+                # Select relevant samples if indices provided
+                if sample_indices is not None:
+                    causes = causes[sample_indices]
+                    layer_noises = [
+                        n[sample_indices] if n is not None else None
+                        for n in layer_noises
+                    ]
+
+                # Map feature indices to per-layer intervention positions
+                intervention_by_layer = {}
+                for feat_i in range(x_cf.shape[-1]):
+                    flat_idx = feature_indices[feat_i].item()
+                    for start, end, layer_idx in layer_boundaries:
+                        if start <= flat_idx < end:
+                            if layer_idx not in intervention_by_layer:
+                                intervention_by_layer[layer_idx] = {}
+                            intervention_by_layer[layer_idx][flat_idx - start] = feat_i
+                            break
+
+                # Re-propagate with fixed noise; gradient flows through x_cf
+                outputs = [causes.detach()]
+                noise_idx = 0
+
+                for i, layer in enumerate(self.layers):
+                    layer_input = outputs[-1]
+                    if isinstance(layer, nn.Sequential):
+                        pre_noise_out = layer_input
+                        for sublayer in layer:
+                            if isinstance(sublayer, GaussianNoise):
+                                noise = layer_noises[noise_idx]
+                                if noise is not None:
+                                    pre_noise_out = pre_noise_out + noise.detach()
+                            else:
+                                pre_noise_out = sublayer(pre_noise_out)
+                        outputs.append(pre_noise_out)
+                        noise_idx += 1
+                    else:
+                        outputs.append(layer(layer_input))
+                        noise_idx += 1
+
+                    # Apply CF feature values at correct layer depth
+                    sel_layer_idx = len(outputs) - 1 - 2
+                    if sel_layer_idx in intervention_by_layer:
+                        current = outputs[-1].clone()
+                        for within_idx, feat_i in intervention_by_layer[sel_layer_idx].items():
+                            current[:, :, within_idx] = x_cf[:, :, feat_i]
+                        outputs[-1] = current
+
+                outputs_for_selection = outputs[2:]
+                if self.is_causal:
+                    outputs_flat_cf = torch.cat(outputs_for_selection, -1)
+                    y_cf = outputs_flat_cf[:, :, target_indices]
+                else:
+                    y_cf = outputs_for_selection[-1][:, :, :]
+
+                return y_cf
+
         model = _MLP(hyperparameters).to(device)
         return model
 

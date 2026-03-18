@@ -313,14 +313,24 @@ def get_batch_with_scm(
         gen.config["perturbation_strategy"] = "uniform_random"
         gen.config["perturbation_magnitude"] = gen.config["perturbation_magnitude"] * 1.5
 
-    x, y, target_y = _reorder_and_encode(
+    reorder_result = _reorder_and_encode(
         batch, single_eval_pos, num_features, device,
         flip_only_queries=flip_only_queries,
         mask_supervision=mask_supervision,
+        return_query_indices=True,
     )
+    x, y, target_y, query_source_indices = reorder_result
+
+    # Attach query source indices to each scm_data entry
+    for b in range(batch_size):
+        scm_data_list[b]["query_source_indices"] = query_source_indices[:, b]
 
     normalize = config.get("normalize_features", True)
     if normalize:
+        # Store norm stats before normalization (for validity loss un-normalization)
+        for b in range(batch_size):
+            scm_data_list[b]["norm_mean"] = x[:, b, :].mean(dim=0, keepdim=True)
+            scm_data_list[b]["norm_std"] = x[:, b, :].std(dim=0, keepdim=True).clamp(min=1e-6)
         x, target_y = _normalize_per_batch(x, target_y)
 
     return x, y, target_y, scm_data_list
@@ -645,9 +655,13 @@ class SCMFamilyDataLoader:
             target_y = torch.cat(all_target_y, dim=1)  # (seq_len, batch_size, channels)
 
             if self.return_internals:
-                # Attach SCM index to each internals dict
+                # Attach SCM info to each internals dict
                 for i, internals in enumerate(all_internals):
                     internals["scm_idx"] = scm_indices[i]
+                    internals["scm"] = self.scms[scm_indices[i]]
+                    internals["class_assigner"] = self.class_assigners[scm_indices[i]]
+                    internals["norm_mean"] = self._cached_mean.squeeze(0)
+                    internals["norm_std"] = self._cached_std.squeeze(0)
                 yield (None, x, y), target_y, self.single_eval_pos, all_internals
             else:
                 yield (None, x, y), target_y, self.single_eval_pos

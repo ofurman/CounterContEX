@@ -83,10 +83,13 @@ def train_counterfactual(
     print(f"Using {device} device")
     using_dist, rank, device = init_dist(device)
 
-    # Distributional loss overrides mask_supervision (output is mean + log_var)
+    # Distributional/validity loss overrides mask_supervision
     if loss_type == "distributional":
         mask_supervision = False
         n_out = num_features * 2  # first half = mean, second half = log_var
+    elif loss_type == "validity":
+        mask_supervision = False
+        n_out = num_features  # predict deltas only
     elif mask_supervision:
         n_out = num_features * 2  # first half = delta, second half = mask logits
     else:
@@ -149,6 +152,10 @@ def train_counterfactual(
         model = torch.nn.parallel.DistributedDataParallel(
             model, device_ids=[rank], output_device=rank, broadcast_buffers=False
         )
+    # For validity loss, enable SCM data return from dataloader
+    if loss_type == "validity" and hasattr(dl, 'return_internals'):
+        dl.return_internals = True
+
     dl.model = model
     utils.check_compatibility(dl)
 
@@ -208,7 +215,14 @@ def _train_one_epoch(model, dl, criterion, optimizer, single_eval_pos,
     model.train()
     total_loss = 0.0
 
-    for batch_idx, (data, targets, sep) in enumerate(dl):
+    for batch_idx, batch_item in enumerate(dl):
+        # Unpack: dataloaders yield 3 or 4 elements
+        if len(batch_item) == 4:
+            data, targets, sep, scm_data_list = batch_item
+        else:
+            data, targets, sep = batch_item
+            scm_data_list = None
+
         # data = (style, x, y), targets = (seq_len, batch, target_channels)
         data_device = tuple(
             e.to(device) if torch.is_tensor(e) else e for e in data
@@ -219,7 +233,15 @@ def _train_one_epoch(model, dl, criterion, optimizer, single_eval_pos,
         # Slice targets to query positions only
         query_targets = targets[single_eval_pos:].to(device)
 
-        if loss_type == "distributional":
+        if loss_type == "validity" and scm_data_list is not None:
+            # Validity loss needs query features and target labels
+            query_x = data[1][single_eval_pos:].to(device)
+            target_labels = data[2][single_eval_pos:].to(device)
+            loss = _validity_loss(
+                output, query_x, target_labels, scm_data_list,
+                num_features, single_eval_pos,
+            )
+        elif loss_type == "distributional":
             # Targets are plain deltas (num_query, batch, num_features)
             loss = _distributional_loss(output, query_targets, num_features)
         elif mask_supervision and num_features is not None:
@@ -260,6 +282,103 @@ def _distributional_loss(output, query_targets, num_features):
     # Gaussian NLL: 0.5 * (log_var + (target - mu)^2 / exp(log_var))
     nll = 0.5 * (log_var + (query_targets - mu) ** 2 / log_var.exp())
     return nll.mean()
+
+
+def _validity_loss(output, query_x, target_labels, scm_data_list,
+                   num_features, single_eval_pos,
+                   proximity_weight=0.1, sparsity_weight=0.01):
+    """Validity-focused loss using differentiable SCM forward pass.
+
+    Instead of matching a specific delta, optimizes for the outcome:
+    does the predicted counterfactual flip the label? Uses the SCM's
+    differentiable forward pass as a learned validity signal, plus
+    proximity and sparsity penalties.
+
+    Args:
+        output: (num_query, batch, num_features) — predicted deltas
+        query_x: (num_query, batch, num_features) — factual query features (normalized)
+        target_labels: (num_query, batch) — desired class labels
+        scm_data_list: list of dicts with SCM data per batch element
+        num_features: number of features
+        single_eval_pos: split position between context and query
+        proximity_weight: weight for L2 proximity penalty
+        sparsity_weight: weight for L1 sparsity penalty
+    """
+    batch_size = output.shape[1]
+    pred_delta = output[..., :num_features]
+
+    total_validity_loss = 0.0
+
+    for b in range(batch_size):
+        scm_data = scm_data_list[b]
+
+        # Extract SCM info (handle both SCMFamily and Diverse formats)
+        if "internals" in scm_data and isinstance(scm_data.get("internals"), dict) and "cause_noise" in scm_data.get("internals", {}):
+            # DiverseSCMDataLoader format: scm_data wraps internals
+            scm = scm_data["scm"]
+            internals = scm_data["internals"]
+            class_assigner = scm_data["class_assigner"]
+            query_src = scm_data.get("query_source_indices")
+        else:
+            # SCMFamilyDataLoader format: internals at top level
+            scm = scm_data["scm"]
+            internals = scm_data
+            class_assigner = scm_data["class_assigner"]
+            query_src = scm_data.get("query_source_indices")
+
+        norm_mean = scm_data.get("norm_mean")
+        norm_std = scm_data.get("norm_std")
+        feature_indices = internals["node_mapping"]["feature_indices"]
+
+        # Freeze SCM parameters (we only train the transformer)
+        for p in scm.parameters():
+            p.requires_grad_(False)
+
+        # Compute x_cf in normalized space
+        delta_b = pred_delta[:, b:b+1, :]  # (num_query, 1, nf)
+        x_norm_b = query_x[:, b:b+1, :]   # (num_query, 1, nf)
+        x_cf_norm = x_norm_b + delta_b     # (num_query, 1, nf)
+
+        # Un-normalize to raw SCM space
+        if norm_mean is not None and norm_std is not None:
+            x_cf_raw = x_cf_norm * norm_std.unsqueeze(0) + norm_mean.unsqueeze(0)
+        else:
+            x_cf_raw = x_cf_norm
+
+        # Get classification threshold
+        if hasattr(class_assigner, 'threshold'):
+            threshold = class_assigner.threshold
+        else:
+            # BalancedBinarize: compute from factual y
+            target_indices = internals["node_mapping"]["target_indices"]
+            y_raw = internals["outputs_flat"][:, :, target_indices]
+            threshold = torch.median(y_raw).item()
+
+        # Differentiable forward through SCM
+        y_cf_raw = scm.differentiable_forward(
+            x_cf_raw, internals, feature_indices,
+            sample_indices=query_src,
+        )  # (num_query, 1, num_outputs)
+        y_cf_scalar = y_cf_raw.squeeze(-1).squeeze(-1)  # (num_query,)
+
+        # Validity loss: BCE on whether y_cf crosses the threshold
+        target_b = target_labels[:, b]  # (num_query,)
+        validity_loss = F.binary_cross_entropy_with_logits(
+            y_cf_scalar - threshold, target_b
+        )
+        total_validity_loss += validity_loss
+
+    # Proximity: keep CF close to factual (L2)
+    proximity_loss = pred_delta.norm(dim=-1).mean()
+
+    # Sparsity: change few features (L1)
+    sparsity_loss = pred_delta.abs().mean()
+
+    total_loss = (total_validity_loss / batch_size
+                  + proximity_weight * proximity_loss
+                  + sparsity_weight * sparsity_loss)
+
+    return total_loss
 
 
 def _composite_loss(output, query_targets, num_features, mask_loss_weight):
