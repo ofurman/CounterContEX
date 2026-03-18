@@ -72,6 +72,7 @@ def train_counterfactual(
     mask_supervision=True,
     mask_loss_weight=0.5,
     dataloader=None,
+    loss_type="mse",
 ):
     """Train a counterfactual generation model.
 
@@ -82,8 +83,14 @@ def train_counterfactual(
     print(f"Using {device} device")
     using_dist, rank, device = init_dist(device)
 
-    # predict delta + mask logits when mask_supervision is on
-    n_out = num_features * 2 if mask_supervision else num_features
+    # Distributional loss overrides mask_supervision (output is mean + log_var)
+    if loss_type == "distributional":
+        mask_supervision = False
+        n_out = num_features * 2  # first half = mean, second half = log_var
+    elif mask_supervision:
+        n_out = num_features * 2  # first half = delta, second half = mask logits
+    else:
+        n_out = num_features
 
     # --- data loader ---
     single_eval_pos = seq_len // 2
@@ -164,15 +171,17 @@ def train_counterfactual(
                 mask_supervision=_mask_supervision,
                 mask_loss_weight=_mask_loss_weight,
                 num_features=_num_features,
+                loss_type=loss_type,
             )
             total_loss = epoch_loss
             loss_history.append(epoch_loss)
 
             if verbose:
                 elapsed = time.time() - epoch_start
+                loss_label = {"mse": "MSE", "distributional": "NLL", "validity": "VAL"}.get(loss_type, "MSE")
                 print(
                     f"| epoch {epoch:3d} | time {elapsed:5.2f}s "
-                    f"| MSE loss {epoch_loss:.4f} "
+                    f"| {loss_label} loss {epoch_loss:.4f} "
                     f"| lr {scheduler.get_last_lr()[0]:.6f}"
                 )
 
@@ -194,7 +203,7 @@ def train_counterfactual(
 def _train_one_epoch(model, dl, criterion, optimizer, single_eval_pos,
                      steps_per_epoch, device, n_out,
                      mask_supervision=False, mask_loss_weight=0.5,
-                     num_features=None):
+                     num_features=None, loss_type="mse"):
     """Run one training epoch, return mean loss."""
     model.train()
     total_loss = 0.0
@@ -210,7 +219,10 @@ def _train_one_epoch(model, dl, criterion, optimizer, single_eval_pos,
         # Slice targets to query positions only
         query_targets = targets[single_eval_pos:].to(device)
 
-        if mask_supervision and num_features is not None:
+        if loss_type == "distributional":
+            # Targets are plain deltas (num_query, batch, num_features)
+            loss = _distributional_loss(output, query_targets, num_features)
+        elif mask_supervision and num_features is not None:
             loss = _composite_loss(
                 output, query_targets, num_features, mask_loss_weight,
             )
@@ -228,6 +240,26 @@ def _train_one_epoch(model, dl, criterion, optimizer, single_eval_pos,
         total_loss += loss.item()
 
     return total_loss / steps_per_epoch
+
+
+def _distributional_loss(output, query_targets, num_features):
+    """Gaussian NLL loss: model outputs mean + log_var per feature.
+
+    output shape: (num_query, batch, num_features * 2)
+      first num_features = predicted mean (delta)
+      last num_features = predicted log_variance
+
+    query_targets shape: (num_query, batch, num_features) — true deltas
+    """
+    mu = output[..., :num_features]
+    log_var = output[..., num_features:]
+
+    # Clamp log_var for numerical stability
+    log_var = log_var.clamp(-10, 10)
+
+    # Gaussian NLL: 0.5 * (log_var + (target - mu)^2 / exp(log_var))
+    nll = 0.5 * (log_var + (query_targets - mu) ** 2 / log_var.exp())
+    return nll.mean()
 
 
 def _composite_loss(output, query_targets, num_features, mask_loss_weight):

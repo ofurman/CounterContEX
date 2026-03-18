@@ -34,7 +34,8 @@ from tabpfn.experiments.configs import EXPERIMENT_REGISTRY
 
 
 def _evaluate_fixed_scm(model, fixed_dl, num_test_datasets, num_features,
-                        seq_len, save_path=None, mask_supervision=True):
+                        seq_len, save_path=None, mask_supervision=True,
+                        loss_type="mse"):
     """Evaluate a model using the same fixed SCM from training.
 
     Generates test data from the training SCM and computes SCM-based validity
@@ -81,6 +82,7 @@ def _evaluate_fixed_scm(model, fixed_dl, num_test_datasets, num_features,
     pred_deltas, true_deltas, query_x, target_labels = run_inference(
         model, test_batches, single_eval_pos, num_features, "cpu",
         mask_supervision=mask_supervision,
+        loss_type=loss_type,
     )
 
     # Pass normalization stats so SCM validity can un-normalize predictions
@@ -105,7 +107,8 @@ def _evaluate_fixed_scm(model, fixed_dl, num_test_datasets, num_features,
 
 
 def _evaluate_scm_family(model, family_dl, num_test_datasets, num_features,
-                         seq_len, save_path=None, mask_supervision=True):
+                         seq_len, save_path=None, mask_supervision=True,
+                         loss_type="mse"):
     """Evaluate a model trained on an SCM family.
 
     Generates test data from each SCM in the family, computes metrics,
@@ -152,6 +155,7 @@ def _evaluate_scm_family(model, family_dl, num_test_datasets, num_features,
     pred_deltas, true_deltas, query_x, target_labels = run_inference(
         model, test_batches, single_eval_pos, num_features, "cpu",
         mask_supervision=mask_supervision,
+        loss_type=loss_type,
     )
 
     norm_stats = (family_dl._cached_mean, family_dl._cached_std)
@@ -174,6 +178,7 @@ def _evaluate_scm_family(model, family_dl, num_test_datasets, num_features,
     ablation_results = _context_ablation(
         model, family_dl, num_features, seq_len, single_eval_pos,
         mask_supervision, num_test=min(num_test_datasets, 20),
+        loss_type=loss_type,
     )
     for key, val in ablation_results.items():
         print(f"  {key}: SCM validity = {val:.4f}")
@@ -182,7 +187,8 @@ def _evaluate_scm_family(model, family_dl, num_test_datasets, num_features,
 
 
 def _context_ablation(model, family_dl, num_features, seq_len,
-                      single_eval_pos, mask_supervision, num_test=20):
+                      single_eval_pos, mask_supervision, num_test=20,
+                      loss_type="mse"):
     """Run context ablation to verify in-context learning.
 
     Three conditions:
@@ -277,6 +283,7 @@ def _context_ablation(model, family_dl, num_features, seq_len,
         pred_deltas, true_deltas, query_x, target_labels = run_inference(
             model, batches, single_eval_pos, num_features, "cpu",
             mask_supervision=mask_supervision,
+            loss_type=loss_type,
         )
         scm_val = compute_scm_validity(
             query_x, pred_deltas, target_labels,
@@ -289,7 +296,8 @@ def _context_ablation(model, family_dl, num_features, seq_len,
 
 
 def _evaluate_diverse_scm(model, diverse_dl, num_test_datasets, num_features,
-                          seq_len, save_path=None, mask_supervision=True):
+                          seq_len, save_path=None, mask_supervision=True,
+                          loss_type="mse"):
     """Evaluate a model trained on diverse SCMs.
 
     Generates test data from new random SCMs (unseen at training time),
@@ -321,6 +329,7 @@ def _evaluate_diverse_scm(model, diverse_dl, num_test_datasets, num_features,
     pred_deltas, true_deltas, query_x, target_labels = run_inference(
         model, test_batches, single_eval_pos, num_features, "cpu",
         mask_supervision=mask_supervision,
+        loss_type=loss_type,
     )
 
     metrics = compute_metrics(
@@ -340,6 +349,7 @@ def _evaluate_diverse_scm(model, diverse_dl, num_test_datasets, num_features,
     ablation_results = _context_ablation_diverse(
         model, diverse_dl, num_features, seq_len, single_eval_pos,
         mask_supervision, num_test=min(num_test_datasets, 20),
+        loss_type=loss_type,
     )
     for key, val in ablation_results.items():
         print(f"  {key}: SCM validity = {val:.4f}")
@@ -348,7 +358,8 @@ def _evaluate_diverse_scm(model, diverse_dl, num_test_datasets, num_features,
 
 
 def _context_ablation_diverse(model, diverse_dl, num_features, seq_len,
-                              single_eval_pos, mask_supervision, num_test=20):
+                              single_eval_pos, mask_supervision, num_test=20,
+                              loss_type="mse"):
     """Run context ablation for diverse-SCM model.
 
     Three conditions:
@@ -408,6 +419,7 @@ def _context_ablation_diverse(model, diverse_dl, num_features, seq_len,
         pred_deltas, true_deltas, query_x, target_labels = run_inference(
             model, batches, single_eval_pos, num_features, "cpu",
             mask_supervision=mask_supervision,
+            loss_type=loss_type,
         )
         scm_val = compute_scm_validity(
             query_x, pred_deltas, target_labels,
@@ -466,7 +478,11 @@ def run_experiment(
     # Prepare prior kwargs from SCM config
     extra_prior_kwargs = dict(scm_config)
     use_fixed_scm = extra_prior_kwargs.pop("use_fixed_scm", False)
+    loss_type = exp_config.get("loss_type", "mse")
     use_mask_supervision = extra_prior_kwargs.pop("mask_supervision", True)
+    # Distributional/validity losses use their own output format, not mask supervision
+    if loss_type in ("distributional", "validity"):
+        use_mask_supervision = False
     num_scms = extra_prior_kwargs.pop("num_scms", None)
     use_diverse_scm = extra_prior_kwargs.pop("diverse_scm", False)
     layer_range = extra_prior_kwargs.pop("layer_range", (2, 5))
@@ -549,6 +565,7 @@ def run_experiment(
         mask_supervision=use_mask_supervision,
         mask_loss_weight=0.5,
         dataloader=diverse_dl or family_dl or fixed_dl,
+        loss_type=loss_type,
     )
 
     train_time = time.time() - start_time
@@ -586,6 +603,7 @@ def run_experiment(
             model, diverse_dl, num_test_datasets, num_features,
             exp_config["seq_len"], str(out / "example_predictions.json"),
             mask_supervision=use_mask_supervision,
+            loss_type=loss_type,
         )
     elif family_dl is not None:
         # SCM family evaluation with context ablation
@@ -593,6 +611,7 @@ def run_experiment(
             model, family_dl, num_test_datasets, num_features,
             exp_config["seq_len"], str(out / "example_predictions.json"),
             mask_supervision=use_mask_supervision,
+            loss_type=loss_type,
         )
     elif use_fixed_scm and fixed_dl is not None:
         # Generate test data from the same fixed SCM
@@ -600,6 +619,7 @@ def run_experiment(
             model, fixed_dl, num_test_datasets, num_features,
             exp_config["seq_len"], str(out / "example_predictions.json"),
             mask_supervision=use_mask_supervision,
+            loss_type=loss_type,
         )
     else:
         metrics = evaluate(

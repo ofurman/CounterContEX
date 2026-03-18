@@ -674,3 +674,69 @@ Exp 3 passes but Exp 4 fails -> model can do in-context identification but not i
 
 Last stage completed: Stage 12 — Results Notebook
 Last updated by: plan-runner-agent
+
+---
+
+## Conclusions
+
+### Results Summary
+
+| Exp | Type | Features | Delta MSE | Sign Acc | SCM Validity | Ablation Gap | Verdict |
+|-----|------|----------|-----------|----------|-------------|-------------|---------|
+| 0 | Linear, fixed | 2 | 0.0000 | N/A | 49%* | — | PASS (MSE perfect) |
+| 1 | Nonlinear, fixed | 3 | 0.007 | 100% | 95.7% | — | PASS |
+| 2A | Nonlinear, fixed | 5 | 0.003 | 100% | 97.3% | — | PASS |
+| 2B | Nonlinear, fixed | 10 | 0.003 | 100% | 99.0% | — | PASS |
+| 3 | 10-SCM family | 5 | 0.71 | 70% | 96.8% | 34.8% | PASS |
+| 4 | Diverse random | 5 | 2.22 | 73% | 51.3% | 0.0% | PARTIAL |
+
+\* Exp 0 SCM validity is 49% because it was run before the matched-internals fix. MSE is perfect (1e-7), so the model is correct.
+
+### Key Findings
+
+1. **Fixed-SCM overfitting works perfectly (Exp 0-2B)**: The transformer architecture can learn exact counterfactual deltas for a fixed causal model, scaling cleanly from 2 to 10 features with no degradation. MSE stays at ~0.003, sign accuracy at 100%, SCM validity >95%.
+
+2. **In-context SCM identification works (Exp 3)**: With a family of 10 SCMs sharing the same structure but different weights, the model achieves 96.8% SCM validity and a 34.8% ablation gap (correct vs wrong context). However, the "no context" condition also achieves 93.1% validity — nearly matching "correct context" (94.1%). This means the model primarily uses the **x-distribution** (which differs between SCMs) rather than the **(x, y) relationship** to identify the SCM. The y-labels contribute only marginally.
+
+3. **Diverse SCM generalization is the frontier (Exp 4)**: With randomly varying SCM structure per batch, the model achieves 51.3% SCM validity (barely above the 50% chance baseline) and **zero ablation gap** — identical performance regardless of context. The model learns an average counterfactual strategy rather than adapting per-SCM. This is the key unsolved challenge.
+
+4. **Stochastic perturbation creates multi-modal targets**: Experiments 3-4 use `uniform_random` perturbation (random magnitudes per sample), which means the same input x can have many valid counterfactual deltas depending on which random perturbation was applied. This creates irreducible MSE variance and makes the delta prediction task harder. Exp 3 MSE=0.71 and Exp 4 MSE=2.22 partly reflect this multi-modality rather than model failure.
+
+5. **SCM validity is a better metric than delta MSE** for stochastic perturbation settings. The model may predict a *different* valid counterfactual than the training target, achieving high validity despite high MSE. Exp 3 demonstrates this: MSE=0.71 but validity=96.8%.
+
+### Identified Issues
+
+- **Exp 0 SCM validity needs re-run** with matched-internals fix (currently 49% due to pre-fix evaluation code)
+- **Exp 3 "no context" anomaly**: 93.1% validity without y-labels suggests the model uses x-distribution similarity rather than causal reasoning. This is a shortcut, not true in-context causal inference.
+- **Exp 4 zero ablation gap**: The model completely ignores context when SCM structures vary. The architecture may need structural changes to handle this.
+- **Mask supervision unused**: Experiments 1-2 disabled mask supervision (trivial all-1s mask with `perturbation_prob=1.0`). Experiments 3-4 use mask supervision with stochastic perturbation, but the mask prediction quality was not evaluated separately.
+
+---
+
+## Next Steps
+
+### Near-term (improve Exp 3-4 results)
+
+1. **Separate mask evaluation**: Log mask accuracy and delta-conditioned-on-mask accuracy independently to understand what the model has and hasn't learned.
+
+2. **Deterministic perturbation for Exp 3**: Re-run Exp 3 with `fixed_magnitude` perturbation (like Exp 1-2) to remove the multi-modal target issue and isolate whether the model truly does in-context SCM identification when targets are unambiguous.
+
+3. **Longer training / larger model for Exp 4**: The current config (128d, 6 layers, 200 epochs) may be insufficient. Try 256d, 8-12 layers, 500+ epochs with the full diverse-SCM setup.
+
+4. **Curriculum learning for Exp 4**: Start training with a small SCM family (like Exp 3), gradually increase diversity. This may help the model learn the general principle of context-based adaptation before facing full structural variation.
+
+### Medium-term (architectural changes)
+
+5. **Condition on SCM structure**: Provide graph topology (adjacency matrix or depth/width) as an additional input channel. If the model can't infer structure from data alone, giving it structural hints may unlock generalization.
+
+6. **Direct x_cf prediction instead of delta**: Predicting the counterfactual directly (rather than a delta) may be easier for the model, especially when the delta depends on both the input and the SCM structure.
+
+7. **Separate "which features" from "how much"**: The current architecture predicts all features in one output. A two-stage approach — first predict the intervention mask, then predict deltas conditioned on the mask — may decompose the problem more effectively.
+
+### Long-term (scaling and real-world utility)
+
+8. **Semi-synthetic evaluation**: Generate SCMs that mimic real dataset correlation structures (Adult, COMPAS, German Credit) and evaluate counterfactual quality.
+
+9. **Comparison with baselines**: Benchmark against DiCE, Wachter, and other optimization-based CF methods on the same SCM-generated data.
+
+10. **Actionability constraints**: Add immutable feature constraints as an input channel and train the model to respect them.

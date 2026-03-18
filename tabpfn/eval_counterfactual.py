@@ -120,7 +120,8 @@ def generate_test_data(num_datasets: int, seq_len: int, num_features: int,
 @torch.no_grad()
 def run_inference(model: TransformerModel, test_batches: list,
                   single_eval_pos: int, num_features: int,
-                  device: str = "cpu", mask_supervision: bool = True):
+                  device: str = "cpu", mask_supervision: bool = True,
+                  loss_type: str = "mse"):
     """Run inference on test data.
 
     When mask_supervision=True, the model outputs 2*num_features channels.
@@ -153,7 +154,12 @@ def run_inference(model: TransformerModel, test_batches: list,
         data = (None, x, y)
         output = model(data, single_eval_pos=single_eval_pos)
 
-        if mask_supervision:
+        if loss_type == "distributional":
+            # Distributional output: first num_features = mean, last = log_var
+            pred_delta = output[..., :num_features]
+            # log_var available as output[..., num_features:] for analysis
+            query_true_delta = target_y[single_eval_pos:]
+        elif mask_supervision:
             # Split output into delta predictions and mask logits
             pred_delta = output[..., :num_features]
             pred_mask_logits = output[..., num_features:]

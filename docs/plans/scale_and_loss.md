@@ -313,10 +313,10 @@ This requires the training loop to have access to the SCM and its internals for 
 | # | Stage | Status | Notes | Updated |
 |---|-------|--------|-------|---------|
 | 1 | Scale Up Model | DONE | Added MEDIUM_MODEL base, EXP3S/EXP4S configs (~3.3M params, 4x scale-up), verified training | 2026-03-18 |
-| 2 | Distributional Loss (NLL) | PENDING | | |
+| 2 | Distributional Loss (NLL) | DONE | Added _distributional_loss(), loss_type param through training/eval pipeline, exp3s_dist/exp4s_dist configs | 2026-03-18 |
 | 3 | Validity-Focused Loss | PENDING | | |
 | 4 | Run Comparative Experiments | PENDING | | |
 | 5 | Comparison Notebook | PENDING | | |
 
-Last stage completed: Stage 1 — Scale Up Model
+Last stage completed: Stage 2 — Distributional Loss (NLL)
 Last updated by: plan-runner-agent

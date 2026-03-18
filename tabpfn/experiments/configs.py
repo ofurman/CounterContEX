@@ -284,6 +284,16 @@ EXP4S_SCM = dict(EXP4_SCM)  # same SCM config
 
 EXP4S_CRITERIA = dict(scm_validity=0.40, context_ablation_gap=0.10)
 
+# ---------- Distributional Loss Variants ----------
+
+EXP3S_DIST_CONFIG = dict(**EXP3S_CONFIG, loss_type="distributional")
+EXP3S_DIST_SCM = dict(EXP3S_SCM)
+EXP3S_DIST_CRITERIA = dict(EXP3S_CRITERIA)
+
+EXP4S_DIST_CONFIG = dict(**EXP4S_CONFIG, loss_type="distributional")
+EXP4S_DIST_SCM = dict(EXP4S_SCM)
+EXP4S_DIST_CRITERIA = dict(EXP4S_CRITERIA)
+
 # Registry for CLI lookup
 EXPERIMENT_REGISTRY = {
     "exp0": (EXP0_CONFIG, EXP0_SCM, EXP0_CRITERIA),
@@ -294,4 +304,6 @@ EXPERIMENT_REGISTRY = {
     "exp4": (EXP4_CONFIG, EXP4_SCM, EXP4_CRITERIA),
     "exp3s": (EXP3S_CONFIG, EXP3S_SCM, EXP3S_CRITERIA),
     "exp4s": (EXP4S_CONFIG, EXP4S_SCM, EXP4S_CRITERIA),
+    "exp3s_dist": (EXP3S_DIST_CONFIG, EXP3S_DIST_SCM, EXP3S_DIST_CRITERIA),
+    "exp4s_dist": (EXP4S_DIST_CONFIG, EXP4S_DIST_SCM, EXP4S_DIST_CRITERIA),
 }
