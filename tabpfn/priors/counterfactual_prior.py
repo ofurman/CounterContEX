@@ -511,3 +511,146 @@ class FixedSCMDataLoader:
 
     def __len__(self):
         return self.num_steps
+
+
+class SCMFamilyDataLoader:
+    """Data loader that pre-creates a family of N SCMs and randomly selects one per batch element.
+
+    Used for in-context learning experiments where the model must identify
+    which SCM generated the context data and predict correct counterfactuals.
+
+    At initialization:
+    1. Builds N SCMs, each with its own fixed node permutation
+    2. Calibrates a FixedThresholdBinarize per SCM from calibration data
+    3. Computes shared normalization stats across all SCMs
+
+    Every batch randomly assigns each element to one of the N SCMs.
+    """
+
+    def __init__(
+        self,
+        num_features: int,
+        seq_len: int,
+        batch_size: int,
+        num_scms: int = 10,
+        hyperparameters: dict = None,
+        device: str = "cpu",
+        single_eval_pos: int = 64,
+        num_outputs: int = 1,
+        num_steps: int = 100,
+        calibration_size: int = 2000,
+    ):
+        import random as pyrandom
+
+        self.num_features = num_features
+        self.seq_len = seq_len
+        self.batch_size = batch_size
+        self.num_scms = num_scms
+        self.hyperparameters = hyperparameters or {}
+        self.device = device
+        self.single_eval_pos = single_eval_pos
+        self._n_outputs = num_outputs
+        self.num_steps = num_steps
+        self.return_internals = False
+
+        # Build config
+        config = dict(get_default_counterfactual_config())
+        config.update(self.hyperparameters)
+
+        gen = CounterfactualSCMGenerator(config, device=device)
+
+        # Pre-generate family of SCMs
+        self.scms = []
+        self.fixed_perms = []
+        self.class_assigners = []
+
+        all_x_cal = []
+        for i in range(num_scms):
+            scm = gen._sample_scm(seq_len, num_features, self._n_outputs)
+
+            # Get fixed node permutation
+            with torch.no_grad():
+                _, y_cal, _, fixed_perm = scm.forward_with_internals_fixed_mapping()
+
+            # Calibrate class boundary
+            with torch.no_grad():
+                y_values = []
+                x_values = []
+                remaining = calibration_size
+                while remaining > 0:
+                    chunk = min(remaining, seq_len)
+                    x_chunk, y_chunk, _, _ = scm.forward_with_internals_fixed_mapping(
+                        fixed_perm
+                    )
+                    y_values.append(y_chunk.squeeze(-1) if y_chunk.dim() > 2 else y_chunk)
+                    x_values.append(x_chunk)
+                    remaining -= chunk
+                y_all = torch.cat(y_values, dim=0)
+                threshold = torch.median(y_all).item()
+
+                x_cal = torch.cat(x_values, dim=0)
+                all_x_cal.append(x_cal)
+
+            self.scms.append(scm)
+            self.fixed_perms.append(fixed_perm)
+            self.class_assigners.append(FixedThresholdBinarize(threshold))
+
+        # Compute shared normalization stats across all SCMs
+        all_x = torch.cat(all_x_cal, dim=0)  # (total, 1, num_features)
+        self._cached_mean = all_x.mean(dim=0, keepdim=True)  # (1, 1, num_features)
+        self._cached_std = all_x.std(dim=0, keepdim=True).clamp(min=1e-6)
+
+        print(f"  SCMFamilyDataLoader: {num_scms} SCMs initialized")
+
+    def __iter__(self):
+        import random as pyrandom
+
+        for _ in range(self.num_steps):
+            # Each batch element gets a randomly selected SCM
+            all_x, all_y, all_target_y = [], [], []
+            all_internals = [] if self.return_internals else None
+            scm_indices = []
+
+            for b in range(self.batch_size):
+                scm_idx = pyrandom.randint(0, self.num_scms - 1)
+                scm_indices.append(scm_idx)
+
+                result = get_batch_fixed_scm(
+                    batch_size=1,
+                    seq_len=self.seq_len,
+                    num_features=self.num_features,
+                    hyperparameters=self.hyperparameters,
+                    device=self.device,
+                    single_eval_pos=self.single_eval_pos,
+                    num_outputs=self._n_outputs,
+                    scm=self.scms[scm_idx],
+                    fixed_perm=self.fixed_perms[scm_idx],
+                    class_assigner=self.class_assigners[scm_idx],
+                    cached_norm_stats=(self._cached_mean, self._cached_std),
+                    return_internals=self.return_internals,
+                )
+                if self.return_internals:
+                    x, y, target_y, batch_int = result
+                    all_internals.extend(batch_int)
+                else:
+                    x, y, target_y = result
+
+                all_x.append(x)
+                all_y.append(y)
+                all_target_y.append(target_y)
+
+            # Concatenate along batch dimension
+            x = torch.cat(all_x, dim=1)  # (seq_len, batch_size, nf)
+            y = torch.cat(all_y, dim=1)  # (seq_len, batch_size)
+            target_y = torch.cat(all_target_y, dim=1)  # (seq_len, batch_size, channels)
+
+            if self.return_internals:
+                # Attach SCM index to each internals dict
+                for i, internals in enumerate(all_internals):
+                    internals["scm_idx"] = scm_indices[i]
+                yield (None, x, y), target_y, self.single_eval_pos, all_internals
+            else:
+                yield (None, x, y), target_y, self.single_eval_pos
+
+    def __len__(self):
+        return self.num_steps

@@ -27,7 +27,7 @@ from tabpfn.eval_counterfactual import (
     save_examples,
     EvalMetrics,
 )
-from tabpfn.priors.counterfactual_prior import FixedSCMDataLoader
+from tabpfn.priors.counterfactual_prior import FixedSCMDataLoader, SCMFamilyDataLoader
 from tabpfn.experiments.configs import EXPERIMENT_REGISTRY
 
 
@@ -102,6 +102,190 @@ def _evaluate_fixed_scm(model, fixed_dl, num_test_datasets, num_features,
     return metrics
 
 
+def _evaluate_scm_family(model, family_dl, num_test_datasets, num_features,
+                         seq_len, save_path=None, mask_supervision=True):
+    """Evaluate a model trained on an SCM family.
+
+    Generates test data from each SCM in the family, computes metrics,
+    and runs context ablation to verify in-context learning.
+    """
+    from tabpfn.eval_counterfactual import compute_scm_validity
+
+    single_eval_pos = seq_len // 2
+
+    # Generate test batches — each batch element uses a random SCM from family
+    test_dl = SCMFamilyDataLoader(
+        num_features=num_features,
+        seq_len=seq_len,
+        batch_size=1,
+        num_scms=family_dl.num_scms,
+        hyperparameters=family_dl.hyperparameters,
+        device="cpu",
+        single_eval_pos=single_eval_pos,
+        num_steps=num_test_datasets,
+    )
+    # Share the same SCM family
+    test_dl.scms = family_dl.scms
+    test_dl.fixed_perms = family_dl.fixed_perms
+    test_dl.class_assigners = family_dl.class_assigners
+    test_dl._cached_mean = family_dl._cached_mean
+    test_dl._cached_std = family_dl._cached_std
+
+    test_dl.return_internals = True
+    test_batches = []
+    scm_data_list = []
+    for data, target_y, sep, batch_internals in test_dl:
+        style, x, y = data
+        test_batches.append((x, y, target_y))
+        for internals in batch_internals:
+            scm_idx = internals["scm_idx"]
+            scm_data_list.append({
+                "scm": family_dl.scms[scm_idx],
+                "internals": internals,
+                "class_assigner": family_dl.class_assigners[scm_idx],
+            })
+
+    print(f"Generated {len(test_batches)} test batches from SCM family ({family_dl.num_scms} SCMs)")
+
+    pred_deltas, true_deltas, query_x, target_labels = run_inference(
+        model, test_batches, single_eval_pos, num_features, "cpu",
+        mask_supervision=mask_supervision,
+    )
+
+    norm_stats = (family_dl._cached_mean, family_dl._cached_std)
+
+    metrics = compute_metrics(
+        pred_deltas, true_deltas, query_x, target_labels,
+        num_features, "cpu",
+        scm_data_list=scm_data_list,
+        single_eval_pos=single_eval_pos,
+        norm_stats=norm_stats,
+    )
+    metrics.num_test_datasets = num_test_datasets
+
+    print_report(metrics)
+    if save_path:
+        save_examples(pred_deltas, true_deltas, query_x, target_labels, save_path)
+
+    # --- Context ablation diagnostic ---
+    print("\n--- Context Ablation Diagnostic ---")
+    ablation_results = _context_ablation(
+        model, family_dl, num_features, seq_len, single_eval_pos,
+        mask_supervision, num_test=min(num_test_datasets, 20),
+    )
+    for key, val in ablation_results.items():
+        print(f"  {key}: SCM validity = {val:.4f}")
+
+    return metrics, ablation_results
+
+
+def _context_ablation(model, family_dl, num_features, seq_len,
+                      single_eval_pos, mask_supervision, num_test=20):
+    """Run context ablation to verify in-context learning.
+
+    Three conditions:
+    1. Correct context: context from same SCM as query (normal)
+    2. Wrong context: context from a different SCM than query
+    3. No context: zero out context y values
+
+    Returns dict of condition -> SCM validity.
+    """
+    import random as pyrandom
+    from tabpfn.eval_counterfactual import compute_scm_validity
+    from tabpfn.priors.counterfactual_prior import get_batch_fixed_scm
+
+    results = {}
+
+    # Generate test batches with correct context
+    correct_batches = []
+    correct_scm_data = []
+    wrong_batches = []
+    wrong_scm_data = []
+    no_ctx_batches = []
+    no_ctx_scm_data = []
+
+    for t in range(num_test):
+        # Pick a query SCM
+        q_idx = pyrandom.randint(0, family_dl.num_scms - 1)
+        # Pick a different SCM for wrong context
+        w_idx = (q_idx + 1) % family_dl.num_scms
+
+        # Generate data from the query SCM
+        result = get_batch_fixed_scm(
+            batch_size=1,
+            seq_len=seq_len,
+            num_features=num_features,
+            hyperparameters=family_dl.hyperparameters,
+            device="cpu",
+            single_eval_pos=single_eval_pos,
+            num_outputs=family_dl._n_outputs,
+            scm=family_dl.scms[q_idx],
+            fixed_perm=family_dl.fixed_perms[q_idx],
+            class_assigner=family_dl.class_assigners[q_idx],
+            cached_norm_stats=(family_dl._cached_mean, family_dl._cached_std),
+            return_internals=True,
+        )
+        x, y, target_y, batch_int = result
+        scm_entry = {
+            "scm": family_dl.scms[q_idx],
+            "internals": batch_int[0],
+            "class_assigner": family_dl.class_assigners[q_idx],
+        }
+
+        # 1. Correct context (normal)
+        correct_batches.append((x, y, target_y))
+        correct_scm_data.append(scm_entry)
+
+        # 2. Wrong context — replace context y with y from different SCM
+        x_wrong = x.clone()
+        y_wrong = y.clone()
+        result_w = get_batch_fixed_scm(
+            batch_size=1,
+            seq_len=seq_len,
+            num_features=num_features,
+            hyperparameters=family_dl.hyperparameters,
+            device="cpu",
+            single_eval_pos=single_eval_pos,
+            num_outputs=family_dl._n_outputs,
+            scm=family_dl.scms[w_idx],
+            fixed_perm=family_dl.fixed_perms[w_idx],
+            class_assigner=family_dl.class_assigners[w_idx],
+            cached_norm_stats=(family_dl._cached_mean, family_dl._cached_std),
+        )
+        x_w, y_w, _ = result_w
+        # Replace context portion with wrong SCM's data
+        x_wrong[:single_eval_pos] = x_w[:single_eval_pos]
+        y_wrong[:single_eval_pos] = y_w[:single_eval_pos]
+        wrong_batches.append((x_wrong, y_wrong, target_y))
+        wrong_scm_data.append(scm_entry)
+
+        # 3. No context — zero out context y
+        y_no = y.clone()
+        y_no[:single_eval_pos] = 0.0
+        no_ctx_batches.append((x, y_no, target_y))
+        no_ctx_scm_data.append(scm_entry)
+
+    norm_stats = (family_dl._cached_mean, family_dl._cached_std)
+
+    for name, batches, scm_data in [
+        ("correct_context", correct_batches, correct_scm_data),
+        ("wrong_context", wrong_batches, wrong_scm_data),
+        ("no_context", no_ctx_batches, no_ctx_scm_data),
+    ]:
+        pred_deltas, true_deltas, query_x, target_labels = run_inference(
+            model, batches, single_eval_pos, num_features, "cpu",
+            mask_supervision=mask_supervision,
+        )
+        scm_val = compute_scm_validity(
+            query_x, pred_deltas, target_labels,
+            scm_data, single_eval_pos, num_features,
+            norm_stats=norm_stats,
+        )
+        results[name] = scm_val
+
+    return results
+
+
 def run_experiment(
     exp_config: dict,
     scm_config: dict,
@@ -151,10 +335,27 @@ def run_experiment(
     extra_prior_kwargs = dict(scm_config)
     use_fixed_scm = extra_prior_kwargs.pop("use_fixed_scm", False)
     use_mask_supervision = extra_prior_kwargs.pop("mask_supervision", True)
+    num_scms = extra_prior_kwargs.pop("num_scms", None)
 
-    # Build fixed-SCM data loader if requested
+    # Build data loader based on config
     fixed_dl = None
-    if use_fixed_scm:
+    family_dl = None
+    if num_scms is not None and num_scms > 1:
+        # SCM family mode (Exp 3+)
+        hp = dict(extra_prior_kwargs)
+        hp["mask_supervision"] = use_mask_supervision
+        family_dl = SCMFamilyDataLoader(
+            num_features=num_features,
+            seq_len=exp_config["seq_len"],
+            batch_size=exp_config["batch_size"],
+            num_scms=num_scms,
+            hyperparameters=hp,
+            device="cpu",
+            single_eval_pos=exp_config["seq_len"] // 2,
+            num_steps=exp_config["steps_per_epoch"],
+        )
+        print(f"  Using SCMFamilyDataLoader ({num_scms} frozen SCMs)")
+    elif use_fixed_scm:
         hp = dict(extra_prior_kwargs)
         hp["mask_supervision"] = use_mask_supervision
         fixed_dl = FixedSCMDataLoader(
@@ -196,7 +397,7 @@ def run_experiment(
         epoch_callback=epoch_callback,
         mask_supervision=use_mask_supervision,
         mask_loss_weight=0.5,
-        dataloader=fixed_dl,
+        dataloader=family_dl or fixed_dl,
     )
 
     train_time = time.time() - start_time
@@ -227,7 +428,15 @@ def run_experiment(
 
     # ---- Evaluation ----
     print(f"\nEvaluating with {num_test_datasets} test datasets...")
-    if use_fixed_scm and fixed_dl is not None:
+    ablation_results = None
+    if family_dl is not None:
+        # SCM family evaluation with context ablation
+        metrics, ablation_results = _evaluate_scm_family(
+            model, family_dl, num_test_datasets, num_features,
+            exp_config["seq_len"], str(out / "example_predictions.json"),
+            mask_supervision=use_mask_supervision,
+        )
+    elif use_fixed_scm and fixed_dl is not None:
         # Generate test data from the same fixed SCM
         metrics = _evaluate_fixed_scm(
             model, fixed_dl, num_test_datasets, num_features,
@@ -245,10 +454,6 @@ def run_experiment(
             mask_supervision=True,
             with_scm_validity=with_scm_validity,
         )
-
-    # ---- Compute additional metrics ----
-    # Sign accuracy: fraction of deltas with correct sign
-    # (computed from example predictions if available)
 
     # ---- Assemble results ----
     results = {
@@ -270,6 +475,8 @@ def run_experiment(
         },
         "training_log": training_log,
     }
+    if ablation_results is not None:
+        results["context_ablation"] = ablation_results
 
     # Save results
     results_path = out / "results.json"
@@ -299,6 +506,10 @@ def run_experiment(
         print(f"  SCM validity:      {metrics.scm_validity:.4f}")
     if metrics.zero_feature_accuracy >= 0:
         print(f"  Zero-feat acc:     {metrics.zero_feature_accuracy:.4f}")
+    if ablation_results is not None:
+        print(f"  Context ablation:")
+        for key, val in ablation_results.items():
+            print(f"    {key}: {val:.4f}")
     print(f"{'=' * 60}")
 
     return results
@@ -403,6 +614,16 @@ def main():
         passed = converge_epoch <= criteria["max_epochs_to_converge"]
         status = "PASS" if passed else "FAIL"
         print(f"  [{status}] Converged at epoch {converge_epoch} <= {criteria['max_epochs_to_converge']}")
+        all_passed = all_passed and passed
+
+    if "context_ablation_gap" in criteria and "context_ablation" in results:
+        ablation = results["context_ablation"]
+        correct = ablation.get("correct_context", 0)
+        wrong = ablation.get("wrong_context", 0)
+        gap = correct - wrong
+        passed = gap >= criteria["context_ablation_gap"]
+        status = "PASS" if passed else "FAIL"
+        print(f"  [{status}] Context ablation gap: {gap:.4f} >= {criteria['context_ablation_gap']}")
         all_passed = all_passed and passed
 
     overall = "PASSED" if all_passed else "FAILED"

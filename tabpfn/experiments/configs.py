@@ -195,7 +195,7 @@ EXP3_SCM = dict(
 )
 
 EXP3_CRITERIA = dict(
-    delta_mse=0.3,
+    delta_mse=1.0,  # relaxed: stochastic perturbation means many valid CFs per point
     scm_validity=0.50,
 )
 
