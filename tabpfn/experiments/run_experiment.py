@@ -297,6 +297,8 @@ def run_experiment(
         print(f"  Sign accuracy:     {metrics.sign_accuracy:.4f}")
     if metrics.scm_validity >= 0:
         print(f"  SCM validity:      {metrics.scm_validity:.4f}")
+    if metrics.zero_feature_accuracy >= 0:
+        print(f"  Zero-feat acc:     {metrics.zero_feature_accuracy:.4f}")
     print(f"{'=' * 60}")
 
     return results
@@ -375,6 +377,13 @@ def main():
         passed = val >= criteria["scm_validity"]
         status = "PASS" if passed else "FAIL"
         print(f"  [{status}] SCM validity: {val:.4f} >= {criteria['scm_validity']}")
+        all_passed = all_passed and passed
+
+    if "zero_feature_accuracy" in criteria:
+        val = metrics.get("zero_feature_accuracy", -1)
+        passed = val >= criteria["zero_feature_accuracy"]
+        status = "PASS" if passed else "FAIL"
+        print(f"  [{status}] Zero-feat acc: {val:.4f} >= {criteria['zero_feature_accuracy']}")
         all_passed = all_passed and passed
 
     if "loss_reduction" in criteria and training["loss_reduction"] is not None:

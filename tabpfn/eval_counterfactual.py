@@ -47,6 +47,7 @@ class EvalMetrics:
     num_query_points: int
     scm_validity: float = -1.0  # SCM-based validity (-1 = not computed)
     sign_accuracy: float = -1.0  # Fraction of deltas with correct sign (-1 = not computed)
+    zero_feature_accuracy: float = -1.0  # Fraction of unperturbed features with near-zero pred delta
 
 
 def build_model(num_features: int, emsize: int = 64, nhead: int = 2,
@@ -371,7 +372,15 @@ def compute_metrics(pred_deltas: Tensor, true_deltas: Tensor,
     else:
         sign_acc = -1.0
 
-    # 6. SCM validity (ground-truth, if SCM data available)
+    # 6. Zero-feature accuracy: for unperturbed features (true delta ~ 0),
+    #    what fraction has near-zero predicted delta?
+    zero_mask = true_deltas.abs() < 1e-6  # unperturbed features
+    if zero_mask.any():
+        zero_feat_acc = (pred_deltas[zero_mask].abs() < 0.1).float().mean().item()
+    else:
+        zero_feat_acc = -1.0
+
+    # 7. SCM validity (ground-truth, if SCM data available)
     scm_val = -1.0
     if scm_data_list is not None and single_eval_pos is not None:
         scm_val = compute_scm_validity(
@@ -390,6 +399,7 @@ def compute_metrics(pred_deltas: Tensor, true_deltas: Tensor,
         num_query_points=N,
         scm_validity=scm_val,
         sign_accuracy=sign_acc,
+        zero_feature_accuracy=zero_feat_acc,
     )
 
 
@@ -407,6 +417,8 @@ def print_report(metrics: EvalMetrics):
         print(f"  Sign accuracy:     {metrics.sign_accuracy:.4f}")
     if metrics.scm_validity >= 0:
         print(f"  SCM validity:      {metrics.scm_validity:.4f}")
+    if metrics.zero_feature_accuracy >= 0:
+        print(f"  Zero-feat acc:     {metrics.zero_feature_accuracy:.4f}")
     print(f"  Proximity (L2):    {metrics.proximity_mean:.4f} +/- {metrics.proximity_std:.4f}")
     print(f"  Sparsity:          {metrics.sparsity:.4f}")
     print("=" * 60)
