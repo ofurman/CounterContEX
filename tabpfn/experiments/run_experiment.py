@@ -726,9 +726,34 @@ def main():
         action="store_true",
         help="Skip SCM-based validity evaluation (faster)",
     )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=None,
+        help="Override number of training epochs (default: use config value)",
+    )
+    parser.add_argument(
+        "--steps-per-epoch",
+        type=int,
+        default=None,
+        help="Override steps per epoch (default: use config value)",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=None,
+        help="Override batch size (default: use config value)",
+    )
     args = parser.parse_args()
 
     exp_config, scm_config, criteria = EXPERIMENT_REGISTRY[args.experiment]
+    exp_config = dict(exp_config)  # copy so we don't mutate the registry
+    if args.epochs is not None:
+        exp_config["epochs"] = args.epochs
+    if args.steps_per_epoch is not None:
+        exp_config["steps_per_epoch"] = args.steps_per_epoch
+    if args.batch_size is not None:
+        exp_config["batch_size"] = args.batch_size
     output_dir = args.output_dir or f"docs/results/{args.experiment}"
 
     results = run_experiment(

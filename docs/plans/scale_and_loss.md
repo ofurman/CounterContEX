@@ -315,8 +315,8 @@ This requires the training loop to have access to the SCM and its internals for 
 | 1 | Scale Up Model | DONE | Added MEDIUM_MODEL base, EXP3S/EXP4S configs (~3.3M params, 4x scale-up), verified training | 2026-03-18 |
 | 2 | Distributional Loss (NLL) | DONE | Added _distributional_loss(), loss_type param through training/eval pipeline, exp3s_dist/exp4s_dist configs | 2026-03-18 |
 | 3 | Validity-Focused Loss | DONE | Added differentiable_forward to _MLP, _validity_loss with SCM forward+proximity+sparsity, exp3s_val/exp4s_val configs | 2026-03-18 |
-| 4 | Run Comparative Experiments | PENDING | | |
+| 4 | Run Comparative Experiments | DONE | All 6 experiments completed (exp3s/exp4s × mse/dist/val). Added CLI overrides (--epochs, --steps-per-epoch, --batch-size). Results in docs/results/ | 2026-03-18 |
 | 5 | Comparison Notebook | PENDING | | |
 
-Last stage completed: Stage 3 — Validity-Focused Loss
+Last stage completed: Stage 4 — Run Comparative Experiments
 Last updated by: plan-runner-agent
