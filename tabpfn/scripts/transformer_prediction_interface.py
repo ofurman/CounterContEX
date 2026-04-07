@@ -219,7 +219,10 @@ class TabPFNClassifier(BaseEstimator, ClassifierMixin):
         """
         if self.no_grad:
             # Check that X and y have correct shape
-            X, y = check_X_y(X, y, force_all_finite=False)
+            try:
+                X, y = check_X_y(X, y, force_all_finite=False)
+            except TypeError:
+                X, y = check_X_y(X, y, ensure_all_finite=False)
         # Store the classes seen during fit
         y = self._validate_targets(y)
         self.label_encoder = LabelEncoder()
@@ -254,7 +257,10 @@ class TabPFNClassifier(BaseEstimator, ClassifierMixin):
 
         # Input validation
         if self.no_grad:
-            X = check_array(X, force_all_finite=False)
+            try:
+                X = check_array(X, force_all_finite=False)
+            except TypeError:
+                X = check_array(X, ensure_all_finite=False)
             X_full = np.concatenate([self.X_, X], axis=0)
             X_full = torch.tensor(X_full, device=self.device).float().unsqueeze(1)
         else:
@@ -525,10 +531,16 @@ def transformer_predict(model, eval_xs, eval_ys, eval_position,
             warnings.filterwarnings("ignore",
                                     message="torch.cuda.amp.autocast only affects CUDA ops, but CUDA is not available.  Disabling.")
             if device == 'cpu':
-                output_batch = checkpoint(predict, batch_input, batch_label, style_, softmax_temperature_, True)
+                output_batch = checkpoint(
+                    predict, batch_input, batch_label, style_, softmax_temperature_, True,
+                    use_reentrant=False
+                )
             else:
                 with torch.cuda.amp.autocast(enabled=fp16_inference):
-                    output_batch = checkpoint(predict, batch_input, batch_label, style_, softmax_temperature_, True)
+                    output_batch = checkpoint(
+                        predict, batch_input, batch_label, style_, softmax_temperature_, True,
+                        use_reentrant=False
+                    )
         outputs += [output_batch]
     #print('MODEL INFERENCE TIME ('+str(batch_input.device)+' vs '+device+', '+str(fp16_inference)+')', str(time.time()-start))
 
