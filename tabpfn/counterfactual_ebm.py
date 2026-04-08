@@ -127,8 +127,6 @@ def generate_counterfactuals(
     clf_proba_fn=None,
     config=None,
     return_trajectory=False,
-    feature_min=None,
-    feature_max=None,
 ):
     if clf_proba_fn is None:
         raise ValueError("`clf_proba_fn` is mandatory for counterfactual generation.")
@@ -142,15 +140,6 @@ def generate_counterfactuals(
     x_0 = _to_tensor(x_0)
     single_input = x_0.ndim == 1
     x_0 = _ensure_2d(x_0)
-    train_x = _to_tensor(tabpfn.X_)
-    if feature_min is None:
-        feature_min = train_x.min(dim=0).values
-    else:
-        feature_min = _to_tensor(feature_min, dtype=x_0.dtype)
-    if feature_max is None:
-        feature_max = train_x.max(dim=0).values
-    else:
-        feature_max = _to_tensor(feature_max, dtype=x_0.dtype)
 
     x = x_0.clone() + config.init_noise_std * torch.randn_like(x_0)
     energy_history = []
@@ -191,8 +180,6 @@ def generate_counterfactuals(
             lr = config.sgld_lr * (config.sgld_lr_decay ** step)
             noise = config.sgld_noise * (2.0 * lr) ** 0.5 * torch.randn_like(x)
             x = x - lr * grad + noise
-            x = torch.maximum(x, feature_min)
-            x = torch.minimum(x, feature_max)
         if return_trajectory and (step + 1) % 10 == 0:
             trajectory.append(x_current.numpy().copy())
 
