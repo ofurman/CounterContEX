@@ -102,7 +102,7 @@ Baselines from cel for HELOC/MOONS (PPCEF, DiCE, etc.) are recorded in `resource
 | # | Stage | Status | Notes | Commit |
 |---|-------|--------|-------|--------|
 | 1 | [Environment & offline checkpoint setup](stages/01-environment-offline-setup.md) | DONE | TabPFN v2 (no-license); cel vendored editable; smoke test passed offline | 2868713 |
-| 2 | [Data, discriminator & metrics harness](stages/02-data-discriminator-metrics.md) | DONE | HELOC 23-feat/MOONS 2-feat loaded; 6-feature immutable split; sklearn LR oracle (MOONS 87%, HELOC 72%); direct metric computation (no orchestrator stub needed) | |
+| 2 | [Data, discriminator & metrics harness](stages/02-data-discriminator-metrics.md) | DONE | HELOC 23-feat/MOONS 2-feat loaded; 6-feature immutable split; sklearn LR oracle (MOONS 87%, HELOC 72%); direct metric computation (no orchestrator stub needed) | 57b18d0 |
 | 3 | [Conditional density sampler wrapper](stages/03-conditional-density-sampler.md) | PENDING | | |
 | 4 | [Experiment 1: single-feature estimation](stages/04-exp1-single-feature.md) | PENDING | | |
 | 5 | [Experiment 2: counterfactual generation](stages/05-exp2-counterfactual-generation.md) | PENDING | | |
