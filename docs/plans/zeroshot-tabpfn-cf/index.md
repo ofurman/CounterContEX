@@ -105,7 +105,7 @@ Baselines from cel for HELOC/MOONS (PPCEF, DiCE, etc.) are recorded in `resource
 | 2 | [Data, discriminator & metrics harness](stages/02-data-discriminator-metrics.md) | DONE | HELOC 23-feat/MOONS 2-feat loaded; 6-feature immutable split; sklearn LR oracle (MOONS 87%, HELOC 72%); direct metric computation (no orchestrator stub needed) | 57b18d0 |
 | 3 | [Conditional density sampler wrapper](stages/03-conditional-density-sampler.md) | DONE | ConditionalDensitySampler: set_context, impute_masked, sample_feature; explicit v2 model_path fix in get_models(); 4 tests all PASS (MSE 0.0036 vs 0.2014 baseline) | f86e488 |
 | 4 | [Experiment 1: single-feature estimation](stages/04-exp1-single-feature.md) | DONE | MOONS: WEAK (1/2 beats marginal, calib 0.70); HELOC: PASS (15/23=65% beats marginal, calib 0.60). Overall gate: PASS — proceed to Stage 5 | ae0e555 |
-| 5 | [Experiment 2: counterfactual generation](stages/05-exp2-counterfactual-generation.md) | DONE | MOONS: validity=0.85 LOF=1.055 true_action=1.0; HELOC: validity=0.66 LOF=2.5B (66% OOB extrapolation) true_action=1.0. Validity targets met; HELOC plausibility poor due to sparse conditioning (17/23 features masked). Cel baselines deferred to Stage 6. | |
+| 5 | [Experiment 2: counterfactual generation](stages/05-exp2-counterfactual-generation.md) | DONE | MOONS: validity=0.85 LOF=1.055 true_action=1.0; HELOC: validity=0.66 LOF=2.5B (66% OOB extrapolation) true_action=1.0. Validity targets met; HELOC plausibility poor due to sparse conditioning (17/23 features masked). Cel baselines deferred to Stage 6. | 2525e27 |
 | 6 | [Refinement & results report](stages/06-refinement-and-report.md) | PENDING | | |
 
 Statuses: `PENDING` -> `IN_PROGRESS` -> `DONE` | `BLOCKED` | `SKIPPED`
