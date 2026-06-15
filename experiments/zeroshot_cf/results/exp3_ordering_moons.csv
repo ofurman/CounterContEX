@@ -1,0 +1,3 @@
+ordering,actionable_set,n_masked,validity,lof_scores_cf,sparsity,true_actionability,proximity_l2_jaccard,frac_oob,runtime_s
+random,full,2,0.96,1.0713647114514058,1.0,1.0,0.608849383073192,0.0,5.572621583007276
+dag,full,2,0.93,1.035239032516965,1.0,1.0,0.5872672055776195,0.0,1.7594999999855645

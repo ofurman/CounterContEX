@@ -13,12 +13,36 @@ from __future__ import annotations
 
 import random
 import time
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 import torch
 
 from tabpfn_extensions.unsupervised import TabPFNUnsupervisedModel
+
+
+def build_chain_dag(
+    ordered_actionable: List[int],
+    immutable_idx: List[int],
+    y_idx: int,
+) -> Dict[int, List[int]]:
+    """Build a chain DAG for ordered autoregressive CF generation.
+
+    Each actionable feature a_i gets parents: [y_idx] + immutable_idx + earlier actionables.
+    Y and immutables are roots (not in the dict) — observed columns skipped by impute().
+
+    Args:
+        ordered_actionable: Actionable column indices in desired generation order.
+        immutable_idx: Immutable column indices (always observed parents).
+        y_idx: Augmented index of the appended Y column (= n_original_features).
+
+    Returns:
+        DAG dict compatible with TabPFNUnsupervisedModel.impute(dag=...).
+    """
+    dag: Dict[int, List[int]] = {}
+    for i, a in enumerate(ordered_actionable):
+        dag[a] = [y_idx] + list(immutable_idx) + list(ordered_actionable[:i])
+    return dag
 
 
 class ConditionalDensitySampler:
@@ -141,6 +165,7 @@ class ConditionalDensitySampler:
         X_query: np.ndarray,
         mask_cols: List[int],
         fixed_target: Optional[int] = None,
+        dag: Optional[Dict[int, List[int]]] = None,
     ) -> np.ndarray:
         """Fill masked columns via conditional density estimation.
 
@@ -154,6 +179,11 @@ class ConditionalDensitySampler:
             Target class to condition on. Required (and only used) when
             append_target=True. The appended Y column is set to this value
             (observed, not NaN) so imputation is class-conditional.
+        dag : dict[int, list[int]] or None
+            Optional DAG in augmented index space (Y appended). When provided,
+            imputation uses the DAG path (condition_on_all_features=False) and
+            each actionable conditions only on its declared parents. When None
+            (default), the standard random-permutation path is used.
 
         Returns
         -------
@@ -181,11 +211,17 @@ class ConditionalDensitySampler:
         else:
             X_aug = X
 
+        if dag is not None:
+            assert all(idx < X_aug.shape[1] for k, v in dag.items() for idx in [k] + v), (
+                f"DAG index out of bounds for augmented matrix of shape {X_aug.shape}"
+            )
+
         t0 = time.perf_counter()
         X_filled_tensor = self.model.impute(
             X_aug,
             t=self.temperature,
             n_permutations=self.n_permutations,
+            dag=dag,
         )
         elapsed = time.perf_counter() - t0
         print(f"[sampler] impute_masked: {len(X_query)} rows, "

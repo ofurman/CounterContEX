@@ -184,12 +184,76 @@ Masking 17/23 features leaves only 6+Y=7 observed values to condition on — a v
 
 ---
 
-## 7. Files
+## 7. Experiment 3: Feature-Ordering (DAG) Ablation
+
+**Stage 9** tests whether replacing random-permutation averaging with an explicit
+chain DAG (Y → immutables → actionable features) changes CF quality, and whether
+combining it with a reduced actionable set addresses HELOC's OOB problem.
+
+### Setup deviations from Stage-8 baseline
+
+| Setting | Stage-8 | Exp3 | Reason |
+|---------|---------|------|--------|
+| context_type | target_only | **all_classes** | DAG places Y as explicit parent; constant Y (target_only) → TabPFN constant-feature error |
+| HELOC n_permutations | 5 | **1** | Runtime (17 cols × 5 perms × 4 cells ≈ 88 min → ≈18 min) |
+| HELOC max_test | 50 | **20** | Runtime reduction; identical across all 4 cells |
+
+### Results
+
+**MOONS** (2 cells, n_perm=5, 100 test pts):
+
+| ordering | actionable_set | validity | LOF | frac_oob | true_action |
+|----------|---------------|---------|-----|---------|------------|
+| random | full | 0.960 | 1.071 | 0.000 | 1.000 |
+| dag | full | 0.930 | 1.035 | 0.000 | 1.000 |
+
+**HELOC** (4 cells, n_perm=1, 20 test pts):
+
+| ordering | actionable_set | n_masked | validity | LOF (×1e6) | frac_oob | true_action |
+|----------|---------------|---------|---------|-----------|---------|------------|
+| random | full | 17 | 0.400 | 1031.8 | 0.500 | 1.000 |
+| dag | full | 17 | 0.550 | 2467.6 | 0.650 | 1.000 |
+| random | reduced | 6 | 0.200 | 99.5 | **0.100** | 1.000 |
+| dag | reduced | 6 | **0.500** | **11.9** | **0.100** | 1.000 |
+
+Reduced set (top-6 by |LR coef|): `ExternalRiskEstimate`, `NumTrades60Ever2DerogPubRec`,
+`NumInqLast6M`, `NumInqLast6Mexcl7days`, `NetFractionRevolvingBurden`, `NumRevolvingTradesWBalance`.
+
+### Verdict
+
+**MOONS**: DAG is neutral-to-slightly-worse vs random (validity 0.93 vs 0.96, Δ=−0.03).
+With only 2 actionable features, ordering freedom is minimal — near-zero delta is expected
+and matches the hypothesis.
+
+**HELOC — DAG vs random (full actionable set)**: DAG improves validity (0.55 vs 0.40,
+Δ=+0.15) but **worsens OOB** (0.65 vs 0.50). This is consistent with the DAG giving each
+actionable a *smaller parent set* (only its declared parents, not all observed columns),
+which can produce more coherent chains but also riskier extrapolations.
+
+**HELOC — reduced vs full actionable set**: Reducing to 6 masked features cuts OOB
+dramatically (0.50 → 0.10 for random; 0.65 → 0.10 for dag). This confirms **the
+sparse-conditioning hypothesis**: HELOC's OOB root cause is having 17 features masked
+with only 6 immutables + Y as context, not temperature or ordering.
+
+**Best HELOC cell**: `dag/reduced` — validity=0.500, frac_oob=0.100, LOF=11.9M (vs
+1031.8M for random/full). If pursuing HELOC further, use a **reduced actionable set
+(top-6 by oracle |coef|) with all_classes context** as the starting configuration.
+
+**Y-first ordering**: The original request ("Y first, immutables, then actionable") is
+meaningful only via the DAG path (with all_classes context). In the random-permutation
+path, Y and immutables are already always-observed parents regardless of position — the
+ordering is a no-op. Switching to DAG does change behavior (improved HELOC validity at
+cost of higher OOB on full set; better balance on reduced set).
+
+---
+
+## 8. Files
 
 | Path | Description |
 |------|-------------|
 | `exp1_single_feature.py` | Experiment 1 runner |
 | `exp2_counterfactuals.py` | Experiment 2 runner |
+| `exp3_feature_ordering.py` | Experiment 3 (DAG ablation) runner |
 | `refine.py` | Refinement sweep runner |
 | `configs/sweep.yaml` | Sweep configuration |
 | `results/exp1_{moons,heloc}.csv` | Per-feature reconstruction metrics |
@@ -198,4 +262,6 @@ Masking 17/23 features leaves only 6+Y=7 observed values to condition on — a v
 | `results/exp2_summary.md` | Exp 2 summary + interpretation |
 | `results/exp2_examples.md` | Concrete CF examples |
 | `results/exp2_sweep_{moons,heloc}.csv` | Refinement sweep results |
+| `results/exp3_ordering_{moons,heloc}.csv` | Exp 3 ablation results |
+| `results/exp3_summary.md` | Exp 3 comparison tables + verdict |
 | `results/REPORT.md` | This file |

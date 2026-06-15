@@ -30,7 +30,7 @@ import argparse
 import csv
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -57,19 +57,34 @@ def generate_counterfactuals(
     n_permutations: int = N_PERMUTATIONS,
     max_context: int = MAX_CONTEXT,
     context_type: str = "target_only",
+    ordering: str = "random",
+    actionable_set: str = "full",
+    reduced_k: int = 6,
+    max_test: Optional[int] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict]:
-    """Generate CFs for one dataset. Returns (X_test, y_test, X_cf, info_dict)."""
+    """Generate CFs for one dataset. Returns (X_test, y_test, X_cf, info_dict).
+
+    Args:
+        ordering: 'random' (default: random permutations) or 'dag' (Y → immutables
+                  → actionable chain via explicit DAG).
+        actionable_set: 'full' (all actionable features) or 'reduced' (top-reduced_k
+                        actionable features by |LR coef|). HELOC only; for MOONS,
+                        'reduced' is treated as 'full' (only 2 actionable features).
+        reduced_k: Number of top actionable features to mask when actionable_set='reduced'.
+        max_test: Override for the number of test points (default: from _DATASET_PARAMS).
+    """
     from experiments.zeroshot_cf.checkpoints import get_models
     from experiments.zeroshot_cf.data import get_actionable_immutable, load_dataset
     from experiments.zeroshot_cf.discriminator import train_discriminator
-    from experiments.zeroshot_cf.sampler import ConditionalDensitySampler
+    from experiments.zeroshot_cf.sampler import ConditionalDensitySampler, build_chain_dag
 
     params = _DATASET_PARAMS.get(dataset_name, {"max_test": 50})
-    MAX_TEST = params["max_test"]
+    MAX_TEST = max_test if max_test is not None else params["max_test"]
 
     print(f"\n=== Experiment 2: {dataset_name.upper()} ===")
     print(f"  temperature={temperature}, n_permutations={n_permutations}, "
-          f"max_context={max_context}, context_type={context_type}")
+          f"max_context={max_context}, context_type={context_type}, "
+          f"ordering={ordering}, actionable_set={actionable_set}")
     bundle = load_dataset(dataset_name)
     X_train = bundle.X_train
     y_train = bundle.y_train
@@ -90,6 +105,34 @@ def generate_counterfactuals(
     y_pred = disc_model.predict(X_test)
     y_target = 1 - y_pred  # binary flip
     print(f"Target distribution: {np.bincount(y_target)}")
+
+    # Determine which actionable features to mask (full or reduced)
+    frozen_cols: List[int] = []
+    if actionable_set == "reduced":
+        if dataset_name == "moons":
+            print("  [INFO] reduced≡full for MOONS (only 2 actionable features). Using full.")
+            mask_cols = list(actionable_idx)
+        else:
+            # Top-reduced_k actionable features by |LR discriminator coef|
+            coef = disc_model._clf.coef_[0]
+            act_array = np.array(actionable_idx)
+            top_local = np.argsort(-np.abs(coef[act_array]))[:reduced_k]
+            mask_cols = sorted(act_array[top_local].tolist())
+            frozen_cols = sorted([i for i in actionable_idx if i not in mask_cols])
+            print(f"  Reduced mask cols (top-{reduced_k} by |coef|): "
+                  f"{[bundle.feature_names[i] for i in mask_cols]}")
+            print(f"  Frozen non-immutable cols: "
+                  f"{[bundle.feature_names[i] for i in frozen_cols]}")
+    else:
+        mask_cols = list(actionable_idx)
+
+    # Build DAG if chain ordering requested (augmented index space: Y appended last)
+    dag = None
+    if ordering == "dag":
+        y_idx = X_train.shape[1]  # Y appended at this position in augmented matrix
+        dag = build_chain_dag(mask_cols, immutable_idx, y_idx)
+        print(f"  DAG ordering: y_idx={y_idx}, immutable={immutable_idx}, "
+              f"actionable chain={mask_cols}")
 
     print("Loading TabPFN models …")
     clf, reg = get_models(n_estimators=N_ESTIMATORS)
@@ -126,8 +169,9 @@ def generate_counterfactuals(
 
         X_cf_batch = sampler.impute_masked(
             X_batch,
-            mask_cols=actionable_idx,
+            mask_cols=mask_cols,
             fixed_target=target_cls,
+            dag=dag,
         )
         X_cf[test_idx] = X_cf_batch
 
@@ -137,11 +181,15 @@ def generate_counterfactuals(
         "y_target": y_target,
         "actionable_idx": actionable_idx,
         "immutable_idx": immutable_idx,
+        "mask_cols": mask_cols,
+        "frozen_cols": frozen_cols,
         "disc_model": disc_model,
         "temperature": temperature,
         "n_permutations": n_permutations,
         "max_context": max_context,
         "context_type": context_type,
+        "ordering": ordering,
+        "actionable_set": actionable_set,
     }
 
 
@@ -151,12 +199,14 @@ def evaluate_and_report(
     y_test: np.ndarray,
     X_cf: np.ndarray,
     info: Dict,
+    write_csv: bool = True,
 ) -> Dict[str, float]:
     from experiments.zeroshot_cf.metrics_harness import compute_metrics, print_metrics
     from experiments.zeroshot_cf.data import load_dataset
 
     bundle = info["bundle"]
     immutable_idx = info["immutable_idx"]
+    frozen_cols = info.get("frozen_cols", [])
     disc_model = info["disc_model"]
     y_target = info["y_target"]
 
@@ -170,14 +220,16 @@ def evaluate_and_report(
     # TabPFN extrapolation artefacts. Document the clip fraction above.
     X_cf_clipped = np.clip(X_cf, 0.0, 1.0)
 
-    # --- Immutable column check (must be exactly preserved by construction) ---
-    if immutable_idx:
-        immut = np.asarray(immutable_idx)
-        max_dev = float(np.abs(X_cf[:, immut] - X_test[:, immut]).max())
-        print(f"  Max immutable-column deviation: {max_dev:.2e}")
+    # --- Immutable + frozen column check (must be exactly preserved by construction) ---
+    check_cols = list(immutable_idx) + list(frozen_cols)
+    if check_cols:
+        cols = np.asarray(check_cols)
+        max_dev = float(np.abs(X_cf[:, cols] - X_test[:, cols]).max())
+        print(f"  Max immutable/frozen-column deviation: {max_dev:.2e} "
+              f"({len(immutable_idx)} immutable, {len(frozen_cols)} frozen)")
         assert max_dev < 1e-9, (
-            f"Immutable columns drifted: max_dev={max_dev} — "
-            "immutable features must be preserved exactly by construction"
+            f"Immutable/frozen columns drifted: max_dev={max_dev} — "
+            "these features must be preserved exactly by construction"
         )
 
     # --- Compute metrics ---
@@ -194,14 +246,15 @@ def evaluate_and_report(
     metrics["frac_oob"] = frac_oob
     print_metrics(metrics, prefix=dataset_name)
 
-    # --- Write per-dataset CSV ---
-    csv_path = RESULTS_DIR / f"exp2_{dataset_name}_metrics.csv"
-    row = {"dataset": dataset_name, **metrics}
-    with open(csv_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(row.keys()))
-        writer.writeheader()
-        writer.writerow(row)
-    print(f"\n  Wrote {csv_path}")
+    if write_csv:
+        # --- Write per-dataset CSV ---
+        csv_path = RESULTS_DIR / f"exp2_{dataset_name}_metrics.csv"
+        row = {"dataset": dataset_name, **metrics}
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+            writer.writeheader()
+            writer.writerow(row)
+        print(f"\n  Wrote {csv_path}")
 
     return metrics
 
@@ -274,6 +327,9 @@ def run_dataset(
     n_permutations: int = N_PERMUTATIONS,
     max_context: int = MAX_CONTEXT,
     context_type: str = "target_only",
+    ordering: str = "random",
+    actionable_set: str = "full",
+    reduced_k: int = 6,
 ) -> Dict[str, float]:
     X_test, y_test, X_cf, info = generate_counterfactuals(
         dataset_name,
@@ -281,6 +337,9 @@ def run_dataset(
         n_permutations=n_permutations,
         max_context=max_context,
         context_type=context_type,
+        ordering=ordering,
+        actionable_set=actionable_set,
+        reduced_k=reduced_k,
     )
     metrics = evaluate_and_report(dataset_name, X_test, y_test, X_cf, info)
     write_examples(dataset_name, X_test, X_cf, info)
@@ -289,12 +348,14 @@ def run_dataset(
 
 def write_summary(all_metrics: List[Dict], temperature: float = TEMPERATURE,
                   n_permutations: int = N_PERMUTATIONS, max_context: int = MAX_CONTEXT,
-                  context_type: str = "target_only") -> None:
+                  context_type: str = "target_only", ordering: str = "random",
+                  actionable_set: str = "full") -> None:
     lines = [
         "# Experiment 2: Counterfactual Generation — Summary",
         "",
         f"Settings: temperature={temperature}, n_permutations={n_permutations}, "
-        f"max_context={max_context}, context_type={context_type}",
+        f"max_context={max_context}, context_type={context_type}, "
+        f"ordering={ordering}, actionable_set={actionable_set}",
         "",
         "## Metrics",
         "",
@@ -367,6 +428,26 @@ def main() -> None:
         default=MAX_CONTEXT,
         help=f"Max context rows passed to TabPFNUnsupervisedModel (default: {MAX_CONTEXT}).",
     )
+    parser.add_argument(
+        "--ordering",
+        choices=["random", "dag"],
+        default="random",
+        help="Feature ordering: 'random' uses random permutations (default); 'dag' uses "
+             "an explicit chain DAG (Y → immutables → actionable features in index order).",
+    )
+    parser.add_argument(
+        "--actionable-set",
+        choices=["full", "reduced"],
+        default="full",
+        help="Actionable feature set: 'full' masks all actionable features (default); "
+             "'reduced' masks only the top-reduced_k features by |LR coef| (HELOC only).",
+    )
+    parser.add_argument(
+        "--reduced-k",
+        type=int,
+        default=6,
+        help="Number of top actionable features to mask when --actionable-set=reduced (default: 6).",
+    )
     args = parser.parse_args()
     datasets = ["moons", "heloc"] if args.dataset == "all" else [args.dataset]
 
@@ -383,6 +464,9 @@ def main() -> None:
             n_permutations=args.n_permutations,
             max_context=args.max_context,
             context_type=args.context_type,
+            ordering=args.ordering,
+            actionable_set=args.actionable_set,
+            reduced_k=args.reduced_k,
         )
         all_metrics.append({"dataset": ds, **m})
 
@@ -392,6 +476,8 @@ def main() -> None:
         n_permutations=args.n_permutations,
         max_context=args.max_context,
         context_type=args.context_type,
+        ordering=args.ordering,
+        actionable_set=args.actionable_set,
     )
     print("\nDone.")
 
