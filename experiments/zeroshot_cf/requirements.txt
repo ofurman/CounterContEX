@@ -1,0 +1,14 @@
+# Local TabPFN core (editable install from repo root)
+-e .
+
+# TabPFN extensions — unsupervised module (imputation/generation)
+tabpfn-extensions[all] @ git+https://github.com/PriorLabs/tabpfn-extensions.git
+
+# Counterfactuals evaluation harness
+cel @ git+https://github.com/ofurman/counterfactuals.git
+
+# Utilities
+scikit-learn>=1.2.0
+pandas>=1.4.0
+numpy>=1.21.6
+matplotlib>=3.5

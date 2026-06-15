@@ -101,7 +101,7 @@ Baselines from cel for HELOC/MOONS (PPCEF, DiCE, etc.) are recorded in `resource
 
 | # | Stage | Status | Notes | Commit |
 |---|-------|--------|-------|--------|
-| 1 | [Environment & offline checkpoint setup](stages/01-environment-offline-setup.md) | PENDING | | |
+| 1 | [Environment & offline checkpoint setup](stages/01-environment-offline-setup.md) | DONE | TabPFN v2 (no-license); cel vendored editable; smoke test passed offline | |
 | 2 | [Data, discriminator & metrics harness](stages/02-data-discriminator-metrics.md) | PENDING | | |
 | 3 | [Conditional density sampler wrapper](stages/03-conditional-density-sampler.md) | PENDING | | |
 | 4 | [Experiment 1: single-feature estimation](stages/04-exp1-single-feature.md) | PENDING | | |
@@ -222,3 +222,7 @@ Decisions made with the user during planning (2026-06-15):
 4. **Code location = new `experiments/zeroshot_cf/` directory** inside the TabPFN repo, importing `tabpfn-extensions` and `cel` as dependencies. Keeps the work next to the local checkpoints.
 
 Decisions made during autonomous execution should be appended below.
+
+5. **Use TabPFN model version "v2" for all experiments.** TabPFN v3 (the default) requires a TABPFN_TOKEN license-acceptance API call before downloading; this is unavailable in an unattended/offline environment. TabPFN v2 models download directly from HuggingFace with no license gate and still expose the full conditional-density API (`output_type="full"`, `criterion.sample()`). `checkpoints.py` enforces this by setting `TABPFN_MODEL_VERSION=v2` before constructing any model.
+
+6. **`cel` installed as editable vendor package with `--no-deps` (Python 3.13 / TensorFlow incompatibility).** The `ce-library` package depends on TensorFlow, which does not have Python 3.13 wheels. Vendored the repo at `experiments/zeroshot_cf/vendor/counterfactuals/`, installed it editable with `--no-deps`, then installed required transitive deps (cel-nflows, torchdiffeq, UMNN, omegaconf, hydra-core) one by one. The `cel/__init__.py` was patched to make CF-method imports optional (try/except) so `cel.datasets` and `cel.metrics` load without nflows/alibi chain. `cel.models` (discriminator LR/MLP) may need further dep-install if needed in Stage 2.
