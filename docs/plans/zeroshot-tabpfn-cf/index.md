@@ -106,11 +106,15 @@ Baselines from cel for HELOC/MOONS (PPCEF, DiCE, etc.) are recorded in `resource
 | 3 | [Conditional density sampler wrapper](stages/03-conditional-density-sampler.md) | DONE | ConditionalDensitySampler: set_context, impute_masked, sample_feature; explicit v2 model_path fix in get_models(); 4 tests all PASS (MSE 0.0036 vs 0.2014 baseline) | f86e488 |
 | 4 | [Experiment 1: single-feature estimation](stages/04-exp1-single-feature.md) | DONE | MOONS: WEAK (1/2 beats marginal, calib 0.70); HELOC: PASS (15/23=65% beats marginal, calib 0.60). Overall gate: PASS — proceed to Stage 5 | ae0e555 |
 | 5 | [Experiment 2: counterfactual generation](stages/05-exp2-counterfactual-generation.md) | DONE | MOONS: validity=0.85 LOF=1.055 true_action=1.0; HELOC: validity=0.66 LOF=2.5B (66% OOB extrapolation) true_action=1.0. Validity targets met; HELOC plausibility poor due to sparse conditioning (17/23 features masked). Cel baselines deferred to Stage 6. | 2525e27 |
-| 6 | [Refinement & results report](stages/06-refinement-and-report.md) | DONE | MOONS sweep: t=0.5+all_classes best (prox=0.629, validity=0.783). HELOC sweep: no config fixes OOB (MAP gives OOB=100%; root cause is sparse conditioning, not temperature). REPORT.md written; README updated; learnings persisted to memory. | |
+| 6 | [Refinement & results report](stages/06-refinement-and-report.md) | DONE | MOONS sweep: t=0.5+all_classes best (prox=0.629, validity=0.783). HELOC sweep: no config fixes OOB (MAP gives OOB=100%; root cause is sparse conditioning, not temperature). REPORT.md written; README updated; learnings persisted to memory. | 1c415ca |
+| 7 | [Post-review correctness & reproducibility fixes](stages/07-postreview-fixes.md) | PENDING | Fixes P1/P2/P3 from plan-post-review (validity reference, LOF presentation, immutability assert, seeding, CLI flags, calibration, backlog entry). Code + tests only — no result recompute. | |
+| 8 | [Regenerate results & report](stages/08-regenerate-results.md) | PENDING | Re-run Exp1/Exp2/sweeps with corrected metrics; rebuild REPORT.md + notebook + README; update memory. Depends on Stage 7. | |
 
 Statuses: `PENDING` -> `IN_PROGRESS` -> `DONE` | `BLOCKED` | `SKIPPED`
 
-Phases: A = Stages 1–3 (infra), B = Stages 4–5 (experiments), C = Stage 6 (refinement). Stage 4 is a **gate** for Stage 5: if single-feature reconstruction is no better than the marginal baseline, note it prominently before proceeding — Stage 5 still runs but expectations are adjusted.
+Phases: A = Stages 1–3 (infra), B = Stages 4–5 (experiments), C = Stage 6 (refinement), **D = Stages 7–8 (post-review remediation)**. Stage 4 is a **gate** for Stage 5: if single-feature reconstruction is no better than the marginal baseline, note it prominently before proceeding — Stage 5 still runs but expectations are adjusted.
+
+> **Phase D context (added 2026-06-15 after `/plan-post-review`)**: a post-implementation review found 3 P1, 4 P2, 5 P3 issues. The most important: Exp2 **validity is scored against the wrong reference** (`y_test` instead of the generation target `y_target = 1 - y_pred`), so the headline Exp2 numbers must be recomputed before they can be cited. Stage 7 fixes the code; Stage 8 regenerates the artifacts. Full findings are reproduced in `stages/07-postreview-fixes.md`.
 
 ---
 
@@ -204,7 +208,7 @@ state the symptom, where it came from, and a concrete lead for resolving it.
 
 | # | Title | Origin Stage | Severity | Why Deferred | Suggested Next Step | Status |
 |---|-------|--------------|----------|--------------|---------------------|--------|
-| | | | | | | |
+| 1 | Record cel baselines (PPCEF/DiCE) for HELOC/MOONS | 5/6 | P2 (med) | cel CF-method baselines need the heavy TF/alibi dependency chain (no Py3.13 wheels) and per-method training; out of scope for the offline zero-shot test | Run cel's `run_ppcef_pipeline.py` (+ DiCE) in a Py3.10 TF-compatible env, capture validity/proximity/sparsity/LOF for both datasets, fill `resources/api-reference.md §cel baseline numbers`, add the side-by-side column to `results/REPORT.md §5`. | OPEN |
 
 Statuses: `OPEN` -> `IN_PROGRESS` -> `RESOLVED`. When an item is resolved, flip its
 status and summarize the fix in **Fixed Issues**. Heavy items may warrant their own
