@@ -1,0 +1,40 @@
+# HELOC actionability split — Decision #2 in docs/plans/zeroshot-tabpfn-cf/index.md
+#
+# Immutable features: history/age fields a person cannot directly act on.
+# These capture how long the credit history has existed or when past events occurred,
+# none of which can be changed by taking action today.
+#
+# Actionable features: balance, utilization, inquiry counts, delinquency rates, and
+# installment-trade percentages — all of which a person can improve over time.
+#
+# Note: the cel heloc.yaml marks all 23 features as actionable; this file overrides
+# that for our experiment, defining the 6-feature immutable subset.
+
+dataset: heloc
+
+immutable_features:
+  - MSinceOldestTradeOpen        # age of oldest trade line (months) — history length
+  - MSinceMostRecentTradeOpen    # months since newest trade opened — history recency
+  - AverageMInFile               # average months in credit file — history depth
+  - NumTotalTrades               # total number of trades ever — cumulative history
+  - MSinceMostRecentDelq         # months since last delinquency — past event timing
+  - MSinceMostRecentInqexcl7days # months since most recent inquiry (excl. 7 days) — recency
+
+actionable_features:             # the remaining 17 features — all actionable
+  - ExternalRiskEstimate
+  - NumSatisfactoryTrades
+  - NumTrades60Ever2DerogPubRec
+  - NumTrades90Ever2DerogPubRec
+  - PercentTradesNeverDelq
+  - MaxDelq2PublicRecLast12M
+  - MaxDelqEver
+  - NumTradesOpeninLast12M
+  - PercentInstallTrades
+  - NumInqLast6M
+  - NumInqLast6Mexcl7days
+  - NetFractionRevolvingBurden
+  - NetFractionInstallBurden
+  - NumRevolvingTradesWBalance
+  - NumInstallTradesWBalance
+  - NumBank2NatlTradesWHighUtilization
+  - PercentTradesWBalance
