@@ -11,6 +11,7 @@ the cel metrics contract, even though the inner model works in float32 tensors.
 
 from __future__ import annotations
 
+import random
 import time
 from typing import List, Optional
 
@@ -89,6 +90,11 @@ class ConditionalDensitySampler:
             deterministically using self.random_state.
         """
         rng = np.random.default_rng(self.random_state)
+        # Seed all RNGs so imputation permutations and posterior sampling are
+        # reproducible. MPS float nondeterminism may persist on Apple Silicon.
+        random.seed(self.random_state)
+        np.random.seed(self.random_state)
+        torch.manual_seed(self.random_state)
 
         X = np.asarray(X_context, dtype=np.float32)
         y = np.asarray(y_context) if y_context is not None else None
@@ -158,6 +164,12 @@ class ConditionalDensitySampler:
         if not self._fitted:
             raise RuntimeError("Call set_context() before impute_masked().")
 
+        # Re-seed before each impute call so n_permutations draws are reproducible.
+        # MPS float nondeterminism may persist on Apple Silicon.
+        random.seed(self.random_state)
+        np.random.seed(self.random_state)
+        torch.manual_seed(self.random_state)
+
         X = np.asarray(X_query, dtype=np.float32).copy()
         X[:, mask_cols] = np.nan
 
@@ -203,6 +215,7 @@ class ConditionalDensitySampler:
         X_query: np.ndarray,
         target_col: int,
         n_samples: int = 1,
+        sample_temperature: Optional[float] = None,
     ) -> np.ndarray:
         """Reconstruct a single feature column via conditional density estimation.
 
@@ -214,9 +227,13 @@ class ConditionalDensitySampler:
         target_col : int
             Column index to reconstruct.
         n_samples : int
-            Number of independent samples to draw per query row. When n_samples>1
-            the sampler raises temperature to 1.0 for each additional draw so the
-            samples explore the posterior rather than all collapsing to MAP.
+            Number of independent samples to draw per query row. Returns shape
+            (m,) when n_samples==1, else (n_samples, m).
+        sample_temperature : float or None
+            Temperature to use for all draws in this call. Overrides
+            self.temperature when provided. Use 1e-9 for near-MAP point
+            estimates and 1.0 for posterior exploration. When None, falls
+            back to self.temperature.
 
         Returns
         -------
@@ -225,23 +242,16 @@ class ConditionalDensitySampler:
         if not self._fitted:
             raise RuntimeError("Call set_context() before sample_feature().")
 
-        if n_samples == 1:
-            X_filled = self.impute_masked(X_query, mask_cols=[target_col])
-            return X_filled[:, target_col]
-
-        # Multiple samples: first draw uses self.temperature; additional draws
-        # use temperature=1.0 to explore the posterior.
-        results = []
+        effective_temp = sample_temperature if sample_temperature is not None else self.temperature
         original_temp = self.temperature
-
-        # First sample at configured temperature
-        X_filled = self.impute_masked(X_query, mask_cols=[target_col])
-        results.append(X_filled[:, target_col])
-
-        # Additional samples at t=1.0 for diversity
-        self.temperature = 1.0
+        self.temperature = effective_temp
         try:
-            for _ in range(n_samples - 1):
+            if n_samples == 1:
+                X_filled = self.impute_masked(X_query, mask_cols=[target_col])
+                return X_filled[:, target_col]
+
+            results = []
+            for _ in range(n_samples):
                 X_filled = self.impute_masked(X_query, mask_cols=[target_col])
                 results.append(X_filled[:, target_col])
         finally:

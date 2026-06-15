@@ -109,4 +109,6 @@ Our subset and where they live:
 `disc_model` must expose `.predict(X_np) -> array` and `.eval()` (no-op ok). cel classifiers in `cel/models/` (logistic_regression, MLP, NODE). `evaluate_cf` defaults `y_target = abs(1 - y_test)` if not passed.
 
 ### cel baseline numbers
-TODO (fill during execution): read HELOC/MOONS validity / proximity / sparsity / LOF for PPCEF, DiCE, etc. from the cel repo's reported results or by running its pipelines, for side-by-side comparison in REPORT.md.
+Not yet populated — see Backlog item 1 in `docs/plans/zeroshot-tabpfn-cf/index.md`.
+Running cel's CF-method baselines (PPCEF, DiCE, etc.) requires a TF-compatible environment
+(Python 3.10, not 3.13) and per-method training. Deferred to a follow-up run.

@@ -129,14 +129,16 @@ def run_experiment(dataset_name: str) -> None:
                 max_context=MAX_CONTEXT,
             )
 
-            # Near-MAP point estimate (t=1e-9)
+            # Near-MAP point estimate (t=1e-9 = sampler.temperature)
             point_est = sampler.sample_feature(X_test_cls, target_col=j, n_samples=1)
             tabpfn_preds[test_mask] = point_est
 
-            # Posterior samples at t=1.0 for calibration (N_SAMPLES draws)
-            # sample_feature returns shape (N_SAMPLES, m) when n_samples>1
+            # Posterior samples at t=1.0 for calibration interval (N_SAMPLES draws).
+            # Use sample_temperature=1.0 so ALL draws explore the posterior;
+            # the MAP draw above is kept separate and not included here.
             posterior = sampler.sample_feature(
-                X_test_cls, target_col=j, n_samples=N_SAMPLES
+                X_test_cls, target_col=j, n_samples=N_SAMPLES,
+                sample_temperature=1.0,
             )  # (N_SAMPLES, m)
             idxs = np.where(test_mask)[0]
             for ii, gi in enumerate(idxs):
@@ -235,13 +237,22 @@ def run_experiment(dataset_name: str) -> None:
                 ax.set_ylabel("TabPFN predicted")
                 ax.set_aspect("equal")
 
-            # Actually do a quick re-prediction per feature for the scatter
+            # Re-prediction per feature using the same per-class conditioning
+            # that was used during scoring (not unconditional context).
             for j in range(n_features):
-                sampler = ConditionalDensitySampler(
-                    clf=clf, reg=reg, n_permutations=5, temperature=1e-9, random_state=42 + j
-                )
-                sampler.set_context(X_train, y_context=y_train, max_context=MAX_CONTEXT)
-                pred_j = sampler.sample_feature(X_test, target_col=j, n_samples=1)
+                pred_j = np.zeros(len(X_test))
+                for cls in np.unique(y_test):
+                    cls_mask = y_test == cls
+                    X_cls = X_test[cls_mask]
+                    s = ConditionalDensitySampler(
+                        clf=clf, reg=reg, n_permutations=5, temperature=1e-9,
+                        random_state=42 + j,
+                    )
+                    s.set_context(
+                        X_train, y_context=y_train,
+                        target_class=int(cls), max_context=MAX_CONTEXT,
+                    )
+                    pred_j[cls_mask] = s.sample_feature(X_cls, target_col=j, n_samples=1)
                 ax = axes[j]
                 ax.scatter(X_test[:, j], pred_j, alpha=0.5, s=20)
                 ax.plot([0, 1], [0, 1], "r--", lw=1)

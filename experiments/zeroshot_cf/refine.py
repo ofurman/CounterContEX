@@ -112,7 +112,9 @@ def run_config(
         X_test=X_test,
         X_train=X_train,
         y_test=y_test,
+        y_target=y_target,
         immutable_idx=immutable_idx,
+        X_cf_lof=X_cf,  # use unclipped array for LOF to preserve true geometry
     )
     metrics["frac_oob"] = frac_oob
     metrics["config_id"] = cfg_id

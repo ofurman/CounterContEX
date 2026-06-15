@@ -18,6 +18,10 @@ Usage:
   uv run python experiments/zeroshot_cf/exp2_counterfactuals.py --dataset moons
   uv run python experiments/zeroshot_cf/exp2_counterfactuals.py --dataset heloc
   uv run python experiments/zeroshot_cf/exp2_counterfactuals.py --dataset all
+
+  # MOONS recommended config (Stage 6 sweep best):
+  uv run python experiments/zeroshot_cf/exp2_counterfactuals.py \\
+      --dataset moons --temperature 0.5 --context-type all_classes
 """
 
 from __future__ import annotations
@@ -49,6 +53,10 @@ _DATASET_PARAMS = {
 
 def generate_counterfactuals(
     dataset_name: str,
+    temperature: float = TEMPERATURE,
+    n_permutations: int = N_PERMUTATIONS,
+    max_context: int = MAX_CONTEXT,
+    context_type: str = "target_only",
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict]:
     """Generate CFs for one dataset. Returns (X_test, y_test, X_cf, info_dict)."""
     from experiments.zeroshot_cf.checkpoints import get_models
@@ -60,6 +68,8 @@ def generate_counterfactuals(
     MAX_TEST = params["max_test"]
 
     print(f"\n=== Experiment 2: {dataset_name.upper()} ===")
+    print(f"  temperature={temperature}, n_permutations={n_permutations}, "
+          f"max_context={max_context}, context_type={context_type}")
     bundle = load_dataset(dataset_name)
     X_train = bundle.X_train
     y_train = bundle.y_train
@@ -102,15 +112,16 @@ def generate_counterfactuals(
             clf=clf,
             reg=reg,
             append_target=True,
-            n_permutations=N_PERMUTATIONS,
-            temperature=TEMPERATURE,
+            n_permutations=n_permutations,
+            temperature=temperature,
             random_state=42 + target_cls,
         )
+        ctx_target = target_cls if context_type == "target_only" else None
         sampler.set_context(
             X_train,
             y_context=y_train,
-            target_class=target_cls,
-            max_context=MAX_CONTEXT,
+            target_class=ctx_target,
+            max_context=max_context,
         )
 
         X_cf_batch = sampler.impute_masked(
@@ -127,6 +138,10 @@ def generate_counterfactuals(
         "actionable_idx": actionable_idx,
         "immutable_idx": immutable_idx,
         "disc_model": disc_model,
+        "temperature": temperature,
+        "n_permutations": n_permutations,
+        "max_context": max_context,
+        "context_type": context_type,
     }
 
 
@@ -143,6 +158,7 @@ def evaluate_and_report(
     bundle = info["bundle"]
     immutable_idx = info["immutable_idx"]
     disc_model = info["disc_model"]
+    y_target = info["y_target"]
 
     # --- Out-of-bounds fraction (before clipping) ---
     oob_mask = (X_cf < 0.0) | (X_cf > 1.0)
@@ -154,12 +170,15 @@ def evaluate_and_report(
     # TabPFN extrapolation artefacts. Document the clip fraction above.
     X_cf_clipped = np.clip(X_cf, 0.0, 1.0)
 
-    # --- Immutable column check ---
+    # --- Immutable column check (must be exactly preserved by construction) ---
     if immutable_idx:
         immut = np.asarray(immutable_idx)
         max_dev = float(np.abs(X_cf[:, immut] - X_test[:, immut]).max())
-        print(f"  Max immutable-column deviation: {max_dev:.2e} "
-              "(should be ~0 — any deviation is a bug)")
+        print(f"  Max immutable-column deviation: {max_dev:.2e}")
+        assert max_dev < 1e-9, (
+            f"Immutable columns drifted: max_dev={max_dev} — "
+            "immutable features must be preserved exactly by construction"
+        )
 
     # --- Compute metrics ---
     metrics = compute_metrics(
@@ -168,7 +187,9 @@ def evaluate_and_report(
         X_test=X_test,
         X_train=bundle.X_train,
         y_test=y_test,
+        y_target=y_target,
         immutable_idx=immutable_idx,
+        X_cf_lof=X_cf,  # use unclipped array for LOF to preserve true geometry
     )
     metrics["frac_oob"] = frac_oob
     print_metrics(metrics, prefix=dataset_name)
@@ -205,16 +226,20 @@ def write_examples(
     X_test_orig = bundle.inverse_transform(X_test)
     X_cf_orig = bundle.inverse_transform(X_cf_clipped)
 
+    temperature = info.get("temperature", TEMPERATURE)
+    n_permutations = info.get("n_permutations", N_PERMUTATIONS)
+    max_context = info.get("max_context", MAX_CONTEXT)
+
     lines = [
         f"# Experiment 2: CF Examples — {dataset_name.upper()}",
         "",
-        f"Temperature: {TEMPERATURE}, n_permutations: {N_PERMUTATIONS}, "
-        f"max_context: {MAX_CONTEXT}",
+        f"Temperature: {temperature}, n_permutations: {n_permutations}, "
+        f"max_context: {max_context}",
         "",
     ]
 
-    # Pick first n_examples where the CF is valid (prediction flipped)
-    valid_mask = y_cf_pred != y_pred
+    # Pick first n_examples where the CF is valid (predicted class == y_target)
+    valid_mask = y_cf_pred == y_target
     valid_idxs = np.where(valid_mask)[0][:n_examples]
     invalid_idxs = np.where(~valid_mask)[0][:max(0, n_examples - len(valid_idxs))]
     idxs = np.concatenate([valid_idxs, invalid_idxs])
@@ -243,19 +268,33 @@ def write_examples(
     print(f"  Wrote examples to {out_path}")
 
 
-def run_dataset(dataset_name: str) -> Dict[str, float]:
-    X_test, y_test, X_cf, info = generate_counterfactuals(dataset_name)
+def run_dataset(
+    dataset_name: str,
+    temperature: float = TEMPERATURE,
+    n_permutations: int = N_PERMUTATIONS,
+    max_context: int = MAX_CONTEXT,
+    context_type: str = "target_only",
+) -> Dict[str, float]:
+    X_test, y_test, X_cf, info = generate_counterfactuals(
+        dataset_name,
+        temperature=temperature,
+        n_permutations=n_permutations,
+        max_context=max_context,
+        context_type=context_type,
+    )
     metrics = evaluate_and_report(dataset_name, X_test, y_test, X_cf, info)
     write_examples(dataset_name, X_test, X_cf, info)
     return metrics
 
 
-def write_summary(all_metrics: List[Dict]) -> None:
+def write_summary(all_metrics: List[Dict], temperature: float = TEMPERATURE,
+                  n_permutations: int = N_PERMUTATIONS, max_context: int = MAX_CONTEXT,
+                  context_type: str = "target_only") -> None:
     lines = [
         "# Experiment 2: Counterfactual Generation — Summary",
         "",
-        f"Settings: temperature={TEMPERATURE}, n_permutations={N_PERMUTATIONS}, "
-        f"max_context={MAX_CONTEXT}",
+        f"Settings: temperature={temperature}, n_permutations={n_permutations}, "
+        f"max_context={max_context}, context_type={context_type}",
         "",
         "## Metrics",
         "",
@@ -303,6 +342,31 @@ def main() -> None:
         default="moons",
         help="Dataset to run (default: moons)",
     )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=TEMPERATURE,
+        help=f"Sampling temperature (default: {TEMPERATURE}). Use 0 or 1e-9 for near-MAP.",
+    )
+    parser.add_argument(
+        "--context-type",
+        choices=["target_only", "all_classes"],
+        default="target_only",
+        help="Context selection strategy: 'target_only' filters context to the target class "
+             "(default); 'all_classes' uses the full training set.",
+    )
+    parser.add_argument(
+        "--n-permutations",
+        type=int,
+        default=N_PERMUTATIONS,
+        help=f"Number of imputation permutations (default: {N_PERMUTATIONS}).",
+    )
+    parser.add_argument(
+        "--max-context",
+        type=int,
+        default=MAX_CONTEXT,
+        help=f"Max context rows passed to TabPFNUnsupervisedModel (default: {MAX_CONTEXT}).",
+    )
     args = parser.parse_args()
     datasets = ["moons", "heloc"] if args.dataset == "all" else [args.dataset]
 
@@ -313,10 +377,22 @@ def main() -> None:
 
     all_metrics = []
     for ds in datasets:
-        m = run_dataset(ds)
+        m = run_dataset(
+            ds,
+            temperature=args.temperature,
+            n_permutations=args.n_permutations,
+            max_context=args.max_context,
+            context_type=args.context_type,
+        )
         all_metrics.append({"dataset": ds, **m})
 
-    write_summary(all_metrics)
+    write_summary(
+        all_metrics,
+        temperature=args.temperature,
+        n_permutations=args.n_permutations,
+        max_context=args.max_context,
+        context_type=args.context_type,
+    )
     print("\nDone.")
 
 
