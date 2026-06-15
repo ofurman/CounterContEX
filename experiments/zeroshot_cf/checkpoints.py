@@ -18,6 +18,10 @@ TABPFN_LOCAL_CACHE = Path(
     os.environ.get("TABPFN_LOCAL_CACHE", str(_DEFAULT_LOCAL_CACHE))
 )
 
+# v2 checkpoint filenames (must match model_loading.py default_filename values)
+_V2_CLF_FILENAME = "tabpfn-v2-classifier-finetuned-zk73skhh.ckpt"
+_V2_REG_FILENAME = "tabpfn-v2-regressor.ckpt"
+
 # Use v2 to avoid the license gate on newer versions
 _TABPFN_MODEL_VERSION = "v2"
 
@@ -78,6 +82,11 @@ def get_models(
 
     from tabpfn import TabPFNClassifier, TabPFNRegressor
 
-    clf = TabPFNClassifier(n_estimators=n_estimators, device=device)
-    reg = TabPFNRegressor(n_estimators=n_estimators, device=device)
+    # Pass explicit model_path so version is resolved from the filename, not from
+    # settings.tabpfn.model_version which defaults to V3 at import time and is
+    # not reliably updated by the TABPFN_MODEL_VERSION env var after import.
+    clf_path = cache_dir / _V2_CLF_FILENAME
+    reg_path = cache_dir / _V2_REG_FILENAME
+    clf = TabPFNClassifier(n_estimators=n_estimators, device=device, model_path=clf_path)
+    reg = TabPFNRegressor(n_estimators=n_estimators, device=device, model_path=reg_path)
     return clf, reg
