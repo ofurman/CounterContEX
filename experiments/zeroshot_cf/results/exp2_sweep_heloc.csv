@@ -1,0 +1,4 @@
+validity,lof_scores_cf,sparsity,actionability,true_actionability,proximity_l2_jaccard,frac_oob,config_id,dataset,temperature,n_permutations,context_type,max_context
+0.7333333333333333,1734521722.0691905,0.6521739130434783,0.0,1.0,1.7924325519494355,1.0,t1e9_np3_tgt,heloc,1e-09,3,target_class_only,256
+0.5333333333333333,738669220.8518616,0.6521739130434783,0.0,1.0,1.639581704859459,0.8,t05_np3_tgt,heloc,0.5,3,target_class_only,256
+0.4,841375244.2970039,0.6695652173913044,0.0,1.0,1.6265223653970027,0.6666666666666666,t10_np3_tgt,heloc,1.0,3,target_class_only,256

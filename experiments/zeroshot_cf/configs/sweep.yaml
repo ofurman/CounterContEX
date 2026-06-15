@@ -1,0 +1,69 @@
+# Inference refinement sweep configuration — Stage 6
+#
+# We sweep only over inference-side knobs (no retraining).
+# Stage 5 showed:
+#   MOONS: already strong (validity=0.85, LOF=1.055) — minimal sweep needed.
+#   HELOC: validity met but LOF=2.5B, OOB=66% — main lever is temperature
+#          (lower t = less extrapolation) and context strategy.
+#
+# Budget note: each HELOC impute call (17 masked features, n_perm=3) ≈ 3.5 min.
+# We cap HELOC at 15 test points per config and 3 temperature configs × 2 class
+# batches = ~21 min total. Skipped grid points are logged.
+
+moons:
+  max_test: 60
+  configs:
+    - id: "t1e9_np5_tgt"
+      temperature: 1.0e-9
+      n_permutations: 5
+      context_type: target_class_only
+      max_context: 256
+    - id: "t05_np5_tgt"
+      temperature: 0.5
+      n_permutations: 5
+      context_type: target_class_only
+      max_context: 256
+    - id: "t10_np5_tgt"
+      temperature: 1.0
+      n_permutations: 5
+      context_type: target_class_only
+      max_context: 256
+    - id: "t10_np10_tgt"
+      temperature: 1.0
+      n_permutations: 10
+      context_type: target_class_only
+      max_context: 256
+    - id: "t10_np5_all"
+      temperature: 1.0
+      n_permutations: 5
+      context_type: all_classes
+      max_context: 256
+    - id: "t05_np5_all"
+      temperature: 0.5
+      n_permutations: 5
+      context_type: all_classes
+      max_context: 256
+
+heloc:
+  max_test: 15
+  configs:
+    # Primary sweep: temperature effect on OOB/plausibility
+    - id: "t1e9_np3_tgt"
+      temperature: 1.0e-9
+      n_permutations: 3
+      context_type: target_class_only
+      max_context: 256
+    - id: "t05_np3_tgt"
+      temperature: 0.5
+      n_permutations: 3
+      context_type: target_class_only
+      max_context: 256
+    - id: "t10_np3_tgt"
+      temperature: 1.0
+      n_permutations: 3
+      context_type: target_class_only
+      max_context: 256
+    # Skipped for budget (estimated >2h each):
+    # - t with n_perm=10 (too slow: 17*10=170 forward passes per call)
+    # - nearest-neighbor context (requires per-point refitting: 15 * 13min = 3h+)
+    # - max_context ∈ {100, 512}: deprioritized vs. temperature sweep

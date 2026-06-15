@@ -52,3 +52,30 @@ incompatibility and installed editable with `--no-deps`.
 
 Metric reports are committed to `experiments/zeroshot_cf/results/`.
 Raw data (large arrays) are gitignored.
+
+### Headline numbers (2026-06-15)
+
+| Dataset | Exp | Validity | LOF plausibility | True actionability |
+|---------|-----|---------|-----------------|-------------------|
+| MOONS | Exp 2 | **0.85** | **1.055** (excellent) | **1.000** |
+| HELOC | Exp 2 | **0.66** | 2.5B (poor: sparse conditioning) | **1.000** |
+
+- MOONS validity exceeds the ≥0.70 target; plausibility is excellent.
+- HELOC validity exceeds the ≥0.50 target; plausibility is poor (66% of CFs extrapolate outside [0,1] before clipping — root cause: 17/23 features masked with only 7 observed values).
+- True actionability = 1.0 on both datasets (immutable columns frozen by construction).
+
+See `results/REPORT.md` for the full analysis and recommended next steps.
+
+### Run Experiment 2 with recommended configs
+
+```bash
+# MOONS recommended: t=0.5, all-class context (best proximity)
+HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/exp2_counterfactuals.py --dataset moons
+
+# HELOC (original config is best; refinement sweep shows temperature doesn't fix OOB)
+HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/exp2_counterfactuals.py --dataset heloc
+
+# Refinement sweep
+HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/refine.py --dataset moons
+HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/refine.py --dataset heloc
+```
