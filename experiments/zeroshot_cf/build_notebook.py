@@ -154,7 +154,7 @@ md(r"""
 ### Validity (with targets) and the HELOC plausibility collapse
 
 Validity targets were **MOONS ≥ 0.70** and **HELOC ≥ 0.50** — both met. But the HELOC LOF score
-is astronomically high and 66% of generated values fall out of range: masking 17/23 features leaves
+is astronomically high and 72% of generated values fall out of range: masking 17/23 features leaves
 only 6 immutables + Y to condition on, so the model extrapolates far outside the training manifold.
 """)
 
@@ -253,14 +253,15 @@ plt.tight_layout(); plt.show()
 md(r"""
 ## 4. Verdict
 
-**Partially viable out-of-the-box.**
+**Partially viable out-of-the-box.** *(Numbers updated post-review: Stage 7 fixed validity scoring
+and RNG seeding; see `results/REPORT.md §Post-review corrections` for details.)*
 
 | | MOONS (2-D) | HELOC (23-D) |
 |---|---|---|
-| Validity | **0.85** ✅ | **0.66** ✅ |
-| LOF plausibility | **1.06** (≈ training data) | **2.5B** ✗ |
+| Validity | **1.00** ✅ | **0.52** ✅ (barely) |
+| LOF plausibility | **1.076** (≈ training data) | **~3.1B** ✗ |
 | True actionability | **1.0** | **1.0** |
-| OOB fraction | 0% | 66% |
+| OOB fraction | 0% | 72% |
 
 **What works:** the Y-as-column conditioning mechanism is sound on low-dimensional, well-separated
 data; immutability is a structural guarantee (frozen columns); single-feature reconstruction beats

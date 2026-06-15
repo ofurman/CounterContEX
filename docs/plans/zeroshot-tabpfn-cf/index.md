@@ -108,7 +108,7 @@ Baselines from cel for HELOC/MOONS (PPCEF, DiCE, etc.) are recorded in `resource
 | 5 | [Experiment 2: counterfactual generation](stages/05-exp2-counterfactual-generation.md) | DONE | MOONS: validity=0.85 LOF=1.055 true_action=1.0; HELOC: validity=0.66 LOF=2.5B (66% OOB extrapolation) true_action=1.0. Validity targets met; HELOC plausibility poor due to sparse conditioning (17/23 features masked). Cel baselines deferred to Stage 6. | 2525e27 |
 | 6 | [Refinement & results report](stages/06-refinement-and-report.md) | DONE | MOONS sweep: t=0.5+all_classes best (prox=0.629, validity=0.783). HELOC sweep: no config fixes OOB (MAP gives OOB=100%; root cause is sparse conditioning, not temperature). REPORT.md written; README updated; key learnings recorded in results/REPORT.md and Decisions section of this index. | 1c415ca |
 | 7 | [Post-review correctness & reproducibility fixes](stages/07-postreview-fixes.md) | DONE | P1: validity now scores disc(X_cf)==y_target; LOF on unclipped X_cf; CLI flags added to exp2. P2: RNG seeding in sampler; immutability assert. P3: sample_temperature arg; scatter uses per-class context; api-reference TODO cleared; Stage6 memory claim resolved. 8/8 tests pass. | 319b05a |
-| 8 | [Regenerate results & report](stages/08-regenerate-results.md) | PENDING | Re-run Exp1/Exp2/sweeps with corrected metrics; rebuild REPORT.md + notebook + README; update memory. Depends on Stage 7. | |
+| 8 | [Regenerate results & report](stages/08-regenerate-results.md) | DONE | All exp1/exp2/sweep CSVs regenerated; sampler RNG seeding fix (calibration 0→0.69/0.62); corrected MOONS validity 0.85→1.0, HELOC 0.66→0.52; REPORT/README/notebook rebuilt; memory updated. | |
 
 Statuses: `PENDING` -> `IN_PROGRESS` -> `DONE` | `BLOCKED` | `SKIPPED`
 
@@ -197,6 +197,7 @@ Leave empty until execution surfaces something.
 | # | Stage | Symptom | Root Cause | Resolution | Fixed By |
 |---|-------|---------|-----------|------------|----------|
 | 1 | 3 | `TabPFNLicenseError: model weights for v3` during unsupervised impute | `settings.tabpfn.model_version` defaults to V3 at import time; `TABPFN_MODEL_VERSION=v2` env var set after import has no effect on already-instantiated pydantic-settings object | Updated `get_models()` to pass explicit `model_path=<v2_ckpt_file>` so `_resolve_model_version` reads version from filename, bypassing the settings object | inline |
+| 2 | 8 | Exp1 calibration collapsed to 0.00 (was 0.70) after Stage 7 RNG seeding fix | `impute_masked()` re-seeds from `self.random_state` on every call; all N posterior samples in `sample_feature(n_samples>1)` are identical (IQR=0 → calibration=0.00) | In `sample_feature`, offset `self.random_state` by sample index `i` inside the multi-sample loop so each draw uses a distinct seed | inline |
 
 ---
 

@@ -250,10 +250,18 @@ class ConditionalDensitySampler:
                 X_filled = self.impute_masked(X_query, mask_cols=[target_col])
                 return X_filled[:, target_col]
 
+            # Each sample must use a distinct seed so draws are truly independent.
+            # impute_masked always re-seeds from self.random_state; we offset it
+            # per iteration to avoid all n_samples producing the same value.
+            original_rs = self.random_state
             results = []
-            for _ in range(n_samples):
-                X_filled = self.impute_masked(X_query, mask_cols=[target_col])
-                results.append(X_filled[:, target_col])
+            try:
+                for i in range(n_samples):
+                    self.random_state = original_rs + i
+                    X_filled = self.impute_masked(X_query, mask_cols=[target_col])
+                    results.append(X_filled[:, target_col])
+            finally:
+                self.random_state = original_rs
         finally:
             self.temperature = original_temp
 

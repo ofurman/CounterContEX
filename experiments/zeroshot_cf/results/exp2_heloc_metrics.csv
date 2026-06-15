@@ -1,2 +1,2 @@
 dataset,validity,lof_scores_cf,sparsity,actionability,true_actionability,proximity_l2_jaccard,frac_oob
-heloc,0.66,2555625357.325865,0.7147826086956521,0.0,1.0,1.6516137507800928,0.66
+heloc,0.52,3114610048.3157673,0.7156521739130435,0.0,1.0,1.6683790093182924,0.72
