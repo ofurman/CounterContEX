@@ -1,2 +1,2 @@
-dataset,validity,lof_scores_cf,sparsity,actionability,true_actionability,proximity_l2_jaccard,frac_oob
-heloc,0.52,3114610048.3157673,0.7156521739130435,0.0,1.0,1.6683790093182924,0.72
+dataset,validity,lof_scores_cf,sparsity,actionability,true_actionability,proximity_l2_jaccard,frac_oob,n_failed
+heloc,0.5382409177820268,5682014774.035098,0.7052747526810209,0.0,0.998565965583174,1.6904712691015444,0.652963671128107,0

@@ -1,2 +1,2 @@
-dataset,validity,lof_scores_cf,sparsity,actionability,true_actionability,proximity_l2_jaccard,frac_oob
-moons,1.0,1.0764141056445622,1.0,0.0,1.0,0.6559946825968099,0.0
+dataset,validity,lof_scores_cf,sparsity,actionability,true_actionability,proximity_l2_jaccard,frac_oob,n_failed
+moons,0.995,1.0598725762396695,1.0,0.0,1.0,0.6742302781659265,0.01,0

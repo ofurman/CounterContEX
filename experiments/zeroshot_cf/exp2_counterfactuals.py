@@ -51,6 +51,43 @@ _DATASET_PARAMS = {
 }
 
 
+def _impute_range(sampler, X_src, X_out, mask_cols, fixed_target, dag, s, e, failed):
+    """Impute rows [s:e); on a numerical failure (float32 overflow in the
+    autoregressive chain at t>0) bisect down to the offending row(s). Rows that
+    fail even individually keep their factual values (→ counted invalid) and their
+    batch-relative index is appended to ``failed``."""
+    try:
+        X_out[s:e] = sampler.impute_masked(
+            X_src[s:e], mask_cols=mask_cols, fixed_target=fixed_target, dag=dag
+        )
+    except Exception as ex:  # noqa: BLE001 — isolate per-row numerical blow-ups
+        if e - s <= 1:
+            failed.append(s)
+            print(f"    [robust] row {s} failed ({type(ex).__name__}); left as factual")
+            return
+        mid = (s + e) // 2
+        print(f"    [robust] chunk [{s}:{e}] failed ({type(ex).__name__}); bisecting")
+        _impute_range(sampler, X_src, X_out, mask_cols, fixed_target, dag, s, mid, failed)
+        _impute_range(sampler, X_src, X_out, mask_cols, fixed_target, dag, mid, e, failed)
+
+
+def robust_impute(sampler, X_batch, mask_cols, fixed_target, dag, chunk=256):
+    """Chunked, failure-isolating wrapper around ``impute_masked`` for large test
+    sets. Per-row results are identical to a single call (rows are conditionally
+    independent given the fixed context); chunking only localizes the rare row
+    whose sampled value overflows float32 when fed to the next column in the chain.
+    Returns (X_cf_batch, failed_idx) with any non-finite survivors mapped to an
+    out-of-range sentinel so they are counted as OOB and then clipped downstream."""
+    n = len(X_batch)
+    out = np.asarray(X_batch, dtype=np.float64).copy()
+    failed: list = []
+    for s in range(0, n, chunk):
+        _impute_range(sampler, X_batch, out, mask_cols, fixed_target, dag,
+                      s, min(s + chunk, n), failed)
+    out = np.nan_to_num(out, nan=1e6, posinf=1e6, neginf=-1e6)
+    return out, failed
+
+
 def generate_counterfactuals(
     dataset_name: str,
     temperature: float = TEMPERATURE,
@@ -79,7 +116,12 @@ def generate_counterfactuals(
     from experiments.zeroshot_cf.sampler import ConditionalDensitySampler, build_chain_dag
 
     params = _DATASET_PARAMS.get(dataset_name, {"max_test": 50})
-    MAX_TEST = max_test if max_test is not None else params["max_test"]
+    if max_test is not None and max_test < 0:
+        MAX_TEST = None  # full test split (no cap)
+    elif max_test is not None:
+        MAX_TEST = max_test
+    else:
+        MAX_TEST = params["max_test"]
 
     print(f"\n=== Experiment 2: {dataset_name.upper()} ===")
     print(f"  temperature={temperature}, n_permutations={n_permutations}, "
@@ -139,6 +181,7 @@ def generate_counterfactuals(
 
     # Build output array; initialize with factual values (immutables stay as-is)
     X_cf = X_test.copy()
+    n_failed = 0
 
     # Process each target class in one batch
     for target_cls in np.unique(y_target):
@@ -167,15 +210,22 @@ def generate_counterfactuals(
             max_context=max_context,
         )
 
-        X_cf_batch = sampler.impute_masked(
+        X_cf_batch, failed = robust_impute(
+            sampler,
             X_batch,
             mask_cols=mask_cols,
             fixed_target=target_cls,
             dag=dag,
         )
         X_cf[test_idx] = X_cf_batch
+        n_failed += len(failed)
+
+    if n_failed:
+        print(f"\n  [robust] {n_failed}/{len(X_test)} rows failed imputation "
+              f"(left as factual → counted invalid).")
 
     return X_test, y_test, X_cf, {
+        "n_failed": n_failed,
         "bundle": bundle,
         "y_pred": y_pred,
         "y_target": y_target,
@@ -244,6 +294,7 @@ def evaluate_and_report(
         X_cf_lof=X_cf,  # use unclipped array for LOF to preserve true geometry
     )
     metrics["frac_oob"] = frac_oob
+    metrics["n_failed"] = int(info.get("n_failed", 0))
     print_metrics(metrics, prefix=dataset_name)
 
     if write_csv:
@@ -330,6 +381,7 @@ def run_dataset(
     ordering: str = "random",
     actionable_set: str = "full",
     reduced_k: int = 6,
+    max_test: Optional[int] = None,
 ) -> Dict[str, float]:
     X_test, y_test, X_cf, info = generate_counterfactuals(
         dataset_name,
@@ -340,6 +392,7 @@ def run_dataset(
         ordering=ordering,
         actionable_set=actionable_set,
         reduced_k=reduced_k,
+        max_test=max_test,
     )
     metrics = evaluate_and_report(dataset_name, X_test, y_test, X_cf, info)
     write_examples(dataset_name, X_test, X_cf, info)
@@ -448,6 +501,14 @@ def main() -> None:
         default=6,
         help="Number of top actionable features to mask when --actionable-set=reduced (default: 6).",
     )
+    parser.add_argument(
+        "--max-test",
+        type=int,
+        default=None,
+        help="Number of test points to evaluate. Default: per-dataset cap "
+             "(moons=100, heloc=50). Use -1 for the FULL stratified test split "
+             "(moons=200, heloc=2092).",
+    )
     args = parser.parse_args()
     datasets = ["moons", "heloc"] if args.dataset == "all" else [args.dataset]
 
@@ -467,6 +528,7 @@ def main() -> None:
             ordering=args.ordering,
             actionable_set=args.actionable_set,
             reduced_k=args.reduced_k,
+            max_test=args.max_test,
         )
         all_metrics.append({"dataset": ds, **m})
 

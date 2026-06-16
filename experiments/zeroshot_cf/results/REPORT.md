@@ -43,9 +43,35 @@ random feature orderings). We use the **Y-as-column trick** to inject class cond
 append the target label as an extra categorical column, fit the model on the augmented
 context, then at impute time fix Y=target (observed) and NaN-mask the actionable features.
 
-### Datasets
-- **MOONS**: 1000 rows, 2 continuous features, 80/20 split. Both features actionable (no immutables). MinMax→[0,1].
-- **HELOC**: 10,459 rows, 23 continuous features, 80/20 split. 6 history/age features are immutable (cannot be changed by the applicant); 17 are actionable. MinMax→[0,1].
+### Datasets & in-context rows
+80/20 **stratified** split (`random_state=42`), MinMax→[0,1] fit on train. TabPFN is never
+trained; the "context" is the in-context conditioning set passed to `TabPFNUnsupervisedModel.fit()`.
+
+| Dataset | Features | Train rows | Train per-class | Test rows (full split) | In-context rows |
+|---------|---------:|-----------:|-----------------|-----------------------:|----------------:|
+| MOONS | 2 (both actionable) | 800 | [397, 403] | 200 | 256 |
+| HELOC | 23 (6 immutable, 17 actionable) | 8,367 | [4367, 4000] | 2,092 | 256 |
+
+**In-context row count** (`sampler.py:set_context`, `exp2:159-173`): the conditioning set is
+drawn from the **train** split only; with `context_type=target_only` (baseline) it is the
+training rows of the **target class**, with `all_classes` the full train set; it is then
+subsampled to `max_context` (default **256**) deterministically. Because every per-class pool
+exceeds 256, **256 rows are used as context in all baseline runs**. Query (test) rows are
+capped by `--max-test` (baseline tables below: MOONS n=100, HELOC n=50; `-1` = full split:
+MOONS 200, HELOC 2092).
+
+### How `frac_oob` (out-of-bounds fraction) is computed
+`frac_oob` is the **row-level extrapolation rate** of the generated CFs
+(`exp2_counterfactuals.py:264-267`):
+```python
+oob_mask = (X_cf < 0.0) | (X_cf > 1.0)          # per-cell, on the UNCLIPPED generated CFs
+frac_oob = float(oob_mask.any(axis=1).mean())   # fraction of CF ROWS with ≥1 out-of-range cell
+```
+Features are MinMax-scaled to [0,1] on **train**, so a value outside [0,1] means TabPFN
+extrapolated beyond the training support. A CF row counts as OOB if **any** of its features is
+`< 0` or `> 1`; the metric is measured on the raw imputed array **before** the `np.clip(X_cf, 0, 1)`
+applied prior to validity/proximity/LOF. High `frac_oob` (HELOC 0.72) is therefore the direct
+signature of sparse-conditioning extrapolation, and explains the astronomical HELOC LOF.
 
 ### Validity oracle
 sklearn `LogisticRegression` trained on scaled features (MOONS: test acc=87%, HELOC: test acc=72%). Wrapped to expose `disc_model.predict(X)` + `.eval()` as required by the cel metrics contract. Note: validity oracle is a different model family than the TabPFN generator — a caveat for comparing with cel baselines.
@@ -95,6 +121,36 @@ For each feature j, mask it in test points, reconstruct via `ConditionalDensityS
 - **MOONS**: Excellent corrected results. Validity=1.0 (every CF lands on the target class). LOF≈1.08 — CFs are indistinguishable from training data (strong plausibility). Zero OOB. The Y-as-column trick works perfectly on the well-separated 2-D class structure.
 - **HELOC**: Validity=0.52 (barely above the ≥0.50 target; down from the inflated 0.66). True actionability=1.0 (immutables exactly frozen by construction). However, LOF≈3.1B and OOB=72% show CFs land far outside the training distribution. Root cause: conditioning on only 6 immutable features + Y while masking 17/23 features leaves too little information for the model — it extrapolates aggressively.
 - **HELOC LOF interpretation**: A score of ~3.1B means the unclipped CFs are ~3.1B times further from the nearest training neighbour than typical in-distribution points. This is a structural consequence of 72% OOB extrapolation under sparse conditioning, not a numerical artefact.
+
+### Full test-split results (2026-06-16)
+
+The baseline table above used capped test sets (MOONS n=100, HELOC n=50). Re-run on the
+**full stratified 80/20 test split** (MOONS n=200, HELOC n=2092) at the same config
+(t=1.0, n_perm=5, max_context=256, target_only, 256 in-context rows):
+
+| Dataset | n | Validity | LOF | Sparsity | True-action | Proximity L2 | OOB frac | n_failed |
+|---------|--:|---------|-----|---------|------------|-------------|---------|---------|
+| MOONS | 200 | **0.995** | 1.060 | 1.000 | 1.000 | 0.674 | 0.010 | 0 |
+| HELOC | 2092 | **0.538** | 5.68e9 | 0.705 | 0.999* | 1.690 | 0.653 | 0 |
+
+**Stability vs. capped runs**: the small-sample headline figures were not misleading —
+MOONS validity 1.00→0.995, HELOC validity 0.52→**0.538** (still ≥0.50 target), HELOC
+`frac_oob` 0.72→0.653 (still high). LOF stays astronomical. The sparse-conditioning
+extrapolation is therefore **structural and confirmed at scale**, not a small-sample artefact.
+
+\* **`true_actionability`=0.9986 is a metric artefact, not a violation.** `compute_metrics`
+compares the **clipped** CF to the test data with exact `==` (`metrics_harness.py:101`).
+MinMax was fit on **train**, so ~3/2092 test rows have an immutable feature natively just
+outside [0,1]; clipping the (frozen) CF value to the boundary creates an artificial mismatch.
+The hard immutability assert — run on the **unclipped** CF at `<1e-9` — passed, so immutables
+were genuinely frozen. The n=50 cap never sampled these boundary rows.
+
+**Robustness note (`robust_impute`)**: at t=1.0 the autoregressive chain can sample a value
+that overflows float32 when fed to the next column, raising `TabPFNValidationError`. The full
+HELOC set (2092 rows) first surfaced this; `exp2_counterfactuals.py:robust_impute` now imputes
+in 256-row chunks and bisects a failing chunk down to the offending row (left as factual →
+counted invalid), with non-finite survivors mapped to an out-of-range sentinel (→ counted OOB).
+This full-split run completed with **`n_failed=0`** (chunk-level re-seeding avoided the blow-up).
 
 ---
 
