@@ -38,7 +38,7 @@ The two `random_*` strategies are already implemented — Stage 3 adds only the 
    - A module-level `_knn_indices(X, query, k) -> np.ndarray` keeps `set_context` readable and is unit-testable in isolation.
 
 4. **Tests.**
-   - New file: `experiments/zeroshot_cf/tests/test_context.py`. Unit-test the selection logic in **isolation** via the module-level `_knn_indices` / random-subsample helpers (pure numpy, **no model needed**); use the conftest `models` fixture only for any test that exercises the full `set_context → model.fit` path. There is no `FAST_TEST_MODE`.
+   - New file: `experiments/zeroshot_cf/tests/test_context.py`. Unit-test the selection logic in **isolation** via the module-level `_knn_indices` / random-subsample helpers (pure numpy, **no model needed**); use the shared `models` fixture (now in `tests/conftest.py` after Stage 1 lifted it there — if Stage 1 has not yet run, reuse the fixture pattern from `test_sampler.py:30`) only for any test that exercises the full `set_context → model.fit` path. There is no `FAST_TEST_MODE`.
    - (a) `selection="random"` with a fixed seed reproduces the **exact** indices the current implementation produces (regression guard — default behaviour unchanged; test the selection logic directly so it doesn't depend on a fitted model).
    - (b) `selection="knn"` returns the `k` rows closest to `query` on a small synthetic set with a hand-checkable nearest set; indices are sorted; `y` is sliced consistently.
    - (c) `knn` raises `ValueError` when `query` is `None`.

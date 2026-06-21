@@ -4,6 +4,10 @@ All runs are **fully offline** against the staged local TabPFN **v2** checkpoint
 load only via `from checkpoints import get_models`. Never import `tabpfn_client` or call the
 cloud API. Run from the repo root (`/Users/ofurman/pwr/CounterContEX`).
 
+> **Artefact path**: all `results/...` artefacts land in `experiments/zeroshot_cf/results/`
+> (the runners use exp2's `RESULTS_DIR = Path(__file__).parent / "results"`), **not** a
+> repo-root `results/`. The report to extend is `experiments/zeroshot_cf/results/REPORT.md`.
+
 ## Environment (offline guarantee)
 
 ```bash

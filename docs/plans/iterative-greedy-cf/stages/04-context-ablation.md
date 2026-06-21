@@ -42,7 +42,7 @@ See `resources/grids.md` for the full cell list and `resources/commands.md` for 
    - See `resources/commands.md`. Keep `--max-test` identical across all cells within a dataset; if reduced for runtime, log it. Sizes above the available pool are capped and the effective size recorded.
 
 4. **Tests.**
-   - Extend `experiments/zeroshot_cf/tests/test_context.py` (or add `test_context_ablation.py`, using the conftest `models` fixture): assert the driver emits the expected number of rows (16, or 8 if the selector is `class_divergence`), that `effective_size <= size` and `effective_size <= pool_size`, and that `class_scope`/`selection` columns match the strategy name. No new model behaviour beyond Stage 3.
+   - Extend `experiments/zeroshot_cf/tests/test_context.py` (or add `test_context_ablation.py`, using the shared `models` fixture in `tests/conftest.py`): assert the driver emits the expected number of rows (16, or 8 if the selector is `class_divergence`), that `effective_size <= size` and `effective_size <= pool_size`, and that `class_scope`/`selection` columns match the strategy name. No new model behaviour beyond Stage 3.
 
 ---
 

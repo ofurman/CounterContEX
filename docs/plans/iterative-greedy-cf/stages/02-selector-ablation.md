@@ -34,7 +34,7 @@ Datasets: MOONS + HELOC ⇒ **4 cells** (2 selectors × 2 datasets). Everything 
    - See `resources/commands.md`. Use the same `--max-test` for both selectors within a dataset.
 
 4. **Tests.**
-   - Extend `experiments/zeroshot_cf/tests/test_greedy.py` (or add `test_selector_ablation.py`, using the conftest `models` fixture): assert the driver produces a CSV with one row per selector and that the `context_scope` column is `all_classes` for `class_divergence` and `target_only` for `prob_ascent`. No new model behaviour to test beyond Stage 1.
+   - Extend `experiments/zeroshot_cf/tests/test_greedy.py` (or add `test_selector_ablation.py`, using the shared `models` fixture in `tests/conftest.py`): assert the driver produces a CSV with one row per selector and that the `context_scope` column is `all_classes` for `class_divergence` and `target_only` for `prob_ascent`. No new model behaviour to test beyond Stage 1.
 
 ---
 
@@ -51,7 +51,7 @@ Datasets: MOONS + HELOC ⇒ **4 cells** (2 selectors × 2 datasets). Everything 
 ## Expected outcomes (record actuals against these)
 
 - **MOONS**: `prob_ascent` ≈ `class_divergence` (only 2 actionable features → little selection freedom); both validity ≈ 1.0, steps ≤ 2.
-- **HELOC**: `prob_ascent` should reach the flip in **fewer steps** (it optimizes the flip directly) and likely higher validity; `class_divergence` may yield more class-coherent / plausible features (lower frac_oob) at a possible cost in steps. Record which trade-off materializes.
+- **HELOC**: `prob_ascent` should reach the flip in **fewer steps** (it optimizes the flip directly) and likely higher validity; `class_divergence` may yield more class-coherent / plausible features (lower frac_oob) at a possible cost in steps. Record which trade-off materializes. **Caveat**: either selector can **plateau** before a flip — because each commit is a MAP value conditioned on the mostly-original row, a point may reach a state where no remaining feature increases `p_target`, exhausting `budget` without flipping. Watch `failure_rate`; a HELOC validity at/below the 0.538 one-pass baseline is a legitimate outcome to report, not a failure of the stage.
 
 ---
 
