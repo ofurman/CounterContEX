@@ -19,18 +19,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from experiments.zeroshot_cf.checkpoints import get_models
 from experiments.zeroshot_cf.sampler import ConditionalDensitySampler
 
-
-# ---------------------------------------------------------------------------
-# Shared fixtures
-# ---------------------------------------------------------------------------
-
-@pytest.fixture(scope="module")
-def models():
-    clf, reg = get_models(n_estimators=2)
-    return clf, reg
+# The shared ``models`` fixture now lives in tests/conftest.py.
 
 
 def _make_synthetic(n: int = 80, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:

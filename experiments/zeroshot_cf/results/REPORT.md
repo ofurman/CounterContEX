@@ -303,6 +303,46 @@ cost of higher OOB on full set; better balance on reduced set).
 
 ---
 
+## 7b. Iterative Greedy CF (Exp4, Stage 1) — `iterative-greedy-cf` plan
+
+Change actionable features **one at a time**, conditioned class-conditionally on all
+the rest (single masked column per step → dense conditioning), and **stop at the
+discriminator's flip**. L0 is optimized by construction (features added only until the
+flip). Two interchangeable selectors share the same loop:
+
+- **prob_ascent** (Strategy 1) — pick the candidate whose near-MAP value most raises
+  `disc.predict_proba[y_target]` (target-class context).
+- **class_divergence** (Strategy 2) — pick the candidate whose class-conditional
+  predictive mean shifts most between `Y=target` and `Y=current` (all-classes context,
+  classifier-free).
+
+Committed value = near-MAP (`t≈1e-9`, deterministic single column). Near-MAP single-column
+commits are deterministic regardless of `n_permutations`.
+
+### Stage-1 baseline metrics (`max_context=256`, `n_permutations=3`)
+
+| Dataset | Selector | n | Validity | LOF | frac_oob | l0_count_mean | steps_max | true_action | failure_rate |
+|---------|----------|---|----------|-----|----------|---------------|-----------|-------------|--------------|
+| MOONS | prob_ascent | 100 | 0.690 | 1.009 | 0.000 | 1.26 | 2 | 1.000 | 0.310 |
+| MOONS | class_divergence | 30 | 0.633 | 1.026 | 0.000 | 1.32 | 2 | 1.000 | 0.367 |
+| HELOC | prob_ascent | 5 | **1.000** | **1.85** | **0.000** | **1.40** | 2 | 1.000 | 0.000 |
+
+**Headline (HELOC).** Greedy salvages HELOC dramatically vs the Stage-8 one-pass baseline
+(validity 0.538, frac_oob 0.65, LOF 5.7e9, all 17 actionables changed): on the bounded
+smoke set it reaches validity 1.0, frac_oob 0.0, LOF ≈ 1.85, and changes **only ~1.4
+features** to flip. Both the OOB collapse (single masked column ⇒ dense conditioning) and
+the L0 minimization (stop at the flip) behave exactly as designed. Larger-`n` confirmation
+and the selector/context ablations are Stages 2–4.
+
+**MOONS caveat.** Validity ≈ 0.69 (not the ≈1.0 expectation). The ~31% `failure_rate` is
+the **near-MAP plateau** the plan anticipated (Success Criteria, HELOC row): with only 2
+actionable features and deterministic near-MAP commits, ~1/3 of boundary points exhaust
+the budget without a hard flip. `steps_max=2` and `true_actionability=1.0` hold by
+construction. The selector ablation (Stage 2) and context ablation (Stage 4) are the levers
+meant to probe this.
+
+---
+
 ## 8. Files
 
 | Path | Description |
@@ -310,8 +350,12 @@ cost of higher OOB on full set; better balance on reduced set).
 | `exp1_single_feature.py` | Experiment 1 runner |
 | `exp2_counterfactuals.py` | Experiment 2 runner |
 | `exp3_feature_ordering.py` | Experiment 3 (DAG ablation) runner |
+| `exp4_greedy_cf.py` | Experiment 4 (iterative greedy CF) runner |
+| `greedy.py` | Greedy loop + prob_ascent / class_divergence selectors |
 | `refine.py` | Refinement sweep runner |
 | `configs/sweep.yaml` | Sweep configuration |
+| `results/exp4_greedy_{moons,heloc}_metrics.csv` | Exp 4 per-dataset greedy metrics |
+| `results/exp4_examples.md` | Greedy CF examples + recourse paths |
 | `results/exp1_{moons,heloc}.csv` | Per-feature reconstruction metrics |
 | `results/exp1_summary.md` | Exp 1 summary + gate verdict |
 | `results/exp2_{moons,heloc}_metrics.csv` | Exp 2 per-dataset metrics |

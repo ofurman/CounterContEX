@@ -16,17 +16,8 @@ import numpy as np
 import pytest
 
 from experiments.zeroshot_cf.sampler import build_chain_dag, ConditionalDensitySampler
-from experiments.zeroshot_cf.checkpoints import get_models
 
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-@pytest.fixture(scope="module")
-def models():
-    clf, reg = get_models(n_estimators=2)
-    return clf, reg
+# The shared ``models`` fixture now lives in tests/conftest.py.
 
 
 def _make_synthetic(n: int = 80, seed: int = 0):

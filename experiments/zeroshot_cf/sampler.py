@@ -45,6 +45,37 @@ def build_chain_dag(
     return dag
 
 
+def mean_of_prediction(logits, criterion) -> np.ndarray:
+    """Expected value of a bar-distribution prediction.
+
+    ``logits``/``criterion`` are the pair returned by
+    ``ConditionalDensitySampler.predictive_distribution`` for a regressor column
+    (``criterion`` is a ``FullSupportBarDistribution``). Returns the per-row
+    distribution mean as a numpy array. This is the bar-distribution *mean*, NOT
+    the near-MAP (mode) value a ``t≈1e-9`` draw produces — they differ for
+    skewed distributions.
+    """
+    mean = criterion.mean(logits)
+    return mean.detach().cpu().numpy()
+
+
+def symmetric_kl(logits_a, logits_b, criterion) -> np.ndarray:
+    """Symmetric KL between two bar distributions that share the same borders.
+
+    Both ``logits_a`` and ``logits_b`` are scored against the same ``criterion``
+    (shared bucket borders), so the per-bucket probabilities are directly
+    comparable. Returns ``KL(P_a || P_b) + KL(P_b || P_a)`` per row as a numpy
+    array.
+    """
+    log_pa = torch.log_softmax(logits_a, dim=-1)
+    log_pb = torch.log_softmax(logits_b, dim=-1)
+    pa = log_pa.exp()
+    pb = log_pb.exp()
+    kl_ab = (pa * (log_pa - log_pb)).sum(dim=-1)
+    kl_ba = (pb * (log_pb - log_pa)).sum(dim=-1)
+    return (kl_ab + kl_ba).detach().cpu().numpy()
+
+
 class ConditionalDensitySampler:
     """Conditional density sampler built on top of TabPFNUnsupervisedModel.
 
@@ -252,6 +283,7 @@ class ConditionalDensitySampler:
         target_col: int,
         n_samples: int = 1,
         sample_temperature: Optional[float] = None,
+        fixed_target: Optional[int] = None,
     ) -> np.ndarray:
         """Reconstruct a single feature column via conditional density estimation.
 
@@ -270,6 +302,12 @@ class ConditionalDensitySampler:
             self.temperature when provided. Use 1e-9 for near-MAP point
             estimates and 1.0 for posterior exploration. When None, falls
             back to self.temperature.
+        fixed_target : int or None
+            Target class to condition on, forwarded to ``impute_masked``.
+            Required (and only used) when ``append_target=True`` — under that
+            regime the single masked column is drawn class-conditionally,
+            ``p(x_j | x_{-j}, Y=fixed_target)``. Default None preserves the
+            existing ``append_target=False`` (class-agnostic) behaviour.
 
         Returns
         -------
@@ -283,7 +321,9 @@ class ConditionalDensitySampler:
         self.temperature = effective_temp
         try:
             if n_samples == 1:
-                X_filled = self.impute_masked(X_query, mask_cols=[target_col])
+                X_filled = self.impute_masked(
+                    X_query, mask_cols=[target_col], fixed_target=fixed_target
+                )
                 return X_filled[:, target_col]
 
             # Each sample must use a distinct seed so draws are truly independent.
@@ -294,7 +334,9 @@ class ConditionalDensitySampler:
             try:
                 for i in range(n_samples):
                     self.random_state = original_rs + i
-                    X_filled = self.impute_masked(X_query, mask_cols=[target_col])
+                    X_filled = self.impute_masked(
+                        X_query, mask_cols=[target_col], fixed_target=fixed_target
+                    )
                     results.append(X_filled[:, target_col])
             finally:
                 self.random_state = original_rs
@@ -302,3 +344,82 @@ class ConditionalDensitySampler:
             self.temperature = original_temp
 
         return np.stack(results, axis=0)  # shape (n_samples, m)
+
+    # ------------------------------------------------------------------
+    # Single-feature predictive distribution (Experiment 4, Strategy 2)
+    # ------------------------------------------------------------------
+
+    def predictive_distribution(
+        self,
+        X_query: np.ndarray,
+        target_col: int,
+        fixed_target: Optional[int] = None,
+    ):
+        """Return the conditional predictive distribution of a single masked feature.
+
+        Unlike ``sample_feature`` this does NOT sample — it returns the raw
+        per-row distribution of ``x_{target_col} | x_{-target_col}, Y=fixed_target``
+        so callers (e.g. the class-divergence selector) can compute statistics
+        (mean, KL) without drawing.
+
+        Mirrors the augmented-matrix construction of ``impute_masked`` (NaN-mask
+        ``target_col``, append the ``Y=fixed_target`` categorical column, same
+        RNG re-seeding) and then calls the underlying model's conditional-density
+        primitive ``density_`` directly — there is no public "impute minus the
+        sample" path.
+
+        Parameters
+        ----------
+        X_query : ndarray of shape (m, d)
+            Query rows; ``target_col`` is masked (its value is ignored).
+        target_col : int
+            Column index whose conditional distribution is requested.
+        fixed_target : int or None
+            Class to condition on. Required when ``append_target=True``.
+
+        Returns
+        -------
+        For a regressor (numerical) column — the case for all HELOC/MOONS
+        features — a dict ``{"logits": Tensor, "criterion": FullSupportBarDistribution}``
+        describing the per-row bar distribution. For a classifier (categorical)
+        column, a dict ``{"proba": ndarray}`` of class probabilities.
+        """
+        if not self._fitted:
+            raise RuntimeError("Call set_context() before predictive_distribution().")
+
+        # Re-seed exactly as impute_masked does so the fit is reproducible.
+        random.seed(self.random_state)
+        np.random.seed(self.random_state)
+        torch.manual_seed(self.random_state)
+
+        X = np.asarray(X_query, dtype=np.float32).copy()
+        X[:, target_col] = np.nan
+
+        if self.append_target:
+            if fixed_target is None:
+                raise ValueError("fixed_target required when append_target=True")
+            target_col_arr = np.full((len(X), 1), float(fixed_target), dtype=np.float32)
+            X_aug = np.concatenate([X, target_col_arr], axis=1)
+        else:
+            X_aug = X
+
+        # conditional_idx = every augmented column except the masked target_col
+        # (all observed features + the appended Y column when present).
+        conditional_idx = [c for c in range(X_aug.shape[1]) if c != target_col]
+
+        X_predict_t = torch.tensor(X_aug, dtype=torch.float32)
+        model_j, X_predict, _ = self.model.density_(
+            X_predict_t,
+            self.model.X_,
+            conditional_idx,
+            target_col,
+        )
+
+        if self.model.use_classifier_(target_col, self.model.X_[:, target_col]):
+            proba = model_j.predict_proba(X_predict.numpy())
+            return {"proba": np.asarray(proba)}
+
+        # Pass X_predict as the tensor returned by density_ (matches the verified
+        # internal caller outliers_single_permutation_); do NOT .numpy() it.
+        out = model_j.predict(X_predict, output_type="full")
+        return {"logits": out["logits"], "criterion": out["criterion"]}
