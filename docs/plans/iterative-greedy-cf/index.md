@@ -66,7 +66,7 @@ Targets stay modest — this remains an out-of-the-box exploration. "Success" = 
 | L0 count — features changed (HELOC) | one-pass changes all 17 actionables (`sparsity≈0.70` of 23 cols) | `l0_count_mean` **markedly < 17** for valid CFs | The core point of greedy: stop at the flip. Report the integer `l0_count_*` keys *and* the existing fractional `sparsity`. |
 | Steps-to-flip (MOONS) | n/a | ≤ 2 (of 2 actionables) | Often a single-feature flip on 2-D data. |
 | Validity (MOONS) | 0.995 | ≥ 0.95 | Greedy drives toward the flip; should hold. |
-| Validity (HELOC) | 0.538 | ≥ 0.538 (record actual) | Greedy explicitly optimizes the flip; should meet/beat one-pass. |
+| Validity (HELOC) | 0.538 | record actual (target ≥ 0.538, not a gate) | Greedy explicitly optimizes the flip and *may* meet/beat one-pass — but committed values are MAP-conditioned on the mostly-original row, and steepest-ascent can **plateau** (no remaining feature increases `p_target`) before a flip, raising `failure_rate`. A HELOC validity below 0.538 is a legitimate finding, not a bug — report it alongside `failure_rate`. |
 | Plausibility — frac_oob / LOF (HELOC) | 0.65 / 5.7e9 | **markedly lower** | One masked column per step ⇒ dense conditioning. |
 | true_actionability (immutables unchanged) | 1.0 | 1.0 | Immutables never candidates — by construction. |
 | Selector ablation | — | identify the winner on validity / L0 / steps | Strategy 1 vs Strategy 2, both datasets. |
@@ -86,7 +86,10 @@ Targets stay modest — this remains an out-of-the-box exploration. "Success" = 
 
 ### Modified
 - `sampler.py` — add `predictive_distribution()` helper (Stage 1); extend `set_context()` with `selection={random,knn}` and `pool={target,both}` (Stage 3). Existing behaviour (random subsample) preserved as the default.
+- `tests/conftest.py` — host the shared `models` fixture (lifted from `test_sampler.py`/`test_ordering.py` in Stage 1; today `conftest.py` only does `sys.path` setup).
 - `results/REPORT.md` (this plan's results section), `results/exp4_*`, `results/exp5_*`, `results/exp6_*` CSV/MD artefacts.
+
+> **Artefact path convention**: every `results/...` path in this plan resolves to `experiments/zeroshot_cf/results/` (exp2's `RESULTS_DIR = Path(__file__).parent / "results"` convention), **not** a repo-root `results/`. The existing report is `experiments/zeroshot_cf/results/REPORT.md`.
 
 > The core `src/tabpfn/**` package is **not** modified (zero architecture changes). No `tabpfn_client` / cloud API anywhere.
 
