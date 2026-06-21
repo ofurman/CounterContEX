@@ -85,7 +85,7 @@ Targets stay modest — this remains an out-of-the-box exploration. "Success" = 
 - `tests/test_context.py` — kNN context-selection unit tests (Stage 3).
 
 ### Modified
-- `sampler.py` — add `predictive_distribution()` helper (Stage 1); extend `set_context()` with `selection={random,knn}` and `pool={target,both}` (Stage 3). Existing behaviour (random subsample) preserved as the default.
+- `sampler.py` — add `fixed_target` pass-through to `sample_feature()` so the greedy commit can sample class-conditionally (Stage 1, prerequisite — default `None` preserves existing behaviour); add `predictive_distribution()` helper (Stage 1); extend `set_context()` with `selection={random,knn}` and `pool={target,both}` (Stage 3). Existing behaviour (random subsample, `append_target=False` sampling) preserved as the default.
 - `tests/conftest.py` — host the shared `models` fixture (lifted from `test_sampler.py`/`test_ordering.py` in Stage 1; today `conftest.py` only does `sys.path` setup).
 - `results/REPORT.md` (this plan's results section), `results/exp4_*`, `results/exp5_*`, `results/exp6_*` CSV/MD artefacts.
 
