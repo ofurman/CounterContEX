@@ -99,7 +99,7 @@ Targets stay modest — this remains an out-of-the-box exploration. "Success" = 
 
 | # | Stage | Status | Notes | Commit |
 |---|-------|--------|-------|--------|
-| 1 | [Iterative greedy core + both selectors](stages/01-greedy-core.md) | PENDING | | |
+| 1 | [Iterative greedy core + both selectors](stages/01-greedy-core.md) | DONE | greedy loop + both selectors + `predictive_distribution`/bar helpers + Exp4 runner + 7 new tests (20/20 pass). HELOC smoke (n=5): validity 1.0, frac_oob 0.0, LOF 1.85, l0≈1.4 — salvages HELOC. MOONS validity ≈0.69 (near-MAP plateau, anticipated finding — see Decision #8). | dc018e9 (pending) |
 | 2 | [Selector ablation (Strategy 1 vs 2)](stages/02-selector-ablation.md) | PENDING | | |
 | 3 | [kNN / context-selection support](stages/03-knn-context-selection.md) | PENDING | | |
 | 4 | [Context ablation (size × strategy)](stages/04-context-ablation.md) | PENDING | | |
@@ -220,3 +220,32 @@ Decisions made during planning (2026-06-21):
 7. **Context size is capped at the available pool** and logged. MOONS train ≈ 800 rows (≈ 400 per class), so sizes 1024/2048 saturate on MOONS — the size axis is primarily informative on HELOC (≈ 8k train). Report the effective size per cell.
 
 Decisions made during autonomous execution should be appended below.
+
+**Stage 1 (2026-06-21):**
+
+8. **`greedy_counterfactual` returns `(x_cf, changed, info)`** where `info` is a dict
+   (`flipped: bool`, `steps: int`, `history: list`) rather than the bare per-step
+   `history` list the stage sketch named. The runner and the budget-exhaustion test both
+   need an explicit `flipped` flag, and the per-step `history` lives inside `info["history"]`.
+   `steps == len(changed)` in this one-feature-per-step loop.
+
+9. **MOONS validity ≈ 0.69 (failure_rate ≈ 0.31) is a recorded finding, not a bug.** The
+   verification checklist's "MOONS validity ≈ 1.0" expectation was *not* met under the
+   plan-mandated near-MAP (`t≈1e-9`) commit (Decision #3). With only 2 actionable features
+   and deterministic mode-bucket commits, ~1/3 of boundary points plateau (no remaining
+   feature produces a hard flip) and exhaust the budget — exactly the plateau the Success
+   Criteria table anticipated for steepest-ascent. `steps_max=2` and `true_actionability=1.0`
+   hold. HELOC, by contrast, is salvaged (validity 1.0, frac_oob 0.0, LOF 1.85, l0≈1.4 on
+   the n=5 smoke set). The selector ablation (Stage 2) and context ablation (Stage 4) are
+   the levers meant to probe MOONS validity; raising temperature or posterior-sample-best
+   (off-by-default per Decision #3) are further options if needed.
+
+10. **Execution environment.** `uv run` could not resolve dependencies in this offline
+    sandbox (pre-existing `pyproject.toml` `[tool.uv] exclude-newer = "7 days"` parse error
+    under the installed uv + a 401 on the private index — unrelated to this plan). Tests and
+    runs were executed with the sibling TabPFN repo's fully-provisioned venv
+    (`/Users/ofurman/pwr/TabPFN/.venv`), `PYTHONPATH` = this repo, `TABPFN_LOCAL_CACHE`
+    pointed at the staged v2 checkpoints, and a **gitignored** symlink
+    `experiments/zeroshot_cf/vendor → ../../../TabPFN/experiments/zeroshot_cf/vendor` so the
+    `cel` dataset configs resolve. No code change was needed; the offline guarantee holds
+    (no network, `get_models()` only, no `tabpfn_client`).
