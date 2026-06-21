@@ -83,14 +83,19 @@ Raw data (large arrays) are gitignored.
 |---------|-----|---------|-----------------|-------------------|
 | MOONS | Exp 2 | **1.00** | **1.076** (excellent) | **1.000** |
 | HELOC | Exp 2 | **0.52** | ~3.1B (structurally poor) | **1.000** |
-| MOONS | Exp 4 (from-scratch beam) | **1.00** | **0.98** (excellent) | 1.000 |
-| HELOC | Exp 4 (from-scratch beam) | 0.33 | **1.03** (excellent, OOB=0) | n/a (immutables soft-frozen, drift≈0.04) |
+| MOONS | Exp 4 (beam, either regime) | **1.00** | **0.98** (excellent) | 1.000 |
+| HELOC | Exp 4 — Set 1 frozen immutables | 0.13 | 7.9e6 (off-manifold) | **1.000** |
+| HELOC | Exp 4 — Set 2 from scratch | **1.00** | **1.01** (excellent, OOB=0) | 0.000 (immutables regenerated) |
 
-> **Exp 4 (Stage 10)** generates *every* feature from scratch (mask all; condition only
-> on `Y=target`) via a task-guided **beam search**. It **solves Exp 2's plausibility
-> failure** on HELOC — LOF 3.1B → **1.03**, frac_oob 72% → **0%**, proximity 1.67 → 0.84 —
-> but **trades it for validity** (≤0.35 vs 0.52). `lambda_actionable` is the
-> validity↔proximity dial. See `results/REPORT.md §8`.
+> **Exp 4 (Stage 10)** runs a task-guided **beam search** in two regimes that differ only
+> in whether immutables are masked. **Set 2 (from scratch — mask nothing)** generates every
+> feature from `p(X|Y=target)` and reaches **validity 1.0, LOF 1.0, frac_oob 0%** on HELOC —
+> strictly beating Exp 2 — but gives up actionability (immutables drift ~0.12). **Set 1
+> (freeze immutables, actionable)** keeps `true_actionability=1.0` but validity collapses to
+> 0.13 and plausibility degrades, because pinning HELOC's highly class-predictive immutables
+> to the wrong-class values forces an off-manifold, invalid configuration. The finding:
+> **actionability and validity+plausibility are in fundamental tension on HELOC.** See
+> `results/REPORT.md §8`.
 
 - MOONS validity=1.0 far exceeds the ≥0.70 target; plausibility is excellent (LOF≈1.08, zero OOB).
 - HELOC validity=0.52 barely meets the ≥0.50 target; plausibility is poor (72% of CFs extrapolate outside [0,1] before clipping — root cause: 17/23 features masked with only 7 observed values under sparse conditioning).
@@ -143,14 +148,19 @@ HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/refine.py --dataset moons
 HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/refine.py --dataset heloc
 ```
 
-### Run Experiment 4 (from-scratch beam search)
+### Run Experiment 4 (beam search: frozen-immutable vs from-scratch)
 
 ```bash
-# Defaults: beam_width=8, n_candidates=6, lambda_actionable=1.0, lambda_immutable=100
-HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/exp4_beam_search.py --dataset all
-
-# Validity↔proximity dial: raise --lambda-actionable to pull CFs toward the factual
-# (note: lambda must be O(20-100) to overcome TabPFN's log-density scale)
+# Both regimes (Set 1 frozen + Set 2 from scratch), both datasets
 HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/exp4_beam_search.py \
-    --dataset heloc --lambda-actionable 20 --max-test 20
+    --dataset all --set both
+
+# Just the from-scratch regime on HELOC
+HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/exp4_beam_search.py \
+    --dataset heloc --set fromscratch
+
+# Proximity dial: raise --lambda-actionable to pull actionables toward the factual
+# (lambda must be O(20-100) to overcome TabPFN's log-density scale)
+HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/exp4_beam_search.py \
+    --dataset heloc --set fromscratch --lambda-actionable 20 --max-test 20
 ```

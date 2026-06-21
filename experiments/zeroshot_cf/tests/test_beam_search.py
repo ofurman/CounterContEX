@@ -213,6 +213,31 @@ def test_higher_lambda_immutable_reduces_drift():
 
 
 # ---------------------------------------------------------------------------
+# 4b. Frozen-immutable mode (Set 1): immutables observed, held exactly at factual
+# ---------------------------------------------------------------------------
+
+
+def test_freeze_immutable_holds_immutables_exactly():
+    reg = _FakeReg(lo=0.0, hi=1.0)
+    Xc, yc = _toy_context(d=4)
+    rng = np.random.default_rng(11)
+    Xf = rng.uniform(0, 1, size=(6, 4))
+    immutable_idx = [0, 2]
+    ordering = build_generation_ordering(4, immutable_idx=immutable_idx)
+    cfg = BeamConfig(beam_width=4, n_candidates=5, max_context=64)
+
+    X_cf, aux = generate_cf_beam(
+        reg, Xc, yc, Xf, 1, ordering, immutable_idx, cfg, freeze_immutable=True
+    )
+    # Immutable columns must be byte-identical to the factual (true_actionability=1.0).
+    np.testing.assert_array_equal(X_cf[:, immutable_idx], Xf[:, immutable_idx])
+    assert aux["immutable_drift"].max() == 0.0
+    # Actionable columns are still generated (in [0,1]).
+    actionable = [1, 3]
+    assert X_cf[:, actionable].min() >= 0.0 and X_cf[:, actionable].max() <= 1.0
+
+
+# ---------------------------------------------------------------------------
 # 5. Out-of-bounds rejection / fallback
 # ---------------------------------------------------------------------------
 

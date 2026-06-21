@@ -176,8 +176,18 @@ def generate_cf_beam(
     immutable_idx: Sequence[int],
     config: Optional[BeamConfig] = None,
     disc_model=None,
+    freeze_immutable: bool = False,
 ) -> Tuple[np.ndarray, Dict]:
-    """Generate counterfactuals from scratch via task-guided beam search.
+    """Generate counterfactuals via task-guided beam search.
+
+    Two regimes (see ``freeze_immutable``):
+
+    - **from scratch** (default): *every* feature is generated; immutables are still
+      generated but soft-pulled to the factual via ``lambda_immutable``.
+    - **frozen-immutable** (``freeze_immutable=True``): immutables are *observed*
+      (held at the factual value, never generated) and the beam generates only the
+      actionable features — directly comparable to the Exp 2/3 imputation baseline,
+      with ``true_actionability == 1.0`` by construction.
 
     Args:
         reg: A ``TabPFNRegressor`` (from ``checkpoints.get_models``). Re-fit per step.
@@ -185,16 +195,20 @@ def generate_cf_beam(
             rows so the appended Y column is informative (a constant Y in context
             triggers TabPFN's constant-feature validator).
         y_context: (n_ctx,) labels for the context rows.
-        X_factual: (m, d) factual rows to explain. Used only for the proximity
-            penalty and final metrics — never observed during generation.
+        X_factual: (m, d) factual rows to explain. Used for the proximity penalty and
+            final metrics; in ``freeze_immutable`` mode its immutable columns are also
+            copied into the (observed) immutable columns of every beam.
         target_class: Desired class for all m counterfactuals (call once per
             target class, mirroring exp2's per-class batching).
-        ordering: Full generation order over all d features (see
-            ``build_generation_ordering``).
-        immutable_idx: Columns that receive the high (soft-freeze) λ.
+        ordering: Generation order. In from-scratch mode a full permutation of all d
+            features; in frozen mode any immutable entries are skipped (immutables are
+            observed, not generated).
+        immutable_idx: Immutable columns. Soft-pulled (from scratch) or held observed
+            (frozen).
         config: Beam hyper-parameters.
         disc_model: Optional validity oracle (``.predict``) used for the terminal
             rerank. When None, beams are ranked by cumulative score only.
+        freeze_immutable: If True, observe immutables and generate only actionables.
 
     Returns:
         (X_cf, aux) where X_cf is (m, d) float64 and aux carries per-row diagnostics.
@@ -208,9 +222,17 @@ def generate_cf_beam(
     Xf = np.asarray(X_factual, dtype=np.float64)
     m, d = Xf.shape
     y_idx = d  # appended Y column index in the augmented matrix
-    ordering = list(ordering)
-    immut_set = set(int(i) for i in immutable_idx)
+    immut_list = sorted(int(i) for i in immutable_idx)
+    immut_set = set(immut_list)
     probs = cfg.probs()
+
+    if freeze_immutable:
+        # Immutables are observed parents at every step; only actionables generated.
+        gen_order = [int(f) for f in ordering if int(f) not in immut_set]
+        base_observed = [y_idx] + immut_list
+    else:
+        gen_order = [int(f) for f in ordering]
+        base_observed = [y_idx]
 
     # Subsample context deterministically (all classes; Y must vary).
     if len(Xc) > cfg.max_context:
@@ -219,9 +241,12 @@ def generate_cf_beam(
         Xc, yc = Xc[idx], yc[idx]
     ctx_aug = np.concatenate([Xc, yc.reshape(-1, 1)], axis=1)  # (n_ctx, d+1)
 
-    # Initial beams: one per query, all original features NaN, Y = target.
+    # Initial beams: one per query, generated features NaN, Y = target.
+    # In frozen mode, immutable columns are pre-filled with the factual values.
     init_rows = np.full((m, d + 1), np.nan, dtype=np.float64)
     init_rows[:, y_idx] = float(target_class)
+    if freeze_immutable and immut_list:
+        init_rows[:, immut_list] = Xf[:, immut_list]
     beams = _Beams(
         rows=init_rows,
         group=np.arange(m, dtype=np.int64),
@@ -231,8 +256,8 @@ def generate_cf_beam(
 
     n_oob_fallback = 0
 
-    for step, f in enumerate(ordering):
-        observed = [y_idx] + ordering[:step]  # augmented indices
+    for step, f in enumerate(gen_order):
+        observed = base_observed + gen_order[:step]  # augmented indices
         lam = cfg.lambda_immutable if f in immut_set else cfg.lambda_actionable
 
         # Fit the conditional density p(f | observed) once on the shared context.

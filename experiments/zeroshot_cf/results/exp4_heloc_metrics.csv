@@ -1,2 +1,0 @@
-dataset,validity,lof_scores_cf,sparsity,actionability,true_actionability,proximity_l2_jaccard,frac_oob,immutable_drift_mean,immutable_drift_max,n_oob_fallback
-heloc,0.3333333333333333,1.0276621620504367,1.0,0.0,0.0,0.8443333385710453,0.0,0.03952857539989054,0.1284304124613603,0

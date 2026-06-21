@@ -304,7 +304,7 @@ cost of higher OOB on full set; better balance on reduced set).
 
 ---
 
-## 7b. Iterative Greedy CF (Exp4, Stage 1) — `iterative-greedy-cf` plan
+## 7b. Iterative Greedy CF (Exp4a, Stage 1) — `iterative-greedy-cf` plan
 
 Change actionable features **one at a time**, conditioned class-conditionally on all
 the rest (single masked column per step → dense conditioning), and **stop at the
@@ -410,68 +410,74 @@ untried knobs).
 
 ---
 
-## 8. Experiment 4: From-Scratch Counterfactuals via Task-Guided Beam Search
+## 8. Experiment 4b: Beam-Search Counterfactuals — Frozen-Immutable vs From-Scratch
 
-**Stage 10** tests a fundamentally different regime: instead of *imputing* the masked
-actionable features (Exp 2/3), **every feature is generated from scratch**, conditioned
-only on `Y=target`. The factual is never observed — it enters solely through a
-per-feature proximity penalty. Generation is a **task-guided beam search**: at each
-autoregressive step it branches over candidate values (bar-distribution quantiles +
-mode), scores them by `log p(feature) − λ·|feature − factual|` with a **hard `[0,1]`
-rejection**, keeps the top-`beam_width` partial CFs, and reranks completed beams by
-validity. Reimplemented on the raw `TabPFNRegressor` (no `tabpfn-extensions`); immutables
-are **soft-frozen** with a large `lambda_immutable` (Decisions #11–12).
+**Stage 10** introduces a **task-guided beam search** (reimplemented on the raw
+`TabPFNRegressor` — no `tabpfn-extensions`). At each autoregressive step it branches over
+candidate values (bar-distribution quantiles + mode), scores them by
+`log p(feature) − λ·|feature − factual|` with a **hard `[0,1]` rejection**, keeps the
+top-`beam_width` partial CFs, and reranks completed beams by validity (Decisions #11–12).
 
-### Why from-scratch is *richer*, not sparser
-Exp 2's OOB failure came from *flat* conditioning: `impute(dag=None)` conditions each of
-the 17 masked features on only the 6 immutables + Y, and **not on each other**. Beam
-search is autoregressive: with a fixed ordering, feature `k` conditions on `Y` + the
-`k−1` already-generated features, so the conditioning context **grows** along the chain.
+It is run in **two regimes that differ only in whether immutables are masked**:
 
-### Results (n=30, defaults: beam_width=8, n_candidates=6, λ_act=1.0, λ_immut=100, all_classes)
+- **Set 1 — frozen immutables** (actionable; directly comparable to the Exp 2/3 baseline):
+  immutables are *observed* (held at the factual value); the beam generates only the 17
+  HELOC actionables. `true_actionability = 1.0` by construction.
+- **Set 2 — from scratch** (no masking): *every* feature is generated, conditioned only on
+  `Y=target`; the factual enters only via the proximity penalty. Immutables drift.
 
-| Dataset | Validity | LOF | Proximity L2 | frac_oob | Immut drift (mean) | True-action |
-|---------|---------|-----|-------------|---------|-------------------|------------|
-| MOONS | **1.000** | 0.977 | 0.470 | **0.000** | 0.000 | 1.000 |
-| HELOC | 0.333 | **1.028** | 0.844 | **0.000** | 0.040 | 0.000* |
+For MOONS (no immutables) the two regimes are identical.
 
-\* `true_actionability=0` is expected by construction — immutables are generated (and
-drift ~0.04), so they are not byte-identical to the factual; `immutable_drift` quantifies
-this instead.
+### Results (n=30; beam_width=8, n_candidates=6, λ_actionable=1.0, all_classes)
 
-### HELOC `lambda_actionable` frontier (n=20, beam=8)
+| Dataset | Set | Validity | LOF | Proximity L2 | frac_oob | True-action | Immut drift |
+|---------|-----|---------|-----|-------------|---------|------------|------------|
+| MOONS | 1 ≡ 2 | **1.000** | 0.977 | 0.470 | **0.000** | 1.000 | 0.000 |
+| HELOC | **1 frozen** | 0.133 | 7.9e6 | 0.455 | **0.000** | **1.000** | 0.000 |
+| HELOC | **2 from scratch** | **1.000** | **1.006** | 0.830 | **0.000** | 0.000 | 0.115 |
 
-| λ_actionable | validity | LOF | proximity L2 | frac_oob |
-|---|---|---|---|---|
-| 0.1 – 1.0 | 0.35 | 1.02 | 0.92 | 0.00 |
-| 20  | 0.05 | 1.03 | 0.20 | 0.00 |
-| 100 | 0.05 | 1.04 | 0.16 | 0.00 |
+For reference, the previous baseline — **Exp 2 (imputation, frozen immutables)** on HELOC:
+validity 0.52, LOF 3.1e9, frac_oob 0.72, proximity 1.67, true_action 1.0.
 
-### Verdict (honest)
+### The finding: actionability vs validity+plausibility is a *fundamental* tension on HELOC
 
-- **Plausibility is solved unconditionally.** Across the whole frontier, LOF ≈ 1.0 and
-  **frac_oob = 0.00** — versus Exp 2's LOF ≈ **3.1 billion** and OOB **72%**. The `[0,1]`
-  rejection plus growing autoregressive context eliminate the extrapolation that broke
-  Exp 2. Proximity also improves (HELOC 1.67 → 0.84).
-- **`lambda_actionable` is a clean validity↔proximity dial** — but note the scale: TabPFN
-  log-densities are O(several units), so λ≈1 is density-dominated; λ must be O(20–100) to
-  pull CFs toward the factual.
-- **The tradeoff:** the entire frontier caps at **validity ≤ 0.35 < Exp 2's 0.52**.
-  From-scratch generation **trades validity for plausibility**. The ceiling is
-  discriminator disagreement (TabPFN `p(X|Y=target)` produces plausible points the LR
-  oracle labels "target" only ~35% of the time); the terminal rerank cannot select a
-  valid beam if none of the explored beams are valid.
-- **vs Exp 2/3**: a genuinely different operating point. Exp 2 maximized validity at
-  catastrophic plausibility cost; Exp 4 maximizes plausibility at a validity cost. Neither
-  is uniformly better — they sit on opposite ends of the validity↔plausibility frontier.
+- **Set 2 (from scratch) is excellent and strictly dominates Exp 2 on the generation axes**:
+  validity **1.0**, LOF **1.0**, frac_oob **0.0** on both datasets. Masking *nothing* and
+  letting the autoregressive chain generate every feature from `p(X | Y=target)` produces
+  valid, fully in-distribution target-class instances. (This is *richer*, not sparser, than
+  Exp 2: with a fixed ordering, feature `k` conditions on `Y` + the `k−1` already-generated
+  features, so context grows along the chain instead of staying flat at "6 immutables + Y".)
+  The cost is that it is no longer a *minimal/actionable* edit — immutables drift 0.115 and
+  proximity is 0.83 (it is essentially "a plausible approved applicant", not "this applicant,
+  minimally changed").
+
+- **Set 1 (frozen immutables) cannot be salvaged on HELOC, even with beam search.** Validity
+  collapses to **0.13** *and* plausibility degrades (LOF 7.9e6) despite frac_oob=0 — because
+  welding target-class actionables onto the applicant's **wrong-class** frozen immutables
+  produces rows that are in-bounds but **off-manifold** (no real applicant looks like that).
+  HELOC's immutables (credit age/history) are so class-determining that fixing them to the
+  factual values forces the rest into an invalid, implausible configuration.
+
+- **Beam vs Exp 2 at equal constraints (both frozen-immutable)**: beam is far more *plausible*
+  and *proximal* (LOF 7.9e6 vs 3.1e9; frac_oob 0.00 vs 0.72; proximity 0.46 vs 1.67) but has
+  *lower* validity (0.13 vs 0.52). Exp 2's higher validity was bought by **wild extrapolation**
+  (72% OOB) into invalid-but-clipped regions; beam stays in-distribution and therefore cannot
+  flip the class while the wrong-class immutables are pinned. Neither escapes the tension —
+  only regenerating the immutables (Set 2) does.
+
+**Take-away**: TabPFN-as-density-estimator *can* generate valid, plausible target-class
+instances zero-shot (Set 2). Whether that counts as a *counterfactual* depends on whether
+actionability (fixed immutables) is required — and on HELOC that requirement is in direct
+conflict with validity, because the protected features carry most of the class signal.
 
 ### Recommended next steps (do not oversell)
-1. **Validity-aware exploration** — steer per-step candidates toward the target class
-   (partial-row discriminator score / validity bonus) so beams *explore* valid regions,
-   not just rerank them. This is the lever for the 0.35 ceiling.
-2. **Factual-as-candidate for immutables** → drives `immutable_drift` → 0 and
-   `true_actionability` → 1.0 at no extra cost (current drift floor ≈ candidate spacing).
-3. **Full-split eval on MPS** to confirm the n=20–30 frontier holds at scale.
+1. **Validity-aware exploration for Set 1** — steer per-step candidates toward the target
+   class (partial-row discriminator score), so the actionable regime can find the rare valid,
+   plausible configuration instead of relying on terminal rerank.
+2. **Proximity dial** — `lambda_actionable` trades proximity for validity, but note the scale:
+   TabPFN log-densities are O(several units), so λ must be O(20–100) to meaningfully pull CFs
+   toward the factual (λ≈1 is density-dominated).
+3. **Full-split eval on MPS** to confirm the n=30 numbers hold at scale.
 
 ---
 
@@ -484,10 +490,10 @@ this instead.
 | `exp3_feature_ordering.py` | Experiment 3 (DAG ablation) runner |
 | `exp4_greedy_cf.py` | Experiment 4a (iterative greedy CF) runner |
 | `greedy.py` | Greedy loop + prob_ascent / class_divergence selectors |
-| `beam_search.py` | Experiment 4b core: task-guided from-scratch beam search |
-| `exp4_beam_search.py` | Experiment 4b (beam search) runner |
-| `results/exp4_{moons,heloc}_{frozen,fromscratch}_metrics.csv` | Exp 4b per-dataset/regime metrics |
-| `results/exp4_summary.md` | Exp 4b summary + two-regime notes |
+| `beam_search.py` | Experiment 4b core: task-guided beam search (frozen / from-scratch) |
+| `exp4_beam_search.py` | Experiment 4b runner (both regimes) |
+| `results/exp4_{moons,heloc}_{frozen,fromscratch}_metrics.csv` | Exp 4b per-dataset, per-regime metrics |
+| `results/exp4_summary.md` | Exp 4b two-regime summary + notes |
 | `refine.py` | Refinement sweep runner |
 | `configs/sweep.yaml` | Sweep configuration |
 | `results/exp4_greedy_{moons,heloc}_metrics.csv` | Exp 4 per-dataset greedy metrics |

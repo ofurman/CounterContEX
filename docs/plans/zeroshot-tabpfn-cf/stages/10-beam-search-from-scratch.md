@@ -102,49 +102,57 @@ rerank completed beams per query: prefer disc.predict(cf)==target, tie-break by 
 
 ## Verification
 
-- [x] `uv run pytest experiments/zeroshot_cf/tests/test_beam_search.py -q` → 8 passed (offline).
-- [x] Live MOONS: validity=1.0, LOF≈0.98, frac_oob=0.0, proximity≈0.47.
-- [x] Live HELOC (n=30, defaults): validity≈0.33, LOF≈1.03, **frac_oob=0.0**,
-      proximity≈0.84, immutable_drift mean≈0.04.
+- [x] `uv run pytest experiments/zeroshot_cf/tests/test_beam_search.py -q` → 9 passed (offline,
+      incl. frozen-immutable mode test).
+- [x] Live MOONS (Set 1 ≡ Set 2, no immutables): validity=1.0, LOF≈0.98, frac_oob=0.0, proximity≈0.47.
+- [x] Live HELOC Set 2 (from scratch, n=30): validity=**1.0**, LOF≈1.01, frac_oob=0.0, drift≈0.12.
+- [x] Live HELOC Set 1 (frozen, n=30): validity=0.13, LOF≈7.9e6, frac_oob=0.0, true_action=1.0.
 - [x] `git diff --name-only main..HEAD -- src/tabpfn` is empty (core untouched).
 
 ---
 
-## Outcomes (actuals)
+## Outcomes (actuals) — two regimes
 
-- **Plausibility is solved unconditionally.** Across the entire `lambda_actionable`
-  frontier, LOF ≈ 1.0 and **frac_oob = 0.00** — versus Exp 2's LOF ≈ 3.1e9 / OOB 72%.
-  The `[0,1]` candidate rejection + growing autoregressive context eliminate the
-  extrapolation that broke Exp 2.
-- **`lambda_actionable` is a clean validity↔proximity dial**, but note the *scale*:
-  TabPFN log-densities are O(several units), so λ≈1 is density-dominated (proximity has
-  no teeth); λ must be O(20–100) to pull CFs toward the factual.
+> **Correction.** An interim run kept immutables *soft-frozen* (large `lambda_immutable`) and
+> reported "from-scratch caps at validity ≈0.35 / trades validity for plausibility". That was
+> an **artifact of soft-freezing immutables to wrong-class values**, not a property of the
+> method. Re-run with the two clean regimes below, the picture is different and stronger.
 
-  | λ_actionable | validity | LOF | proximity L2 | frac_oob |
-  |---|---|---|---|---|
-  | 0.1 – 1.0 | 0.35 | 1.02 | 0.92 | 0.00 |
-  | 20  | 0.05 | 1.03 | 0.20 | 0.00 |
-  | 100 | 0.05 | 1.04 | 0.16 | 0.00 |
+| Dataset | Set | validity | LOF | proximity | frac_oob | true_action | immut drift |
+|---------|-----|---------|-----|-----------|---------|------------|------------|
+| MOONS | 1 ≡ 2 | **1.00** | 0.98 | 0.47 | 0.00 | 1.00 | 0.00 |
+| HELOC | 1 frozen | 0.13 | 7.9e6 | 0.46 | 0.00 | **1.00** | 0.00 |
+| HELOC | 2 from scratch | **1.00** | **1.01** | 0.83 | 0.00 | 0.00 | 0.115 |
 
-- **The tradeoff:** the whole frontier sits at **validity ≤ 0.35 < Exp 2's 0.52**.
-  From-scratch generation trades validity for plausibility + proximity. The ~0.35
-  ceiling is discriminator disagreement (TabPFN `p(X|Y=target)` produces plausible
-  points the LR oracle labels "target" only ~35% of the time); the terminal rerank
-  cannot pick a valid beam if none of the explored beams are valid.
-- **Immutable soft-freeze** plateaus at the candidate-spacing floor (drift ≈ 0.04–0.05
-  at λ≥100): the closest fixed quantile candidate to the factual is ~0.5/`n_candidates`
-  away. Injecting the factual value itself as a guaranteed candidate for immutable
-  columns would drive drift → 0 (documented as a next step, not implemented).
+- **Set 2 (from scratch) strictly dominates Exp 2 on the generation axes**: validity **1.0**,
+  LOF **1.0**, frac_oob **0** on both datasets. Masking nothing and generating every feature
+  from `p(X|Y=target)` yields valid, in-distribution target-class instances — the conditioning
+  is *richer*, not sparser (feature `k` sees `Y` + the `k−1` already-generated features). Cost:
+  not a minimal/actionable edit (immutables drift 0.12, proximity 0.83).
+- **Set 1 (frozen immutables) cannot be salvaged on HELOC, even with beam search**: validity
+  collapses to **0.13** and plausibility degrades (LOF 7.9e6, off-manifold) despite frac_oob=0,
+  because welding target-class actionables onto the wrong-class frozen immutables yields
+  in-bounds-but-unreal rows. HELOC's immutables carry most of the class signal.
+- **Beam-frozen vs Exp 2 (equal constraints)**: beam is far more plausible/proximal
+  (LOF 7.9e6 vs 3.1e9, OOB 0 vs 0.72, prox 0.46 vs 1.67) but lower validity (0.13 vs 0.52) —
+  Exp 2's validity was bought via 72% OOB extrapolation; beam stays in-distribution and can't
+  flip the class while immutables are pinned.
+- **The finding (Decision #13): actionability ⟂ validity+plausibility on HELOC.** You can have
+  the protected immutables (Set 1, but invalid/implausible) or a valid, plausible target-class
+  instance (Set 2, but immutables regenerated) — not both, because the protected features
+  determine the class.
 
 ### Recommended next steps (do not oversell Exp 4)
-1. **Validity-aware exploration**: add a per-step signal that steers candidates toward
-   the target class (partial-row discriminator score, or a small validity bonus), so
-   beams *explore* valid regions instead of relying on terminal rerank.
-2. **Factual-as-candidate for immutables** → true_actionability ≈ 1.0 at zero extra cost.
-3. **Full-split eval on MPS** to confirm the n=20–30 frontier holds at scale.
+1. **Validity-aware exploration for Set 1**: steer per-step candidates toward the target class
+   (partial-row discriminator score) so the actionable regime can find rare valid+plausible
+   configurations instead of relying on terminal rerank.
+2. **Proximity dial**: `lambda_actionable` trades proximity for validity; it must be O(20–100)
+   to overcome TabPFN's log-density scale (λ≈1 is density-dominated).
+3. **Full-split eval on MPS** to confirm the n=30 numbers hold at scale.
 
 ---
 
 ## Commit
 
-`feat(zeroshot-cf): add from-scratch beam-search CF generation (Exp4)`
+`feat(zeroshot-cf): add from-scratch beam-search CF generation (Exp4)` (initial), then
+`feat(zeroshot-cf): add frozen-immutable regime + correct Exp4 two-regime analysis`.

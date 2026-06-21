@@ -1,25 +1,27 @@
-"""Experiment 4: from-scratch counterfactuals via task-guided beam search.
+"""Experiment 4: counterfactuals via task-guided beam search, in two regimes.
 
-Every feature of each counterfactual is generated autoregressively, conditioned
-only on Y=target — the factual is *never observed*, entering solely through a
-per-feature proximity penalty. Immutable columns are soft-frozen with a large λ
-(still generated, but strongly pulled to the factual value).
+Both regimes use identical beam settings and differ **only** in whether the
+immutable features are masked:
 
-Contrast with Exp 2/3 (imputation: freeze immutables, mask only actionables).
-Because immutables are now generated, ``true_actionability`` is no longer 1.0 by
-construction — immutable *drift* is reported as a first-class metric instead.
+- **Set 1 — frozen immutables** (``--set frozen``): immutables are *observed*
+  (held at the factual value); the beam generates only the actionable features.
+  Directly comparable to the Exp 2/3 imputation baseline; ``true_actionability=1.0``.
+- **Set 2 — from scratch** (``--set fromscratch``): *no* feature is masked; every
+  feature is generated autoregressively conditioned only on Y=target. The factual
+  enters solely via the per-feature proximity penalty; immutables drift (reported).
 
 Context: all_classes (mandatory — a constant Y in context trips TabPFN's
 constant-feature validator; Y must vary so the appended-Y conditioning works).
+For MOONS (no immutables), Set 1 ≡ Set 2.
 
 Outputs:
-  results/exp4_<dataset>_metrics.csv   — per-dataset metric row
-  results/exp4_summary.md              — aggregate table + notes
+  results/exp4_<dataset>_<set>_metrics.csv   — per-dataset, per-regime metric row
+  results/exp4_summary.md                    — combined two-regime table + notes
 
 Usage:
-  uv run python experiments/zeroshot_cf/exp4_beam_search.py --dataset moons
+  uv run python experiments/zeroshot_cf/exp4_beam_search.py --dataset all --set both
   uv run python experiments/zeroshot_cf/exp4_beam_search.py --dataset heloc \\
-      --beam-width 8 --n-candidates 6 --lambda-actionable 1.0 --lambda-immutable 50
+      --set fromscratch --beam-width 8 --lambda-actionable 1.0
 """
 
 from __future__ import annotations
@@ -64,8 +66,14 @@ def generate_counterfactuals_beam(
     lambda_immutable: float = 100.0,
     max_context: int = MAX_CONTEXT,
     max_test: Optional[int] = None,
+    freeze_immutable: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict]:
-    """Generate from-scratch CFs for one dataset. Returns (X_test, y_test, X_cf, info)."""
+    """Generate beam-search CFs for one dataset. Returns (X_test, y_test, X_cf, info).
+
+    ``freeze_immutable=False`` (Set 2): every feature generated from scratch.
+    ``freeze_immutable=True``  (Set 1): immutables observed (held at factual),
+    only actionables generated — comparable to the Exp 2/3 imputation baseline.
+    """
     from experiments.zeroshot_cf.beam_search import (
         BeamConfig,
         build_generation_ordering,
@@ -83,11 +91,16 @@ def generate_counterfactuals_beam(
     else:
         MAX_TEST = params["max_test"]
 
-    print(f"\n=== Experiment 4 (beam, from scratch): {dataset_name.upper()} ===")
+    mode = (
+        "frozen-immutable (Set 1, ~Exp2 baseline)"
+        if freeze_immutable
+        else ("from-scratch (Set 2, no masking)")
+    )
+    print(f"\n=== Experiment 4 (beam) [{mode}]: {dataset_name.upper()} ===")
     print(
         f"  beam_width={beam_width}, n_candidates={n_candidates}, "
         f"lambda_actionable={lambda_actionable}, lambda_immutable={lambda_immutable}, "
-        f"max_context={max_context}"
+        f"max_context={max_context}, freeze_immutable={freeze_immutable}"
     )
 
     bundle = load_dataset(dataset_name)
@@ -97,9 +110,10 @@ def generate_counterfactuals_beam(
     n, d = X_test.shape
 
     actionable_idx, immutable_idx = get_actionable_immutable(dataset_name, bundle)
+    immut_note = "observed/held" if freeze_immutable else "generated (drift reported)"
     print(
         f"Features: {d} total, {len(actionable_idx)} actionable, "
-        f"{len(immutable_idx)} immutable (soft-frozen); all generated from scratch"
+        f"{len(immutable_idx)} immutable ({immut_note})"
     )
     print(f"Test set (capped): {n} points")
 
@@ -150,9 +164,11 @@ def generate_counterfactuals_beam(
             immutable_idx=immutable_idx,
             config=cfg,
             disc_model=disc_model,
+            freeze_immutable=freeze_immutable,
         )
+        n_gen = len(actionable_idx) if freeze_immutable else d
         print(
-            f"    beam search: {len(X_batch)} pts, {d} features "
+            f"    beam search: {len(X_batch)} pts, {n_gen} generated features "
             f"→ {time.perf_counter() - t0:.2f}s "
             f"(oob_fallback={aux['n_oob_fallback']})"
         )
@@ -182,6 +198,7 @@ def generate_counterfactuals_beam(
             "lambda_actionable": lambda_actionable,
             "lambda_immutable": lambda_immutable,
             "max_context": max_context,
+            "freeze_immutable": freeze_immutable,
         },
     )
 
@@ -249,31 +266,66 @@ def evaluate_and_report_beam(
     return metrics
 
 
-def run_dataset(dataset_name: str, **kwargs) -> Dict[str, float]:
-    X_test, y_test, X_cf, info = generate_counterfactuals_beam(dataset_name, **kwargs)
-    return evaluate_and_report_beam(dataset_name, X_test, y_test, X_cf, info)
+# The two report regimes. Each (tag, freeze_immutable) pair becomes one "set".
+_SETS = [
+    ("frozen", True, "Set 1 — frozen immutables (actionable, ~Exp2 baseline)"),
+    ("fromscratch", False, "Set 2 — from scratch (no masking, nothing frozen)"),
+]
 
 
-def write_summary(all_metrics: List[Dict], settings: Dict) -> None:
+def run_dataset(dataset_name: str, tag: str, freeze_immutable: bool, **kwargs) -> Dict:
+    X_test, y_test, X_cf, info = generate_counterfactuals_beam(
+        dataset_name, freeze_immutable=freeze_immutable, **kwargs
+    )
+    metrics = evaluate_and_report_beam(
+        dataset_name, X_test, y_test, X_cf, info, write_csv=False
+    )
+    row = {
+        "dataset": dataset_name,
+        "set": tag,
+        "freeze_immutable": freeze_immutable,
+        **metrics,
+    }
+    csv_path = RESULTS_DIR / f"exp4_{dataset_name}_{tag}_metrics.csv"
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+        writer.writeheader()
+        writer.writerow(row)
+    print(f"\n  Wrote {csv_path}")
+    return row
+
+
+def write_summary(all_rows: List[Dict], settings: Dict) -> None:
     lines = [
-        "# Experiment 4: From-Scratch Counterfactuals via Task-Guided Beam Search",
+        "# Experiment 4: Counterfactuals via Task-Guided Beam Search",
+        "",
+        "Two regimes, identical beam settings — they differ **only** in whether the "
+        "immutable features are masked:",
+        "",
+        "- **Set 1 (frozen immutables)** — immutables are *observed* (held at the "
+        "factual value); the beam generates only the actionable features. Directly "
+        "comparable to the Exp 2/3 imputation baseline; `true_actionability = 1.0`.",
+        "- **Set 2 (from scratch)** — *no* feature is masked; every feature is "
+        "generated, conditioned only on `Y=target`. The factual enters only via the "
+        "proximity penalty.",
         "",
         f"Settings: beam_width={settings['beam_width']}, "
         f"n_candidates={settings['n_candidates']}, "
         f"lambda_actionable={settings['lambda_actionable']}, "
-        f"lambda_immutable={settings['lambda_immutable']}, "
-        f"max_context={settings['max_context']}, context_type=all_classes",
+        f"max_context={settings['max_context']}, context_type=all_classes. "
+        "(For MOONS, which has no immutables, Set 1 ≡ Set 2.)",
         "",
         "## Metrics",
         "",
-        "| Dataset | Validity | LOF | Proximity L2 | OOB frac | Immut drift (mean) | "
+        "| Dataset | Set | Validity | LOF | Proximity L2 | OOB frac | Immut drift | "
         "True-action |",
-        "|---------|---------|-----|-------------|---------|-------------------|"
+        "|---------|-----|---------|-----|-------------|---------|------------|"
         "------------|",
     ]
-    for m in all_metrics:
+    for m in all_rows:
         lines.append(
             f"| {m['dataset']} "
+            f"| {m['set']} "
             f"| {m.get('validity', float('nan')):.3f} "
             f"| {m.get('lof_scores_cf', float('nan')):.3f} "
             f"| {m.get('proximity_l2_jaccard', float('nan')):.4f} "
@@ -285,19 +337,15 @@ def write_summary(all_metrics: List[Dict], settings: Dict) -> None:
         "",
         "## Notes",
         "",
-        "- **From scratch**: every feature is generated autoregressively conditioned "
-        "only on Y=target; the factual enters solely via the per-feature proximity "
-        "penalty `λ·|f − factual|`.",
-        "- Immutables are soft-frozen (large `lambda_immutable`); they are still "
-        "generated, so `true_actionability` < 1.0 is expected and `immutable_drift` "
-        "(mean |Δ| over immutable columns) quantifies how far they wandered.",
         "- `validity`: fraction whose discriminator class == target (higher = better).",
         "- `lof_scores_cf`: mean negative-LOF plausibility on unclipped CFs (lower = better).",
         "- `proximity_l2_jaccard`: mean L2 to factual on *valid* CFs (lower = closer).",
-        "- `frac_oob`: fraction of CF rows with a feature outside [0,1] before clipping. "
-        "Hard [0,1] candidate rejection during search should keep this low.",
+        "- `frac_oob`: fraction of CF rows with a feature outside [0,1] before clipping; "
+        "the hard [0,1] candidate rejection keeps this at 0.",
+        "- **Set 2** generates immutables too, so `true_actionability` < 1.0 and "
+        "`immutable_drift` reports how far they wandered.",
         "",
-        "Comparison vs. Exp 2 (imputation baseline) is recorded in `results/REPORT.md`.",
+        "Full comparison vs. Exp 2 (imputation baseline) is in `results/REPORT.md §8`.",
     ]
     out = RESULTS_DIR / "exp4_summary.md"
     out.write_text("\n".join(lines) + "\n")
@@ -306,13 +354,12 @@ def write_summary(all_metrics: List[Dict], settings: Dict) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Experiment 4: from-scratch beam-search CFs"
+        description="Experiment 4: beam-search CFs (frozen-immutable vs from-scratch)"
     )
     parser.add_argument("--dataset", choices=["moons", "heloc", "all"], default="moons")
     parser.add_argument("--beam-width", type=int, default=8)
     parser.add_argument("--n-candidates", type=int, default=6)
     parser.add_argument("--lambda-actionable", type=float, default=1.0)
-    parser.add_argument("--lambda-immutable", type=float, default=100.0)
     parser.add_argument("--max-context", type=int, default=MAX_CONTEXT)
     parser.add_argument(
         "--max-test",
@@ -321,23 +368,39 @@ def main() -> None:
         help="Test points to evaluate. Default per-dataset cap (moons=100, heloc=30); "
         "-1 for the full stratified split.",
     )
+    parser.add_argument(
+        "--set",
+        choices=["frozen", "fromscratch", "both"],
+        default="both",
+        help="Which regime(s) to run (default: both).",
+    )
     args = parser.parse_args()
     datasets = ["moons", "heloc"] if args.dataset == "all" else [args.dataset]
+    sets = _SETS if args.set == "both" else [s for s in _SETS if s[0] == args.set]
 
+    settings = dict(
+        beam_width=args.beam_width,
+        n_candidates=args.n_candidates,
+        lambda_actionable=args.lambda_actionable,
+        max_context=args.max_context,
+    )
     kwargs = dict(
         beam_width=args.beam_width,
         n_candidates=args.n_candidates,
         lambda_actionable=args.lambda_actionable,
-        lambda_immutable=args.lambda_immutable,
+        # Set 2 (from scratch): immutables generated with the same λ as actionables
+        # (no special freeze). Set 1 ignores lambda_immutable (immutables observed).
+        lambda_immutable=args.lambda_actionable,
         max_context=args.max_context,
         max_test=args.max_test,
     )
-    all_metrics = []
-    for ds in datasets:
-        m = run_dataset(ds, **kwargs)
-        all_metrics.append({"dataset": ds, **m})
+    all_rows = []
+    for tag, freeze, label in sets:
+        print(f"\n########## {label} ##########")
+        for ds in datasets:
+            all_rows.append(run_dataset(ds, tag, freeze, **kwargs))
 
-    write_summary(all_metrics, settings=kwargs)
+    write_summary(all_rows, settings=settings)
     print("\nExperiment 4 done.")
 
 

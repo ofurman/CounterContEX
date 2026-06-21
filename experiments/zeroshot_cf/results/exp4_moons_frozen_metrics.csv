@@ -1,0 +1,2 @@
+dataset,set,freeze_immutable,validity,lof_scores_cf,sparsity,actionability,true_actionability,proximity_l2_jaccard,frac_oob,immutable_drift_mean,immutable_drift_max,n_oob_fallback
+moons,frozen,True,1.0,0.9767065840694613,1.0,0.0,1.0,0.46974947107747067,0.0,0.0,0.0,0
