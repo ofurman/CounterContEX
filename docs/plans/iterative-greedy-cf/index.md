@@ -99,7 +99,7 @@ Targets stay modest — this remains an out-of-the-box exploration. "Success" = 
 
 | # | Stage | Status | Notes | Commit |
 |---|-------|--------|-------|--------|
-| 1 | [Iterative greedy core + both selectors](stages/01-greedy-core.md) | DONE | greedy loop + both selectors + `predictive_distribution`/bar helpers + Exp4 runner + 7 new tests (20/20 pass). HELOC smoke (n=5): validity 1.0, frac_oob 0.0, LOF 1.85, l0≈1.4 — salvages HELOC. MOONS validity ≈0.69 (near-MAP plateau, anticipated finding — see Decision #8). | dc018e9 (pending) |
+| 1 | [Iterative greedy core + both selectors](stages/01-greedy-core.md) | DONE | greedy loop + both selectors + `predictive_distribution`/bar helpers + Exp4 runner + 7 new tests (20/20 pass). HELOC smoke (n=5): validity 1.0, frac_oob 0.0, LOF 1.85, l0≈1.4 — salvages HELOC. MOONS validity ≈0.69 (near-MAP plateau, anticipated finding — see Decision #8). | 5dfcaba |
 | 2 | [Selector ablation (Strategy 1 vs 2)](stages/02-selector-ablation.md) | PENDING | | |
 | 3 | [kNN / context-selection support](stages/03-knn-context-selection.md) | PENDING | | |
 | 4 | [Context ablation (size × strategy)](stages/04-context-ablation.md) | PENDING | | |
