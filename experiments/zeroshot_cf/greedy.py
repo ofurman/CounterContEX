@@ -29,7 +29,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from experiments.zeroshot_cf.sampler import mean_of_prediction
+from experiments.zeroshot_cf.sampler import class_conditional_shift
 
 
 def _select_prob_ascent(
@@ -74,19 +74,27 @@ def _select_class_divergence(
     y_current: int,
     candidates: List[int],
 ) -> Tuple[int, float, Optional[float]]:
-    """Strategy 2: pick the candidate whose class-conditional predictive mean
-    shifts most between ``Y=y_target`` and ``Y=y_current``. Classifier-free.
-    Returns ``(j*, divergence, None)`` — the loop draws the committed value."""
+    """Strategy 2: pick the candidate whose class-conditional predictive
+    distribution shifts most between ``Y=y_target`` and ``Y=y_current``.
+    Classifier-free. Returns ``(j*, divergence, None)`` — the loop draws the
+    committed value.
+
+    The per-candidate divergence is delegated to ``class_conditional_shift``,
+    which handles BOTH of TabPFN's per-column routings uniformly and in
+    comparable [0,1] units: the absolute mean-shift for regressor columns (all
+    MOONS features, most HELOC features) and the total-variation distance for
+    classifier columns (HELOC's low-cardinality integer features, which
+    ``infer_categorical_features`` routes to the classifier head — reaching into
+    ``dist["logits"]`` directly used to KeyError on those). Features are
+    MinMax-[0,1] so no extra normalization is needed.
+    """
     X = x_cf.reshape(1, -1)
     best_j: Optional[int] = None
     best_div = -np.inf
     for j in candidates:
         dist_tgt = sampler.predictive_distribution(X, target_col=j, fixed_target=y_target)
         dist_cur = sampler.predictive_distribution(X, target_col=j, fixed_target=y_current)
-        mean_tgt = float(mean_of_prediction(dist_tgt["logits"], dist_tgt["criterion"])[0])
-        mean_cur = float(mean_of_prediction(dist_cur["logits"], dist_cur["criterion"])[0])
-        # Features are MinMax-[0,1] so the range is ~1.0 → no extra normalization.
-        div = abs(mean_tgt - mean_cur)
+        div = float(class_conditional_shift(dist_tgt, dist_cur)[0])
         if div > best_div:
             best_div = div
             best_j = j

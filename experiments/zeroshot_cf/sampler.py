@@ -102,6 +102,57 @@ def symmetric_kl(logits_a, logits_b, criterion) -> np.ndarray:
     return (kl_ab + kl_ba).detach().cpu().numpy()
 
 
+def class_conditional_shift(dist_tgt: dict, dist_cur: dict) -> np.ndarray:
+    """Per-row magnitude of the class-conditional shift between two predictive
+    distributions of the *same* masked feature (one conditioned on ``Y=target``,
+    the other on ``Y=current``).
+
+    Uniform across TabPFN's two per-column routings; both branches return a
+    value in ``[0, 1]`` so the class-divergence selector's argmax stays in
+    comparable units regardless of whether a column is regressor- or
+    classifier-routed:
+
+    - **Regressor column** (``{"logits", "criterion"}``): absolute difference of
+      the bar-distribution means, ``|E[x_j|Y=target] - E[x_j|Y=current]|``. The
+      feature is MinMax-[0,1] so this is already in ``[0, 1]``.
+    - **Classifier column** (``{"proba", "classes"}``): total-variation distance
+      ``½·Σ_k |p_target,k - p_current,k|`` between the two class-probability
+      vectors, aligned on the union of their ``classes_``. We deliberately do
+      NOT compute an expected value ``Σ_k p_k·support_k`` here: ``density_`` fits
+      the classifier on ``y.astype(int)``, so for MinMax-[0,1] features the
+      ``classes_`` support collapses to ``{0}`` (a few columns to ``{0, 1}``) and
+      carries no real feature-value information — the true 8-10 distinct MinMax
+      levels are destroyed by the int-cast and are not recoverable from the
+      fitted model. TV distance is the principled, in-[0,1] stand-in: it directly
+      measures how much the class-conditional distribution moves between the two
+      target conditions, which is exactly what the selector ranks. (Its scale is
+      not identical to the regressor mean-shift, but both live in ``[0, 1]`` and
+      the selector only needs a per-step argmax over candidate columns.)
+    """
+    if "logits" in dist_tgt:
+        mean_tgt = mean_of_prediction(dist_tgt["logits"], dist_tgt["criterion"])
+        mean_cur = mean_of_prediction(dist_cur["logits"], dist_cur["criterion"])
+        return np.abs(mean_tgt - mean_cur)
+
+    # Classifier column: TV distance over the union of the two class supports.
+    classes = np.union1d(
+        np.asarray(dist_tgt["classes"]), np.asarray(dist_cur["classes"])
+    )
+
+    def _align(dist: dict) -> np.ndarray:
+        proba = np.atleast_2d(np.asarray(dist["proba"], dtype=float))
+        src = np.asarray(dist["classes"])
+        aligned = np.zeros((proba.shape[0], classes.shape[0]), dtype=float)
+        col_for = {c: k for k, c in enumerate(classes)}
+        for s, c in enumerate(src):
+            aligned[:, col_for[c]] = proba[:, s]
+        return aligned
+
+    p_tgt = _align(dist_tgt)
+    p_cur = _align(dist_cur)
+    return 0.5 * np.abs(p_tgt - p_cur).sum(axis=1)
+
+
 class ConditionalDensitySampler:
     """Conditional density sampler built on top of TabPFNUnsupervisedModel.
 
@@ -443,7 +494,12 @@ class ConditionalDensitySampler:
         For a regressor (numerical) column — the case for all HELOC/MOONS
         features — a dict ``{"logits": Tensor, "criterion": FullSupportBarDistribution}``
         describing the per-row bar distribution. For a classifier (categorical)
-        column, a dict ``{"proba": ndarray}`` of class probabilities.
+        column — which DOES occur on HELOC, whose low-cardinality integer
+        features ``infer_categorical_features`` routes to the classifier head —
+        a dict ``{"proba": ndarray, "classes": ndarray}`` of class probabilities
+        and the (int-cast) class labels. Use ``class_conditional_shift`` to get a
+        comparable [0,1] divergence across both shapes (see that helper for why
+        the classifier branch can't yield a true expected feature value).
         """
         if not self._fitted:
             raise RuntimeError("Call set_context() before predictive_distribution().")
@@ -478,7 +534,16 @@ class ConditionalDensitySampler:
 
         if self.model.use_classifier_(target_col, self.model.X_[:, target_col]):
             proba = model_j.predict_proba(X_predict.numpy())
-            return {"proba": np.asarray(proba)}
+            # ``classes_`` are the *int-cast* feature labels density_ fit on
+            # (``y_fit.astype(int)``), NOT the real MinMax-[0,1] feature values:
+            # for MinMax features almost everything collapses to class 0, so the
+            # support is unusable as an expected-value grid. We still return it so
+            # callers can column-align two proba vectors (see ``class_divergence``
+            # in greedy.py, which uses total-variation distance, not a mean).
+            return {
+                "proba": np.asarray(proba),
+                "classes": np.asarray(model_j.classes_),
+            }
 
         # Pass X_predict as the tensor returned by density_ (matches the verified
         # internal caller outliers_single_permutation_); do NOT .numpy() it.
