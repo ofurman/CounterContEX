@@ -100,7 +100,7 @@ Targets stay modest — this remains an out-of-the-box exploration. "Success" = 
 | # | Stage | Status | Notes | Commit |
 |---|-------|--------|-------|--------|
 | 1 | [Iterative greedy core + both selectors](stages/01-greedy-core.md) | DONE | greedy loop + both selectors + `predictive_distribution`/bar helpers + Exp4 runner + 7 new tests (20/20 pass). HELOC smoke (n=5): validity 1.0, frac_oob 0.0, LOF 1.85, l0≈1.4 — salvages HELOC. MOONS validity ≈0.69 (near-MAP plateau, anticipated finding — see Decision #8). | 5dfcaba |
-| 2 | [Selector ablation (Strategy 1 vs 2)](stages/02-selector-ablation.md) | IN_PROGRESS | | |
+| 2 | [Selector ablation (Strategy 1 vs 2)](stages/02-selector-ablation.md) | IN_PROGRESS | `exp5_selector_ablation.py` + `test_selector_ablation.py` done. **MOONS done** (winner `prob_ascent`: validity 0.69 vs 0.64, lower L0/steps/LOF). HELOC re-run pending on remote DGX after the class_divergence bugfix (Fixed Issue #1). | |
 | 3 | [kNN / context-selection support](stages/03-knn-context-selection.md) | DONE | `set_context` gains `selection={random,knn}` + `query` (kNN anchor); module-level `_knn_indices`; default `random` path byte-identical. `test_context.py` (6 cases a–e). Full suite 30 passed. Committed before Stage 2 since both touch `sampler.py` independently (Stages 2/3 are mutually independent per plan). | (see git log) |
 | 4 | [Context ablation (size × strategy)](stages/04-context-ablation.md) | PENDING | | |
 

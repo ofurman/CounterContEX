@@ -176,6 +176,9 @@ experiments/zeroshot_cf/results/data/
 experiments/zeroshot_cf/vendor/
 experiments/zeroshot_cf/vendor
 
+# Dataset inputs resolved by the cel loader at repo root (regenerated/downloaded)
+data/
+
 # Plan-runner / experiment run artifacts (regenerated each run)
 logs/
 .plan_runner_done
