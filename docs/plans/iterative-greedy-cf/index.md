@@ -187,7 +187,7 @@ Leave empty until execution surfaces something.
 
 | # | Stage | Symptom | Root Cause | Resolution | Fixed By |
 |---|-------|---------|-----------|------------|----------|
-| | | | | | |
+| 1 | 2 | `class_divergence` selector crashed `KeyError: 'logits'` on HELOC (worked on MOONS) at `greedy.py:_select_class_divergence`. | `model.fit`'s `infer_categorical_features` auto-routes HELOC low-cardinality integer columns to TabPFN's **classifier** head, so `predictive_distribution` returns `{"proba"}` not `{"logits","criterion"}`. MOONS is all-continuous → regressor only. The fitted classifier's `classes_` are int-cast (MinMax-[0,1] → all 0), so the true feature support is unrecoverable (expected-value shift infeasible). | Added `class_conditional_shift(dist_tgt, dist_cur)` helper handling both dict shapes: regressor → abs mean-shift (`mean_of_prediction`), classifier-routed → **total-variation distance** between the two class-proba vectors (both bounded [0,1], comparable for the argmax ranking). `predictive_distribution` classifier branch now returns `{"proba","classes"}`; `_select_class_divergence` delegates to the helper. Regression test `test_class_divergence_handles_classifier_column` (fails pre-fix, passes post). Full suite 31 passed. | fix subagent |
 
 ---
 
@@ -249,3 +249,22 @@ Decisions made during autonomous execution should be appended below.
     `experiments/zeroshot_cf/vendor → ../../../TabPFN/experiments/zeroshot_cf/vendor` so the
     `cel` dataset configs resolve. No code change was needed; the offline guarantee holds
     (no network, `get_models()` only, no `tabpfn_client`).
+
+**Stage 2 (2026-06-22):**
+
+11. **`class_divergence` divergence metric is heterogeneous across column types.** Regressor
+    columns use the absolute bar-distribution mean-shift `|E[x_j|Y=t] − E[x_j|Y=c]|`;
+    classifier-routed columns (HELOC low-cardinality integers, auto-detected by
+    `infer_categorical_features`) use the **total-variation distance** between the two
+    class-conditional proba vectors. Both are bounded in [0,1] so the per-step argmax over
+    candidates is well-defined, but the two scales are not strictly identical — the
+    expected-value approach was proven infeasible (the classifier's `classes_` are int-cast,
+    destroying the MinMax support). See Fixed Issue #1. This only affects the
+    `class_divergence` selector; `prob_ascent` (the expected Stage-4 winner) is unaffected.
+
+12. **Heavy experiments run on the remote DGX `gx10-bdc5` (NVIDIA GB10), not local CPU.**
+    Local imputes are ~1.3 s each on CPU, making the HELOC selector ablation (~1 h) and the
+    Stage-4 16-cell context grid (many hours) impractical and incompatible with the
+    `claude -p` per-stage runner (which can't survive a multi-hour background job). The
+    branch is pushed to `origin`; the DGX clones it, provisions the env + v2 checkpoints, runs
+    the experiments on GPU, and results are pulled back and committed.

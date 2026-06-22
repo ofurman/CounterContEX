@@ -65,6 +65,23 @@ def _make_disc(X, y):
     return DiscriminatorModel(clf)
 
 
+def _make_lowcard(n: int = 120, seed: int = 0):
+    """3-feature dataset where col 1 is a low-cardinality categorical-looking
+    column that ``infer_categorical_features`` routes to TabPFN's classifier
+    head (few unique values, many samples per value). Col 0 and col 2 stay
+    continuous (regressor-routed). Binary label depends on col 0 and col 1 so
+    both are informative. All features are MinMax-[0,1]."""
+    rng = np.random.default_rng(seed)
+    x0 = rng.uniform(0, 1, n)
+    # col 1: only 4 distinct levels in [0,1] → categorical, classifier-routed.
+    levels = np.array([0.0, 1.0 / 3, 2.0 / 3, 1.0])
+    x1 = levels[rng.integers(0, 4, n)]
+    x2 = rng.uniform(0, 1, n)
+    X = np.stack([x0, x1, x2], axis=1).astype(np.float64)
+    y = ((x0 + x1) > 1.0).astype(np.int64)
+    return X, y
+
+
 # ---------------------------------------------------------------------------
 # (a)(b)(c) real-model greedy loop on a separable case
 # ---------------------------------------------------------------------------
@@ -196,6 +213,51 @@ def test_class_divergence_picks_max_shift():
     assert j_star == 1
     assert abs(div - 0.9) < 1e-6
     assert val is None  # the loop draws the committed value
+
+
+# ---------------------------------------------------------------------------
+# (e2) class_divergence on a classifier-routed column (regression for the
+#      KeyError: 'logits' crash on HELOC's low-cardinality integer features).
+# ---------------------------------------------------------------------------
+
+def test_class_divergence_handles_classifier_column(models):
+    """A low-cardinality column routes to TabPFN's classifier head, whose
+    predictive_distribution returns {"proba","classes"} (not {"logits"}). The
+    class_divergence selector must run without raising KeyError and return a
+    valid candidate index. Fails before the fix (KeyError: 'logits')."""
+    clf, reg = models
+    X, y = _make_lowcard(n=120, seed=0)
+
+    sampler = ConditionalDensitySampler(
+        clf, reg, append_target=True, n_permutations=3,
+        temperature=1e-9, random_state=42,
+    )
+    sampler.set_context(X, y_context=y, target_class=None)  # both-classes pool
+
+    # Sanity: col 1 really is routed to the classifier head in this context.
+    assert sampler.model.use_classifier_(1, sampler.model.X_[:, 1]), (
+        "test precondition broken: col 1 is not classifier-routed"
+    )
+
+    x_cf = X[0].copy()
+    candidates = [0, 1, 2]  # includes the classifier-routed col 1
+
+    j_star, div, val = _select_class_divergence(
+        sampler, x_cf, y_target=1, y_current=0, candidates=candidates
+    )
+    assert j_star in candidates
+    assert np.isfinite(div) and div >= 0.0
+    assert val is None
+
+    # And the full loop with selector="class_divergence" must also not raise.
+    disc = _make_disc(X, y)
+    y_target = 1 - int(disc.predict(x_cf.reshape(1, -1))[0])
+    x_out, changed, info = greedy_counterfactual(
+        sampler, disc, x_cf, y_target, candidates, "class_divergence",
+        budget=len(candidates),
+    )
+    assert set(changed).issubset(set(candidates))
+    assert "flipped" in info
 
 
 # ---------------------------------------------------------------------------
