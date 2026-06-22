@@ -9,8 +9,8 @@ Held identical across the two selectors **within a dataset**: `max_context=256`,
 
 | selector | context_scope | n_test | validity | l0_count_mean | steps_mean | steps_median | steps_max | failure_rate | lof_scores_cf | true_actionability | proximity_l2_jaccard | frac_oob | runtime_s |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| prob_ascent | target_only | 100 | 0.69 | 1.261 | 1.261 | 1 | 2 | 0.31 | 1.009 | 1 | 0.6048 | 0 | 67.78 |
-| class_divergence | all_classes | 100 | 0.64 | 1.312 | 1.312 | 1 | 2 | 0.36 | 1.011 | 1 | 0.6255 | 0 | 118.9 |
+| prob_ascent | target_only | 100 | 0.7 | 1.271 | 1.271 | 1 | 2 | 0.3 | 1.009 | 1 | 0.5975 | 0 | 64.5 |
+| class_divergence | all_classes | 100 | 0.64 | 1.312 | 1.312 | 1 | 2 | 0.36 | 1.011 | 1 | 0.619 | 0 | 107 |
 
 **Per-metric winner:**
 
@@ -19,6 +19,21 @@ Held identical across the two selectors **within a dataset**: `max_context=256`,
 - steps-to-flip (lower better): **prob_ascent**
 - plausibility frac_oob (lower better): **tie**
 - plausibility LOF (lower better): **prob_ascent**
+
+## HELOC
+
+| selector | context_scope | n_test | validity | l0_count_mean | steps_mean | steps_median | steps_max | failure_rate | lof_scores_cf | true_actionability | proximity_l2_jaccard | frac_oob | runtime_s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| prob_ascent | target_only | 50 | 0.9 | 1.667 | 1.667 | 2 | 4 | 0.1 | 9.491e+06 | 1 | 0.6349 | 0.04 | 1.056e+03 |
+| class_divergence | all_classes | 50 | 0.52 | 14.27 | 14.27 | 17 | 17 | 0.48 | 3.073e+06 | 1 | 1.075 | 0.08 | 2.963e+03 |
+
+**Per-metric winner:**
+
+- validity (higher better): **prob_ascent**
+- L0 count (lower better): **prob_ascent**
+- steps-to-flip (lower better): **prob_ascent**
+- plausibility frac_oob (lower better): **prob_ascent**
+- plausibility LOF (lower better): **class_divergence**
 
 ## Chosen downstream selector (used by Stage 4)
 
