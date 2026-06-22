@@ -21,6 +21,32 @@ import torch
 from tabpfn_extensions.unsupervised import TabPFNUnsupervisedModel
 
 
+def _knn_indices(X: np.ndarray, query: np.ndarray, k: int) -> np.ndarray:
+    """Return the indices of the ``k`` rows of ``X`` closest to ``query``.
+
+    Distance is plain Euclidean (L2) over the ``d`` columns of ``X``, computed
+    in whatever feature space ``X`` is already in (callers pass MinMax-[0,1]
+    features before the categorical-Y column is appended). The returned index
+    array is **sorted ascending** for determinism, so callers can slice ``X``
+    and a parallel ``y`` in lockstep.
+
+    Args:
+        X: ndarray of shape (n, d). The candidate pool.
+        query: ndarray of shape (d,) or (1, d). The anchor point.
+        k: number of neighbours to return. Assumes ``k <= n`` (callers gate on
+            ``len(X) > max_context`` before calling).
+
+    Returns:
+        Sorted ndarray of ``k`` integer indices into ``X``.
+    """
+    q = np.asarray(query, dtype=X.dtype).reshape(-1)
+    diff = X - q[None, :]
+    dist2 = np.einsum("ij,ij->i", diff, diff)
+    # argpartition gives the k smallest (unordered); sort for determinism.
+    nearest = np.argpartition(dist2, k - 1)[:k]
+    return np.sort(nearest)
+
+
 def build_chain_dag(
     ordered_actionable: List[int],
     immutable_idx: List[int],
@@ -127,6 +153,8 @@ class ConditionalDensitySampler:
         y_context: Optional[np.ndarray] = None,
         target_class: Optional[int] = None,
         max_context: Optional[int] = None,
+        selection: str = "random",
+        query: Optional[np.ndarray] = None,
     ) -> "ConditionalDensitySampler":
         """Build the context and call model.fit().
 
@@ -141,9 +169,39 @@ class ConditionalDensitySampler:
             If provided, filter X_context to rows whose label equals target_class
             before fitting (class-conditional context).
         max_context : int or None
-            Cap on context size. If set and context exceeds this, subsample
-            deterministically using self.random_state.
+            Cap on context size. If set and context exceeds this, select
+            ``max_context`` rows according to ``selection``.
+        selection : {"random", "knn"}
+            How to subsample the (optionally class-filtered) pool down to
+            ``max_context`` rows.
+            - ``"random"`` (default): deterministic ``rng.choice`` subsample
+              seeded by ``self.random_state``. This path is byte-identical to
+              the pre-Stage-3 behaviour.
+            - ``"knn"``: keep the ``max_context`` rows with smallest Euclidean
+              distance to ``query`` over the original ``d`` features (the
+              MinMax-[0,1] feature space, before the Y column is appended).
+              Requires ``query`` (raises ``ValueError`` otherwise). Chosen
+              indices are sorted for determinism.
+        query : ndarray of shape (d,) or (1, d), optional
+            The factual point used as the kNN anchor. Required when
+            ``selection="knn"``; ignored when ``selection="random"``.
+
+        Notes
+        -----
+        The four context strategies used by the ablation map onto the two
+        orthogonal choices (class pool via ``target_class`` × selection):
+
+        - ``random_target`` ≡ (``target_class=<t>``, ``selection="random"``)
+        - ``random_both``   ≡ (``target_class=None``, ``selection="random"``)
+        - ``knn_target``    ≡ (``target_class=<t>``, ``selection="knn"``)
+        - ``knn_both``      ≡ (``target_class=None``, ``selection="knn"``)
         """
+        if selection not in ("random", "knn"):
+            raise ValueError(
+                f"selection must be 'random' or 'knn', got {selection!r}"
+            )
+        if selection == "knn" and query is None:
+            raise ValueError("query is required when selection='knn'")
         rng = np.random.default_rng(self.random_state)
         # Seed all RNGs so imputation permutations and posterior sampling are
         # reproducible. MPS float nondeterminism may persist on Apple Silicon.
@@ -164,8 +222,11 @@ class ConditionalDensitySampler:
 
         # Subsample if over max_context
         if max_context is not None and len(X) > max_context:
-            idx = rng.choice(len(X), size=max_context, replace=False)
-            idx.sort()
+            if selection == "knn":
+                idx = _knn_indices(X, query, max_context)
+            else:
+                idx = rng.choice(len(X), size=max_context, replace=False)
+                idx.sort()
             X = X[idx]
             if y is not None:
                 y = y[idx]
