@@ -102,7 +102,7 @@ Targets stay modest — this remains an out-of-the-box exploration. "Success" = 
 | 1 | [Iterative greedy core + both selectors](stages/01-greedy-core.md) | DONE | greedy loop + both selectors + `predictive_distribution`/bar helpers + Exp4 runner + 7 new tests (20/20 pass). HELOC smoke (n=5): validity 1.0, frac_oob 0.0, LOF 1.85, l0≈1.4 — salvages HELOC. MOONS validity ≈0.69 (near-MAP plateau, anticipated finding — see Decision #8). | 5dfcaba |
 | 2 | [Selector ablation (Strategy 1 vs 2)](stages/02-selector-ablation.md) | DONE | Run on remote DGX GPU (Decision #12). **`prob_ascent` wins decisively.** MOONS: 0.70 vs 0.64 validity. **HELOC (n=50): prob_ascent validity 0.90, L0 1.67, fail 0.10, frac_oob 0.04 — vs class_divergence 0.52, L0 14.27, fail 0.48.** Greedy+prob_ascent lifts HELOC validity 0.538→0.90 and L0 17→1.67 over one-pass. class_divergence degrades on HELOC (int-collapsed classifier cols weaken its TV-distance signal → budget exhaustion). Chosen downstream selector = **prob_ascent**. | (see git log) |
 | 3 | [kNN / context-selection support](stages/03-knn-context-selection.md) | DONE | `set_context` gains `selection={random,knn}` + `query` (kNN anchor); module-level `_knn_indices`; default `random` path byte-identical. `test_context.py` (6 cases a–e). Full suite 30 passed. Committed before Stage 2 since both touch `sampler.py` independently (Stages 2/3 are mutually independent per plan). | (see git log) |
-| 4 | [Context ablation (size × strategy)](stages/04-context-ablation.md) | IN_PROGRESS | `exp6_context_ablation.py` (16-cell size×strategy grid at `prob_ascent`, per-query kNN fit, inline frac_oob) + `test_context_ablation.py` (12 ctx tests pass; MOONS max-test-2 smoke = 16 rows). Full grid running on remote DGX GPU; HELOC bounded `--max-test 30` (logged). Results + consolidated REPORT pending. | |
+| 4 | [Context ablation (size × strategy)](stages/04-context-ablation.md) | DONE | 16-cell grid on remote DGX GPU at `prob_ascent`. MOONS n=100; **HELOC n=15** (bounded, Decision #13; full grid ~5.3 h). **Finding: bigger context HURTS HELOC** (random `frac_oob` 256→2048 0.13→0.53); **kNN beats random** at every size (LOF 1e6 vs 1e7–1e10). **Best: `knn_both@256` — frac_oob 0.000, LOF 1.98.** Recommended HELOC `(prob_ascent,256,knn_both)`, MOONS `(prob_ascent,512,random_both)`. `true_actionability=1.0` all cells. Consolidated REPORT.md §7c + exp6_summary verdict written. | (see git log) |
 
 Statuses: `PENDING` -> `IN_PROGRESS` -> `DONE` | `BLOCKED` | `SKIPPED`
 
@@ -267,4 +267,24 @@ Decisions made during autonomous execution should be appended below.
     Stage-4 16-cell context grid (many hours) impractical and incompatible with the
     `claude -p` per-stage runner (which can't survive a multi-hour background job). The
     branch is pushed to `origin`; the DGX clones it, provisions the env + v2 checkpoints, runs
-    the experiments on GPU, and results are pulled back and committed.
+    the experiments on GPU, and results are pulled back and committed. Env: `uv venv` py3.13,
+    `torch 2.11.0+cu128` (Blackwell), `tabpfn` (this repo, editable), `tabpfn-extensions`,
+    and `cel` vendored under `experiments/zeroshot_cf/vendor/counterfactuals`; checkpoints
+    scp'd to `experiments/zeroshot_cf/models/`. Runs detached via `nohup` + a `*.DONE`
+    sentinel, polled over SSH.
+
+**Stage 4 (2026-06-22):**
+
+13. **HELOC Stage-4 grid bounded to `--max-test 15`** (MOONS kept at n=100). At the full
+    sizes {256…2048}, the size-2048 kNN cells (per-query context fit over a 2048-row pool)
+    dominate cost; even at n=15 the 16-cell HELOC grid took ~5.3 h on the GB10. The plan
+    permits reducing `--max-test` for runtime if logged. Consequence: HELOC validity is noisy
+    at ±0.12 granularity, so the **`frac_oob`/`LOF` plausibility trends are the robust
+    signal** (they are monotone and consistent); the recommended config is driven by those.
+
+14. **Context ablation headline: relevant context, not large context.** Larger *random*
+    context degrades HELOC plausibility and validity monotonically with size; **kNN context
+    selection** is what helps, with `knn_both@256` achieving `frac_oob 0.000 / LOF 1.98`
+    (every CF in-distribution) vs LOF 1e6–1e10 elsewhere. This is the lever that closes the
+    HELOC plausibility gap the predecessor plan left open. See `results/exp6_summary.md` and
+    REPORT.md §7c.

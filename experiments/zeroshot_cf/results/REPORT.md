@@ -343,6 +343,72 @@ meant to probe this.
 
 ---
 
+## 7c. Selector & Context Ablations (Exp5 + Exp6, Stages 2 & 4) — DGX GPU
+
+Stages 2 and 4 were run on a remote **NVIDIA GB10 (DGX)** GPU; everything else is identical
+(offline v2 checkpoints, near-MAP commits, `n_permutations=3`). The local `claude -p`
+per-stage runner cannot survive multi-hour jobs, so the heavy ablations were run detached
+on the DGX and the results pulled back.
+
+### Exp5 — Selector ablation (Stage 2): `prob_ascent` vs `class_divergence`
+
+Each selector at its required context (`prob_ascent` → target-only; `class_divergence` →
+all-classes), `max_context=256`, held identical otherwise within a dataset.
+
+| Dataset | Selector | n | Validity | l0_count_mean | failure_rate | frac_oob | LOF |
+|---------|----------|---|----------|---------------|--------------|----------|-----|
+| MOONS | prob_ascent | 100 | **0.70** | **1.27** | 0.30 | 0.00 | 1.009 |
+| MOONS | class_divergence | 100 | 0.64 | 1.31 | 0.36 | 0.00 | 1.011 |
+| HELOC | prob_ascent | 50 | **0.90** | **1.67** | **0.10** | **0.04** | 9.5e6 |
+| HELOC | class_divergence | 50 | 0.52 | 14.27 | 0.48 | 0.08 | 3.1e6 |
+
+**`prob_ascent` wins decisively**, most starkly on HELOC: validity **0.90 vs 0.52**, L0
+**1.67 vs 14.27**, failure 0.10 vs 0.48. `class_divergence` degrades on HELOC because its
+low-cardinality integer columns route to TabPFN's *classifier* head, where the int-cast
+collapses the feature support (so an expected-value shift is unrecoverable; the selector
+falls back to a total-variation divergence — see plan Fixed Issue #1 / Decision #11). The
+weak signal leaves many points unable to find a flipping feature → budget exhaustion.
+**Chosen downstream selector: `prob_ascent`.** Note the HELOC `prob_ascent` n=50 number
+(validity **0.90**, frac_oob **0.04**) is the robust confirmation of the Stage-1 n=5 smoke.
+
+### Exp6 — Context ablation (Stage 4): size {256,512,1024,2048} × strategy {random,knn}×{target,both}
+
+At `prob_ascent` (16 cells/dataset). MOONS n=100; **HELOC n=15** (bounded for runtime — the
+2048 kNN cells dominate; the full grid took ~5.3 h even at n=15, so HELOC validity is noisy
+at ±0.12 and the `frac_oob`/`LOF` trends are the robust signal).
+
+**HELOC — bigger context *hurts*; relevant (kNN) context helps.**
+
+- `random_*` plausibility degrades monotonically with size: `frac_oob` 256→2048 rises
+  0.13→0.53 (`random_target`), 0.13→0.47 (`random_both`); validity falls (`random_both`
+  0.67→0.40→0.47). A larger *random* pool dilutes the local conditioning the dense
+  single-column step relies on. **Refutes "bigger context helps."**
+- `knn_*` holds plausibility at large size (2048: `frac_oob` 0.13–0.20, LOF ≈ 1e6) where
+  `random_*` blows up (0.47–0.53, LOF 1e7–1e10). kNN beats random at every size on LOF.
+- **Best cell: `knn_both` @ size 256 — `frac_oob` 0.000, `LOF` 1.98** (every CF
+  in-distribution), validity 0.67, L0 1.50. Nearest-neighbours from both classes at small
+  size give the tightest on-manifold context.
+
+**MOONS — flat & saturating.** `frac_oob ≡ 0`, LOF ≈ 1.0 everywhere; size saturates by
+~512 (effective_size caps at the ~403/class or 800-row pool); best `(512, random_both)`
+validity 0.82 (near-MAP ceiling); kNN gives no benefit on easy 2-D data.
+
+**Recommended production config** — HELOC: `(prob_ascent, size=256, knn_both)`; MOONS:
+`(prob_ascent, size=512, random_both)`. Full grids: `results/exp6_summary.md`.
+
+### Updated TL;DR — does iterative greedy + better context salvage HELOC?
+
+**Largely yes.** Iterative greedy with `prob_ascent` lifts HELOC over the Stage-8 one-pass
+baseline on every axis: **validity 0.538 → 0.90**, **L0 17 → 1.67**, **frac_oob 0.65 →
+0.04** (256/random). Adding a **small relevance-selected context** (`knn_both@256`) closes
+the residual plausibility gap entirely — **frac_oob 0.65 → 0.00, LOF 5.7e9 → 1.98**. The
+controlling lever is *relevant* context (kNN, small), not *large* context (which hurts).
+Remaining limitation: a ~10–30% `failure_rate` from the deterministic near-MAP plateau
+(raising temperature or posterior-sample-best, off-by-default per Decision #3, are the
+untried knobs).
+
+---
+
 ## 8. Files
 
 | Path | Description |
@@ -356,6 +422,12 @@ meant to probe this.
 | `configs/sweep.yaml` | Sweep configuration |
 | `results/exp4_greedy_{moons,heloc}_metrics.csv` | Exp 4 per-dataset greedy metrics |
 | `results/exp4_examples.md` | Greedy CF examples + recourse paths |
+| `exp5_selector_ablation.py` | Experiment 5 (selector ablation) runner |
+| `exp6_context_ablation.py` | Experiment 6 (context ablation) runner |
+| `results/exp5_selector_{moons,heloc}.csv` | Exp 5 selector ablation metrics |
+| `results/exp5_summary.md` | Exp 5 selector ablation tables + chosen selector |
+| `results/exp6_context_{moons,heloc}.csv` | Exp 6 context grid (size × strategy) metrics |
+| `results/exp6_summary.md` | Exp 6 context ablation grids + recommended config |
 | `results/exp1_{moons,heloc}.csv` | Per-feature reconstruction metrics |
 | `results/exp1_summary.md` | Exp 1 summary + gate verdict |
 | `results/exp2_{moons,heloc}_metrics.csv` | Exp 2 per-dataset metrics |
