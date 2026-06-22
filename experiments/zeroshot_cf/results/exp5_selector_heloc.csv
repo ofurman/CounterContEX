@@ -1,0 +1,3 @@
+selector,context_scope,n_test,validity,l0_count_mean,steps_mean,steps_median,steps_max,failure_rate,lof_scores_cf,true_actionability,proximity_l2_jaccard,frac_oob,runtime_s
+prob_ascent,target_only,50,0.9,1.6666666666666667,1.6666666666666667,2.0,4.0,0.1,9490897.651569318,1.0,0.6348991073299298,0.04,1056.07
+class_divergence,all_classes,50,0.52,14.26923076923077,14.26923076923077,17.0,17.0,0.48,3073260.95278793,1.0,1.075412225114814,0.08,2963.46
