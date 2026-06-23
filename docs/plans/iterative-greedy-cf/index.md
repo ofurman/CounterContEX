@@ -54,6 +54,15 @@ Four stages, grouped into two phases, all offline against local v2 checkpoints.
 
 Stage 1 is a prerequisite for all later stages. Stages 2 and 3 are independent of each other; Stage 4 depends on both (it needs the selector chosen in Stage 2 and the context machinery added in Stage 3).
 
+- **Phase C — Follow-up from the 2026-06-23 meeting (Stages 5–9)**: act on the review of the greedy mechanism.
+  - **Stage 5 — Budget > |A| + feature revisiting**: remove the one-change-per-feature exclusion so features can be re-imputed under updated conditioning; add a no-progress guard; sweep `budget` (Exp7). The suspected fix for MOONS validity stalling at ≈0.70.
+  - **Stage 6 — MOONS trajectory plots (Exp8)**: visualize per-step landings, the selected feature each step, and the "blocked slice" regions. Next-meeting deliverable.
+  - **Stage 7 — Discrete dataset**: wire a categorical dataset and confirm the predicted ≈100% validity (all current datasets are continuous).
+  - **Stage 8 — Binning / routing audit (Exp9)**: document TabPFN's ordered bar-distribution continuous handling; fix the low-cardinality-integer → classifier-head support loss via a routing override experiment.
+  - **Stage 9 — Consolidated table + REPORT**: surface Proximity as a first-class column across all datasets/configs; fold in Stages 5–8. The headline "tabelka" deliverable.
+
+  Dependencies: Stage 5 gates Stage 6 (trajectories reflect the revisit loop). Stages 5, 7, 8 are mutually independent (all build on Stage 1). Stage 9 depends on 5–8. Stages 5/7/8 are heavy-experiment stages (run on the remote DGX per Decision #12); Stages 6/9 are visualization/synthesis (local).
+
 ---
 
 ## Success Criteria
@@ -71,6 +80,10 @@ Targets stay modest — this remains an out-of-the-box exploration. "Success" = 
 | true_actionability (immutables unchanged) | 1.0 | 1.0 | Immutables never candidates — by construction. |
 | Selector ablation | — | identify the winner on validity / L0 / steps | Strategy 1 vs Strategy 2, both datasets. |
 | Context ablation | 256 / random / target-only only | identify best (size, strategy); report whether larger / kNN context lifts HELOC validity & plausibility | Untested lever from the predecessor plan. |
+| **Validity vs budget (MOONS)** — Phase C | 0.70 at budget=\|A\|=2 | report the curve; does revisiting lift it toward 1.0, and at what budget does it saturate? (not a hard gate) | Stage 5: feature revisiting under updated conditioning is the meeting's hypothesized fix. A plateau below 1.0 is a legitimate TabPFN-vs-classifier finding. |
+| **Validity (discrete dataset)** — Phase C | n/a (no discrete dataset today) | ≈1.0 | Stage 7: categorical commits land in-support; meeting predicts easy validity. |
+| **Routing override (HELOC)** — Phase C | int cols auto-routed to classifier head | report Δ validity / Δ proximity / Δ frac_oob with vs without forcing numeric treatment | Stage 8: tests whether preserving ordered support helps. |
+| **Proximity surfaced in headline table** — Phase C | computed but omitted from the viewed table | `proximity_l2_jaccard` is a first-class column for every (dataset, config) | Stage 9: the metric already exists; surface it. |
 
 ---
 
@@ -81,10 +94,22 @@ Targets stay modest — this remains an out-of-the-box exploration. "Success" = 
 - `exp4_greedy_cf.py` — greedy CF runner with `--selector` and stop/budget flags + L0/steps metrics (Stage 1).
 - `exp5_selector_ablation.py` — Strategy 1 vs Strategy 2 grid driver (Stage 2).
 - `exp6_context_ablation.py` — size × context-strategy grid driver (Stage 4).
-- `tests/test_greedy.py` — greedy loop + selector unit tests (Stage 1).
+- `exp7_budget_sweep.py` — validity-vs-budget sweep driver (Stage 5).
+- `exp8_moons_trajectories.py` — MOONS per-step trajectory + blocked-slice plots (Stage 6).
+- `exp9_routing_audit.py` — classifier-routing override experiment (Stage 8).
+- `tests/test_greedy.py` — greedy loop + selector unit tests (Stage 1; extended in Stage 5 for revisiting + no-progress guard).
 - `tests/test_context.py` — kNN context-selection unit tests (Stage 3).
+- `tests/test_discrete_dataset.py` — discrete-dataset load + Exp4 smoke (Stage 7).
+- `tests/test_routing.py` — classifier↔regressor routing override (Stage 8).
+
+### New config / data (Phase C)
+- `configs/<name>_actionability.yaml` + (if synthetic) `vendor/counterfactuals/{data,config/datasets}/<name>.*` — discrete dataset (Stage 7).
+- `results/figures/` — MOONS trajectory PNGs + README (Stage 6).
+- `results/exp7_*`, `results/exp9_*`, `results/binning_audit.md`, `results/summary_table.{md,csv}` (Stages 5/8/9).
 
 ### Modified
+- `greedy.py` — Phase C: remove the one-change-per-feature exclusion (`:172–174`), add the `--stall-eps` no-progress guard, keep `budget` decoupled from `|A|` (Stage 5); add a routing-override pass-through (Stage 8). Default behaviour preserved (`budget=None`, no forced-numeric cols).
+- `exp4_greedy_cf.py` — Phase C: `l0_count_*` counts **distinct** features changed (not commit-list length, which can now repeat), keep `steps_*`; add `--stall-eps` and `--force-numeric-cols` flags (Stages 5/8).
 - `sampler.py` — add `fixed_target` pass-through to `sample_feature()` so the greedy commit can sample class-conditionally (Stage 1, prerequisite — default `None` preserves existing behaviour); add `predictive_distribution()` helper (Stage 1); extend `set_context()` with `selection={random,knn}` and `pool={target,both}` (Stage 3). Existing behaviour (random subsample, `append_target=False` sampling) preserved as the default.
 - `tests/conftest.py` — host the shared `models` fixture (lifted from `test_sampler.py`/`test_ordering.py` in Stage 1; today `conftest.py` only does `sys.path` setup).
 - `results/REPORT.md` (this plan's results section), `results/exp4_*`, `results/exp5_*`, `results/exp6_*` CSV/MD artefacts.
@@ -103,10 +128,15 @@ Targets stay modest — this remains an out-of-the-box exploration. "Success" = 
 | 2 | [Selector ablation (Strategy 1 vs 2)](stages/02-selector-ablation.md) | DONE | Run on remote DGX GPU (Decision #12). **`prob_ascent` wins decisively.** MOONS: 0.70 vs 0.64 validity. **HELOC (n=50): prob_ascent validity 0.90, L0 1.67, fail 0.10, frac_oob 0.04 — vs class_divergence 0.52, L0 14.27, fail 0.48.** Greedy+prob_ascent lifts HELOC validity 0.538→0.90 and L0 17→1.67 over one-pass. class_divergence degrades on HELOC (int-collapsed classifier cols weaken its TV-distance signal → budget exhaustion). Chosen downstream selector = **prob_ascent**. | (see git log) |
 | 3 | [kNN / context-selection support](stages/03-knn-context-selection.md) | DONE | `set_context` gains `selection={random,knn}` + `query` (kNN anchor); module-level `_knn_indices`; default `random` path byte-identical. `test_context.py` (6 cases a–e). Full suite 30 passed. Committed before Stage 2 since both touch `sampler.py` independently (Stages 2/3 are mutually independent per plan). | (see git log) |
 | 4 | [Context ablation (size × strategy)](stages/04-context-ablation.md) | DONE | 16-cell grid on remote DGX GPU at `prob_ascent`. MOONS n=100; **HELOC n=15** (bounded, Decision #13; full grid ~5.3 h). **Finding: bigger context HURTS HELOC** (random `frac_oob` 256→2048 0.13→0.53); **kNN beats random** at every size (LOF 1e6 vs 1e7–1e10). **Best: `knn_both@256` — frac_oob 0.000, LOF 1.98.** Recommended HELOC `(prob_ascent,256,knn_both)`, MOONS `(prob_ascent,512,random_both)`. `true_actionability=1.0` all cells. Consolidated REPORT.md §7c + exp6_summary verdict written. | (see git log) |
+| 5 | [Budget > \|A\| + feature revisiting (Exp7)](stages/05-budget-revisit.md) | PENDING | Phase C. Remove one-change-per-feature exclusion; unlimited revisits + no-progress guard (Decision #15); `l0_count` = distinct features; budget sweep to test MOONS validity lift. | |
+| 6 | [MOONS trajectory plots (Exp8)](stages/06-moons-trajectories.md) | PENDING | Phase C. Per-step landings + selected feature + blocked-slice density. Depends on Stage 5. Next-meeting deliverable. | |
+| 7 | [Discrete dataset + validity check](stages/07-discrete-dataset.md) | PENDING | Phase C. Wire a categorical dataset (Decision #16); expect ≈1.0 validity, frac_oob≈0. | |
+| 8 | [Binning / routing audit (Exp9)](stages/08-binning-routing-audit.md) | PENDING | Phase C. Document ordered bar-dist + icdf commit; force low-cardinality int cols to regressor head; measure Δ proximity/validity on HELOC. | |
+| 9 | [Consolidated table + REPORT](stages/09-consolidated-table.md) | PENDING | Phase C. Surface `proximity_l2_jaccard` as a first-class column; fold in Stages 5–8. The headline "tabelka". Depends on 5–8. | |
 
 Statuses: `PENDING` -> `IN_PROGRESS` -> `DONE` | `BLOCKED` | `SKIPPED`
 
-Phases: **A = Stage 1 (mechanism)**, **B = Stages 2–4 (ablations)**. Stage 1 gates all others. Stages 2 and 3 are mutually independent; Stage 4 depends on both. See `resources/grids.md` for the exact ablation grids and `resources/commands.md` for run commands.
+Phases: **A = Stage 1 (mechanism)**, **B = Stages 2–4 (ablations)**, **C = Stages 5–9 (2026-06-23 meeting follow-up)**. Stage 1 gates all others. Stages 2 and 3 are mutually independent; Stage 4 depends on both. In Phase C: Stage 5 gates Stage 6; Stages 5/7/8 are mutually independent; Stage 9 depends on 5–8. See `resources/grids.md` for the exact grids/sweeps and `resources/commands.md` for run commands.
 
 ---
 
@@ -199,7 +229,9 @@ state the symptom, where it came from, and a concrete lead for resolving it.
 
 | # | Title | Origin Stage | Severity | Why Deferred | Suggested Next Step | Status |
 |---|-------|--------------|----------|--------------|---------------------|--------|
-| | | | | | | |
+| 1 | **Combined / MI / entropy selector.** Combine Strategy 1 and Strategy 2 (`score = p_ascent − λ·divergence`) to balance validity and proximity in one rule, or replace divergence with **mutual information** between the target and the candidate feature, or with class-conditional **entropy** comparison. | Meeting 2026-06-23 | Medium | Explicitly punted in the meeting ("to jest dyskusja jak na potem … jak strategia 1 nie będzie działać tak dobrze"). Strategy 1 (`prob_ascent`) already won Stage 2; class_divergence is deprioritized. Introduces a λ hyperparameter to tune. | If `prob_ascent` + revisiting (Stage 5) still leaves proximity/validity gaps, add a combined-score selector to `greedy.py` and ablate λ; consider MI(target; feature) as a classifier-free alternative to TV-distance. | OPEN |
+| 2 | **Newer TabPFN backbone (v2.5 / v3).** Compare against v2.5/2.6 checkpoints (exist on HuggingFace, not cached locally) — larger context capacity may handle the big-context degradation better. v3 needs a `TABPFN_TOKEN` (offline-incompatible). | Meeting 2026-06-23 | Low | Lukewarm in the meeting ("z naszego punktu widzenia chyba wiele się nie zmieni"); requires a one-time checkpoint download (breaks the strict-offline guarantee) and a `checkpoints.py` version switch. | Fetch v2.5 regressor+classifier ckpts into `models/`, add `TABPFN_MODEL_VERSION=v2.5` path in `checkpoints.py`, re-run the Stage-9 headline configs, compare. Keep v2 as the default. | OPEN |
+| 3 | **Plausibility/proximity inside the selection rule (greedy-search-over-criteria).** Add plausibility (LOF) and/or proximity penalties to the candidate-selection objective, not just classifier probability (Łukasz's idea). | Meeting 2026-06-23 | Low | Explicitly "nie na teraz". Complicates the selection rule and couples it to extra models. | After the core mechanism is settled, extend the `prob_ascent` objective with weighted plausibility/proximity terms and ablate; relates to Backlog #1's combined-score selector. | OPEN |
 
 Statuses: `OPEN` -> `IN_PROGRESS` -> `RESOLVED`. When an item is resolved, flip its
 status and summarize the fix in **Fixed Issues**. Heavy items may warrant their own
@@ -288,3 +320,32 @@ Decisions made during autonomous execution should be appended below.
     (every CF in-distribution) vs LOF 1e6–1e10 elsewhere. This is the lever that closes the
     HELOC plausibility gap the predecessor plan left open. See `results/exp6_summary.md` and
     REPORT.md §7c.
+
+**Phase C — meeting follow-up (planning 2026-06-23):**
+
+15. **Revisit policy = unlimited revisits + no-progress guard** (user decision). The greedy
+    loop drops the one-change-per-feature exclusion entirely; any actionable feature is
+    eligible every step; `budget` may exceed `|A|`. Termination: flip, `steps == budget`, or
+    a no-progress stall (`prob_ascent`: best achievable `p_target` gain ≤ `--stall-eps`,
+    default `1e-6`; `class_divergence`: same `j*` re-selected with value within `eps` →
+    fixed point). Rationale: the meeting's hypothesis is that re-imputing a feature under the
+    *updated* conditioning created by earlier changes unblocks MOONS boundary points that a
+    single pass cannot move. Consequence: `l0_count` (distinct features) and `steps` (commits)
+    now diverge — both reported; `l0_count` uses `len(set(changed))`.
+
+16. **Discrete dataset = prefer an existing CEL-configured categorical dataset** (e.g.
+    `german_credit` / `adult_census` / `bank_marketing`) with a clean immutable/actionable
+    split, over synthesizing one; synthesize only if none is cleanly discrete. The dataset
+    loader already supports categoricals (one-hot via CEL YAML); no loader code change needed.
+    Final choice recorded at execution time.
+
+17. **Routing override goes through the sampler/runner, NOT `src/tabpfn`.** Forcing
+    low-cardinality integer columns to the regressor (bar-distribution) head is done via the
+    existing `categorical_features_indices` plumbing exposed as an Exp4/Exp9 `--force-numeric-cols`
+    flag (default `none` = current behaviour). The zero-architecture-change guarantee holds.
+
+18. **Phase C scope.** Materialized as stages: budget+revisit (5), MOONS plots (6), discrete
+    dataset (7), binning/routing audit (8), consolidated table (9). Deferred to Backlog:
+    combined/MI/entropy selector (#1), newer TabPFN backbone (#2), plausibility-in-selection
+    (#3) — all explicitly punted in the meeting. Heavy-experiment stages (5/7/8) run on the
+    remote DGX per Decision #12; 6/9 are local viz/synthesis.

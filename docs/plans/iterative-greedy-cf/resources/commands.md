@@ -51,6 +51,43 @@ uv run python experiments/zeroshot_cf/exp6_context_ablation.py --dataset moons
 uv run python experiments/zeroshot_cf/exp6_context_ablation.py --dataset heloc --max-test 30
 ```
 
+## Stage 5 — budget sweep (Exp7)
+
+```bash
+# Revisit-enabled loop; --stall-eps default 1e-6. Sweep budget at the Stage-4 config.
+uv run python experiments/zeroshot_cf/exp7_budget_sweep.py --dataset moons
+uv run python experiments/zeroshot_cf/exp7_budget_sweep.py --dataset heloc --max-test 30
+# Spot-check the revisit loop directly:
+uv run python experiments/zeroshot_cf/exp4_greedy_cf.py --dataset moons --selector prob_ascent --budget 32
+```
+
+## Stage 6 — MOONS trajectory plots (Exp8)
+
+```bash
+uv run python experiments/zeroshot_cf/exp8_moons_trajectories.py --max-test 30
+# → results/figures/moons_trajectories.png (+ blocked-slice panels)
+```
+
+## Stage 7 — discrete dataset (Exp4 on the new dataset)
+
+```bash
+uv run python experiments/zeroshot_cf/exp4_greedy_cf.py --dataset <discrete_name> --selector prob_ascent --max-test 50
+```
+
+## Stage 8 — routing override (Exp9)
+
+```bash
+uv run python experiments/zeroshot_cf/exp9_routing_audit.py --dataset heloc --max-test 30
+# baseline (--force-numeric-cols none) vs override, written to results/exp9_routing_summary.md
+```
+
+## Stage 9 — consolidated table
+
+```bash
+# Synthesis only — aggregates exp4/5/6/7/9 CSVs into results/summary_table.{md,csv}
+uv run python experiments/zeroshot_cf/exp4_greedy_cf.py --help   # confirm proximity column present
+```
+
 ## Guardrail checks (run before each commit)
 
 ```bash

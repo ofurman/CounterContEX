@@ -48,6 +48,33 @@ Held constant within a dataset: selector, `t=1e-9`, `n_permutations`, `--max-tes
 kNN context is selected **per query point** (Decision #5) → fit context per test point; the
 dominant cost on HELOC, bounded by a small `--max-test` held identical across all cells.
 
+## Stage 5 — Budget sweep (Exp7)
+
+One factor (`budget`), swept per dataset at the **Stage-4 recommended config** with the
+revisit-enabled loop (Decision #15). `prob_ascent` selector throughout.
+
+| Dataset | Config (fixed) | `\|A\|` | Budget grid |
+|---------|----------------|------|-------------|
+| MOONS | `random_both@512` | 2 | `2, 4, 8, 16, 32, 64` |
+| HELOC | `knn_both@256` | 17 | `17, 34, 51, 100, 250, 1000` |
+
+Held constant within a dataset: selector, context strategy/size, `t=1e-9`, `n_permutations`,
+`--stall-eps`, `--max-test`. Report `validity, failure_rate, l0_count_mean (distinct), steps_mean,
+steps_max, proximity_l2_jaccard, lof_scores_cf, frac_oob, true_actionability, runtime_s` per budget.
+Question answered: does validity climb toward 1.0 as budget exceeds `\|A\|`, and at what budget
+does it saturate (or does it plateau below 1.0 = TabPFN-vs-classifier ceiling)?
+
+## Stage 8 — Routing override (Exp9)
+
+HELOC only (MOONS is all-continuous → null control). Two cells at `prob_ascent` + `knn_both@256`:
+
+| Cell | `--force-numeric-cols` | Effect |
+|------|------------------------|--------|
+| baseline | `none` | low-cardinality int cols auto-route to classifier head (current) |
+| override | `<int-col idx list>` (or `all`) | those cols forced to regressor (ordered bar-dist) head |
+
+Report Δ `validity`, Δ `proximity_l2_jaccard`, Δ `frac_oob`, Δ `l0_count` between cells.
+
 ## Metric columns (all ablation CSVs)
 
 `validity, l0_count_mean/median/max (integer features changed per CF), steps_mean/median/max, failure_rate,`
