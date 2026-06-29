@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import sys
 import time
 from pathlib import Path
@@ -60,7 +61,8 @@ from experiments.zeroshot_cf.exp4_greedy_cf import (  # noqa: E402
     evaluate_and_report,
 )
 
-RESULTS_DIR = Path(__file__).parent / "results"
+DEFAULT_RESULTS_DIR = Path(__file__).parent / "results"
+RESULTS_DIR = Path(os.environ.get("ZEROSHOT_CF_RESULTS_DIR", DEFAULT_RESULTS_DIR))
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 SIZES = [256, 512, 1024, 2048]
@@ -99,6 +101,16 @@ CSV_COLUMNS = [
     "frac_oob",
     "runtime_s",
 ]
+
+
+def _parse_sizes(raw: str) -> List[int]:
+    """Parse a comma-separated context-size list for sweep runs."""
+    sizes = [int(part.strip()) for part in raw.split(",") if part.strip()]
+    if not sizes:
+        raise ValueError("--sizes must contain at least one integer")
+    if any(size <= 0 for size in sizes):
+        raise ValueError(f"--sizes must be positive integers, got {sizes}")
+    return sizes
 
 
 def _strategies_for_selector(selector: str) -> List[str]:
@@ -456,7 +468,7 @@ def write_summary() -> None:
     lines = [
         "# Experiment 6: Context Ablation — size × strategy",
         "",
-        "Two-factor grid (size `{256, 512, 1024, 2048}` × strategy "
+        f"Two-factor grid (size `{{{', '.join(map(str, SIZES))}}}` × strategy "
         "`{random_target, random_both, knn_target, knn_both}`) at the Stage-2 "
         "winning selector, on each dataset.",
         "Held identical across all cells **within a dataset**: selector, "
@@ -514,6 +526,8 @@ def write_summary() -> None:
 
 
 def main() -> None:
+    global RESULTS_DIR, SIZES
+
     parser = argparse.ArgumentParser(
         description="Experiment 6: context ablation (size × strategy grid)"
     )
@@ -534,7 +548,24 @@ def main() -> None:
     parser.add_argument("--max-test", type=int, default=None,
                         help="Number of test points, identical across all cells "
                              "(default: moons=100, heloc=50; -1 for full split).")
+    parser.add_argument(
+        "--sizes",
+        default=",".join(map(str, SIZES)),
+        help="Comma-separated context sizes to sweep "
+        f"(default: {','.join(map(str, SIZES))}).",
+    )
+    parser.add_argument(
+        "--results-dir",
+        type=Path,
+        default=None,
+        help="Directory for exp6 CSV/summary outputs. Useful for Slurm arrays.",
+    )
     args = parser.parse_args()
+
+    SIZES = _parse_sizes(args.sizes)
+    if args.results_dir is not None:
+        RESULTS_DIR = args.results_dir
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     datasets = ["moons", "heloc"] if args.dataset == "all" else [args.dataset]
     for ds in datasets:
