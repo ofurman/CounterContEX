@@ -68,6 +68,14 @@ echo "results_dir=$RESULTS_DIR"
 echo "python=${PYTHON_CMD[*]}"
 echo "cuda_visible_devices=${CUDA_VISIBLE_DEVICES:-unset}"
 
+if command -v nvidia-smi >/dev/null 2>&1; then
+    nvidia-smi
+else
+    echo "nvidia-smi not found on PATH"
+fi
+
+"${PYTHON_CMD[@]}" experiments/zeroshot_cf/athena/check_torch_gpu.py --require-cuda
+
 "${PYTHON_CMD[@]}" -m experiments.zeroshot_cf.exp6_context_ablation \
     --dataset "$DATASET" \
     --selector "$SELECTOR" \
@@ -78,4 +86,3 @@ echo "cuda_visible_devices=${CUDA_VISIBLE_DEVICES:-unset}"
     --results-dir "$RESULTS_DIR"
 
 echo "[$(date --iso-8601=seconds)] Finished Exp6 v3 case: $TAG"
-

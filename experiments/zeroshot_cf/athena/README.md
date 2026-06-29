@@ -43,6 +43,15 @@ The submit script uses:
 - `TABPFN_MODEL_VERSION=v3`
 - `TABPFN_DEVICE=cuda`
 
+Before starting Exp6, each Slurm task runs:
+
+```bash
+nvidia-smi
+python experiments/zeroshot_cf/athena/check_torch_gpu.py --require-cuda
+```
+
+The task exits before the expensive experiment if PyTorch cannot see CUDA.
+
 Each row in `exp6_v3_cases.tsv` becomes one Slurm array task. Outputs go to:
 
 ```text
