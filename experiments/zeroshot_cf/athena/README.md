@@ -11,6 +11,7 @@ Clone this repo and create the Python environment once:
 cd "$PLG_GROUPS_STORAGE/plgmodalitiescfes/$USER/CounterContEX"
 uv venv --python 3.13
 uv pip install -e .
+uv pip install "setuptools>=70,<81"
 uv pip install "tabpfn-extensions[all] @ git+https://github.com/PriorLabs/tabpfn-extensions.git"
 uv run python experiments/zeroshot_cf/vendor_setup.py
 ```
