@@ -41,17 +41,15 @@ The submit script uses:
 - Slurm account: `plgmodalitiescfes-gpu-a100`
 - Partition: `plgrid-gpu-a100`
 - One GPU per array task
+- Wall time: 47 hours per array task
 - `TABPFN_MODEL_VERSION=v3`
 - `TABPFN_DEVICE=cuda`
 
-Before starting Exp6, each Slurm task runs:
+Before starting Exp6, each Slurm task prints GPU visibility with:
 
 ```bash
 nvidia-smi
-python experiments/zeroshot_cf/athena/check_torch_gpu.py --require-cuda
 ```
-
-The task exits before the expensive experiment if PyTorch cannot see CUDA.
 
 Each row in `exp6_v3_cases.tsv` becomes one Slurm array task. Outputs go to:
 
@@ -64,21 +62,26 @@ experiments/zeroshot_cf/results/athena/<tag>/
 Edit `exp6_v3_cases.tsv`. Columns are tab-separated:
 
 ```text
-dataset  selector  sizes  max_test  n_permutations  temperature  tag
+dataset  selector  sizes  strategies  max_test  n_permutations  temperature  tag
 ```
 
 For the context-size question, the important column is `sizes`, for example:
 
 ```text
-256,512,1024,2048,4096
+512,1024,4096,10000
 ```
 
-The Exp6 driver still runs all four strategies for each size:
+Use `strategies` to shard the sweep into smaller Slurm tasks. For example,
+one row with `random_target` runs only that strategy for all listed sizes.
+Valid strategies are:
 
 - `random_target`
 - `random_both`
 - `knn_target`
 - `knn_both`
+
+If `10000` is larger than the available training pool, the driver reports
+`effective_size` capped at the available pool.
 
 For `class_divergence`, target-only strategies are skipped by the existing Exp6
 logic because that selector needs both classes in context.

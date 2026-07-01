@@ -6,8 +6,8 @@
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=96G
-#SBATCH --time=2:00:00
+#SBATCH --mem=128G
+#SBATCH --time=47:00:00
 #SBATCH --array=0-0
 #SBATCH --output=slurm-%x-%A_%a.out
 #SBATCH --error=slurm-%x-%A_%a.err
@@ -31,8 +31,16 @@ if (( SLURM_ARRAY_TASK_ID >= ${#CASES[@]} )); then
     exit 2
 fi
 
-IFS=$'\t' read -r DATASET SELECTOR SIZES MAX_TEST N_PERMUTATIONS TEMPERATURE TAG \
+IFS=$'\t' read -r \
+    DATASET SELECTOR SIZES STRATEGIES MAX_TEST N_PERMUTATIONS TEMPERATURE TAG EXTRA \
     <<< "${CASES[$SLURM_ARRAY_TASK_ID]}"
+
+if [[ -z "${TAG:-}" || -n "${EXTRA:-}" ]]; then
+    echo "Expected 8 tab-separated case columns:" >&2
+    echo "dataset selector sizes strategies max_test n_permutations temperature tag" >&2
+    echo "Got: ${CASES[$SLURM_ARRAY_TASK_ID]}" >&2
+    exit 2
+fi
 
 RESULTS_DIR="$RESULTS_BASE/$TAG"
 mkdir -p "$RESULTS_DIR"
@@ -62,7 +70,8 @@ fi
 echo "[$(date --iso-8601=seconds)] Starting Exp6 v3 case"
 echo "project=$PROJECT_DIR"
 echo "case_file=$CASE_FILE"
-echo "dataset=$DATASET selector=$SELECTOR sizes=$SIZES max_test=$MAX_TEST"
+echo "dataset=$DATASET selector=$SELECTOR sizes=$SIZES"
+echo "strategies=$STRATEGIES max_test=$MAX_TEST"
 echo "n_permutations=$N_PERMUTATIONS temperature=$TEMPERATURE tag=$TAG"
 echo "results_dir=$RESULTS_DIR"
 echo "python=${PYTHON_CMD[*]}"
@@ -74,12 +83,11 @@ else
     echo "nvidia-smi not found on PATH"
 fi
 
-"${PYTHON_CMD[@]}" experiments/zeroshot_cf/athena/check_torch_gpu.py --require-cuda
-
 "${PYTHON_CMD[@]}" -m experiments.zeroshot_cf.exp6_context_ablation \
     --dataset "$DATASET" \
     --selector "$SELECTOR" \
     --sizes "$SIZES" \
+    --strategies "$STRATEGIES" \
     --max-test "$MAX_TEST" \
     --n-permutations "$N_PERMUTATIONS" \
     --temperature "$TEMPERATURE" \

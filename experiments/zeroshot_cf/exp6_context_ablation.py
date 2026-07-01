@@ -128,6 +128,36 @@ def _strategies_for_selector(selector: str) -> List[str]:
     return list(STRATEGIES)
 
 
+def _parse_strategies(raw: Optional[str], selector: str) -> List[str]:
+    """Parse an optional comma-separated strategy subset for sweep sharding."""
+    if raw is None or not raw.strip():
+        return _strategies_for_selector(selector)
+
+    requested: List[str] = []
+    for part in raw.split(","):
+        strategy = part.strip()
+        if strategy and strategy not in requested:
+            requested.append(strategy)
+
+    if not requested:
+        raise ValueError("--strategies must contain at least one strategy name")
+
+    unknown = [s for s in requested if s not in STRATEGY_SPEC]
+    if unknown:
+        supported = ", ".join(STRATEGIES)
+        raise ValueError(f"Unknown strategies {unknown}; supported: {supported}")
+
+    allowed = _strategies_for_selector(selector)
+    incompatible = [s for s in requested if s not in allowed]
+    if incompatible:
+        raise ValueError(
+            f"Strategies {incompatible} are incompatible with selector={selector!r}; "
+            f"allowed: {allowed}"
+        )
+
+    return requested
+
+
 def _resolve_max_test(dataset_name: str, max_test: Optional[int]) -> Optional[int]:
     params = _DATASET_PARAMS.get(dataset_name, {"max_test": 50})
     if max_test is not None and max_test < 0:
@@ -303,6 +333,27 @@ def _run_cell(
     }
 
 
+def _write_context_csv(dataset_name: str, rows: List[Dict[str, float]]) -> Path:
+    """Persist completed Exp6 cells atomically.
+
+    Slurm can terminate long GPU runs at the wall-time limit. Writing after each
+    completed cell keeps completed metrics usable; writing to a temp file and
+    replacing the destination keeps the previous CSV intact if termination lands
+    during the write itself.
+    """
+    csv_path = RESULTS_DIR / f"exp6_context_{dataset_name}.csv"
+    tmp_path = csv_path.with_suffix(csv_path.suffix + ".tmp")
+    with open(tmp_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row[k] for k in CSV_COLUMNS})
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, csv_path)
+    return csv_path
+
+
 def run_dataset_ablation(
     dataset_name: str,
     selector: str = "prob_ascent",
@@ -310,6 +361,7 @@ def run_dataset_ablation(
     temperature: float = TEMPERATURE,
     n_permutations: int = N_PERMUTATIONS,
     max_test: Optional[int] = None,
+    strategies: Optional[List[str]] = None,
 ) -> List[Dict[str, float]]:
     """Run the full size×strategy grid for one dataset and write the per-dataset
     CSV. Loads the dataset / discriminator / TabPFN models ONCE and reuses them
@@ -347,7 +399,11 @@ def run_dataset_ablation(
     print("  Loading TabPFN models …")
     clf, reg = get_models(n_estimators=N_ESTIMATORS)
 
-    strategies = _strategies_for_selector(selector)
+    strategies = (
+        list(strategies)
+        if strategies is not None
+        else _strategies_for_selector(selector)
+    )
 
     rows: List[Dict[str, float]] = []
     for size in SIZES:
@@ -361,14 +417,10 @@ def run_dataset_ablation(
                 tau=tau, temperature=temperature, n_permutations=n_permutations,
             )
             rows.append(row)
+            csv_path = _write_context_csv(dataset_name, rows)
+            print(f"  Wrote {csv_path}  ({len(rows)} completed cells)")
 
-    csv_path = RESULTS_DIR / f"exp6_context_{dataset_name}.csv"
-    with open(csv_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({k: row[k] for k in CSV_COLUMNS})
-    print(f"\n  Wrote {csv_path}  ({len(rows)} cells)")
+    print(f"\n  Completed {len(rows)} cells for {dataset_name}")
 
     return rows
 
@@ -555,6 +607,12 @@ def main() -> None:
         f"(default: {','.join(map(str, SIZES))}).",
     )
     parser.add_argument(
+        "--strategies",
+        default=None,
+        help="Comma-separated strategy subset to run "
+        f"(default: all compatible strategies: {','.join(STRATEGIES)}).",
+    )
+    parser.add_argument(
         "--results-dir",
         type=Path,
         default=None,
@@ -563,6 +621,7 @@ def main() -> None:
     args = parser.parse_args()
 
     SIZES = _parse_sizes(args.sizes)
+    strategies = _parse_strategies(args.strategies, args.selector)
     if args.results_dir is not None:
         RESULTS_DIR = args.results_dir
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -576,6 +635,7 @@ def main() -> None:
             temperature=args.temperature,
             n_permutations=args.n_permutations,
             max_test=args.max_test,
+            strategies=strategies,
         )
 
     write_summary()
