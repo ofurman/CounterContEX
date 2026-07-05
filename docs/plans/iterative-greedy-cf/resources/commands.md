@@ -2,18 +2,78 @@
 
 All runs are **fully offline** against the staged local TabPFN **v2** checkpoints. Models
 load only via `from checkpoints import get_models`. Never import `tabpfn_client` or call the
-cloud API. Run from the repo root (`/Users/ofurman/pwr/CounterContEX`).
+cloud API. Run from the repo root. On the DGX/GB10 host used for the heavy stages this is
+`/home/ofurman/pwr/CounterContEX`.
 
 > **Artefact path**: all `results/...` artefacts land in `experiments/zeroshot_cf/results/`
 > (the runners use exp2's `RESULTS_DIR = Path(__file__).parent / "results"`), **not** a
 > repo-root `results/`. The report to extend is `experiments/zeroshot_cf/results/REPORT.md`.
+
+## Host preflight (required before Stage 5+)
+
+Run this once on the execution host before starting any pending stage. Dependency/vendor
+provisioning may require network access once; the experiment runs after this preflight remain
+offline. Do not proceed until all checks pass.
+
+```bash
+cd /home/ofurman/pwr/CounterContEX
+
+# Install the experiment-only dependencies that are not part of the TabPFN package itself.
+uv pip install -r experiments/zeroshot_cf/requirements.txt
+
+# Restore the gitignored CEL dataset/config tree used by load_dataset().
+uv run python experiments/zeroshot_cf/vendor_setup.py
+
+export HF_HUB_OFFLINE=1
+export TABPFN_MODEL_VERSION=v2
+export TABPFN_LOCAL_CACHE=/home/ofurman/pwr/CounterContEX/experiments/zeroshot_cf/models
+export TABPFN_DEVICE=cuda
+
+# These exact files must already be present for offline execution.
+test -s "$TABPFN_LOCAL_CACHE/tabpfn-v2-classifier-finetuned-zk73skhh.ckpt"
+test -s "$TABPFN_LOCAL_CACHE/tabpfn-v2-regressor.ckpt"
+
+# Import and data smoke tests. These catch missing tabpfn-extensions, cel, vendor data,
+# checkpoints, and CUDA visibility before a multi-hour experiment starts.
+uv run python - <<'PY'
+from pathlib import Path
+import torch
+from experiments.zeroshot_cf.checkpoints import TABPFN_LOCAL_CACHE
+from experiments.zeroshot_cf.data import load_dataset
+from experiments.zeroshot_cf.sampler import ConditionalDensitySampler
+
+print("cuda_available", torch.cuda.is_available())
+assert torch.cuda.is_available(), "TABPFN_DEVICE=cuda requested but CUDA is unavailable"
+print("sampler", ConditionalDensitySampler.__name__)
+for name in [
+    "tabpfn-v2-classifier-finetuned-zk73skhh.ckpt",
+    "tabpfn-v2-regressor.ckpt",
+]:
+    path = Path(TABPFN_LOCAL_CACHE) / name
+    assert path.is_file() and path.stat().st_size > 0, path
+for dataset in ["moons", "heloc"]:
+    bundle = load_dataset(dataset)
+    print(dataset, bundle.X_train.shape, bundle.X_test.shape)
+PY
+
+uv run pytest experiments/zeroshot_cf/tests/test_context.py -q
+```
+
+If any command fails, fix provisioning first. Do **not** defer missing dependencies,
+missing vendor data, missing v2 checkpoints, or CUDA unavailability to the stage backlog:
+they block all experiment stages.
+
+Spark note: the current plan does not call Spark. If the target host policy requires Spark,
+verify `spark-submit --version` separately; otherwise Spark is not a prerequisite for these
+Python/TabPFN runs.
 
 ## Environment (offline guarantee)
 
 ```bash
 export HF_HUB_OFFLINE=1
 export TABPFN_MODEL_VERSION=v2
-# TABPFN_LOCAL_CACHE / TABPFN_DEVICE may be set per checkpoints.py defaults.
+export TABPFN_LOCAL_CACHE=/home/ofurman/pwr/CounterContEX/experiments/zeroshot_cf/models
+export TABPFN_DEVICE=cuda
 ```
 
 ## Tests

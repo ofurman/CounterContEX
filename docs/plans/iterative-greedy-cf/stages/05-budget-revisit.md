@@ -1,7 +1,9 @@
 # Stage 5: Budget > |A| + Feature Revisiting (the MOONS-validity fix)
 
 **Goal**: Let the greedy loop change **more features than once and exceed the actionable-set size**, so a feature can be re-imputed under the *new conditioning* created by earlier changes — the mechanism the meeting hypothesized is the cause of MOONS validity stalling at ≈0.70. Add a **no-progress guard** for clean termination, then sweep `budget` to see whether validity climbs toward 1.0.
-**Dependencies**: Stage 1 DONE (greedy loop + `prob_ascent` selector + Exp4 runner). Independent of Stages 6–8.
+**Dependencies**: Stage 1 DONE (greedy loop + `prob_ascent` selector + Exp4 runner) and the
+host preflight in `../resources/commands.md` passing on the execution machine. Independent
+of Stages 6–8.
 
 ---
 
@@ -62,6 +64,14 @@ Update Exp4's L0 aggregation (currently `exp4_greedy_cf.py:236–239`, computed 
 
 3. **Add the budget-sweep driver `exp7_budget_sweep.py`.**
    - Sweep `budget` over a per-dataset grid (see `resources/grids.md` Stage 5) at the **Stage-4 recommended config** (HELOC `prob_ascent` + `knn_both@256`; MOONS `prob_ascent` + `random_both@512`).
+   - **Do not call Exp4's current generation path for these sweeps unless Exp4 has first been
+     extended with an explicit `--context-strategy` flag.** Today Exp4 only supports its
+     selector-derived target-only/all-classes batching and would silently miss the Stage-4
+     recommended configs. Reuse or extract the context-strategy generation logic from
+     `experiments/zeroshot_cf/exp6_context_ablation.py`: map
+     `random_both@512` to `target_class=None, selection="random", max_context=512`, and
+     `knn_both@256` to per-query `set_context(..., target_class=None, selection="knn",
+     query=x_factual, max_context=256)`.
    - For each budget, run Exp4 generation+metrics; write `results/exp7_budget_{moons,heloc}.csv` with one row per budget: `budget, validity, failure_rate, l0_count_mean (distinct), steps_mean, steps_max, proximity_l2_jaccard, lof_scores_cf, frac_oob, true_actionability, runtime_s`.
    - Reuse the inline `frac_oob` computation (`exp2_counterfactuals.py:264–267`).
 

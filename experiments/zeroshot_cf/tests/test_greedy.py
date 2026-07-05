@@ -179,6 +179,87 @@ def test_prob_ascent_picks_max_score():
     assert score > 0.0
 
 
+class _RevisitSampler:
+    """Returns progressively larger MAP values for col 0 and no movement for col 1."""
+
+    def __init__(self):
+        self.col0_vals = iter([0.25, 0.75, 0.75])
+
+    def sample_feature(self, X, target_col, sample_temperature=None, fixed_target=None):
+        if target_col == 0:
+            return np.array([next(self.col0_vals)])
+        return np.array([0.0])
+
+
+class _OneDimTargetDisc:
+    def predict_proba(self, X):
+        p = float(np.clip(X[0, 0], 0.0, 1.0))
+        return np.array([[1.0 - p, p]])
+
+    def predict(self, X):
+        return (X[:, 0] >= 0.5).astype(int)
+
+
+class _NoProgressSampler:
+    def sample_feature(self, X, target_col, sample_temperature=None, fixed_target=None):
+        return np.array([X[0, target_col]])
+
+
+def test_budget_above_actionable_allows_repeated_feature():
+    x_cf, changed, info = greedy_counterfactual(
+        sampler=_RevisitSampler(),
+        disc=_OneDimTargetDisc(),
+        x=np.array([0.0, 0.0], dtype=np.float64),
+        y_target=1,
+        actionable_idx=[0, 1],
+        selector="prob_ascent",
+        budget=4,
+        stall_eps=1e-6,
+    )
+
+    assert info["flipped"] is True
+    assert changed == [0, 0]
+    assert len(info["history"]) > len(set(changed))
+    assert info["distinct_changed"] == [0]
+    assert x_cf[0] >= 0.5
+
+
+def test_prob_ascent_no_progress_guard_stops_before_budget():
+    x_cf, changed, info = greedy_counterfactual(
+        sampler=_NoProgressSampler(),
+        disc=_OneDimTargetDisc(),
+        x=np.array([0.0, 0.0], dtype=np.float64),
+        y_target=1,
+        actionable_idx=[0, 1],
+        selector="prob_ascent",
+        budget=100,
+        stall_eps=1e-6,
+    )
+
+    assert info["flipped"] is False
+    assert changed == []
+    assert info["steps"] == 0
+    np.testing.assert_array_equal(x_cf, np.array([0.0, 0.0], dtype=np.float64))
+
+
+def test_default_budget_still_caps_at_actionable_count():
+    x_cf, changed, info = greedy_counterfactual(
+        sampler=_RevisitSampler(),
+        disc=_OneDimTargetDisc(),
+        x=np.array([0.0, 0.0], dtype=np.float64),
+        y_target=1,
+        actionable_idx=[0, 1],
+        selector="prob_ascent",
+        budget=None,
+        stall_eps=1e-6,
+    )
+
+    assert info["flipped"] is True
+    assert len(changed) <= 2
+    assert info["steps"] == len(changed)
+    assert x_cf[0] >= 0.5
+
+
 # ---------------------------------------------------------------------------
 # (e) class_divergence selection logic (stubbed, deterministic)
 # ---------------------------------------------------------------------------

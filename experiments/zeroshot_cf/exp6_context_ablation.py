@@ -143,6 +143,7 @@ def _run_cell(
     reg,
     tau: float,
     temperature: float,
+    stall_eps: float,
     n_permutations: int,
 ) -> Dict[str, float]:
     """Run one (size, strategy) cell on a pre-loaded dataset. Returns a CSV row."""
@@ -209,6 +210,7 @@ def _run_cell(
                     sampler, disc_model, X_test[i], target_cls,
                     actionable_idx, selector,
                     tau=tau, budget=eff_budget, temperature=temperature,
+                    stall_eps=stall_eps,
                 )
                 X_cf[i] = x_cf
                 changed_per_point[i] = changed
@@ -230,6 +232,7 @@ def _run_cell(
                     sampler, disc_model, X_test[i], target_cls,
                     actionable_idx, selector,
                     tau=tau, budget=eff_budget, temperature=temperature,
+                    stall_eps=stall_eps,
                 )
                 X_cf[i] = x_cf
                 changed_per_point[i] = changed
@@ -256,6 +259,7 @@ def _run_cell(
         "tau": tau,
         "budget": eff_budget,
         "temperature": temperature,
+        "stall_eps": stall_eps,
         "n_permutations": n_permutations,
         "max_context": size,
         "changed_per_point": changed_per_point,
@@ -296,6 +300,7 @@ def run_dataset_ablation(
     selector: str = "prob_ascent",
     tau: float = TAU,
     temperature: float = TEMPERATURE,
+    stall_eps: float = 1e-6,
     n_permutations: int = N_PERMUTATIONS,
     max_test: Optional[int] = None,
 ) -> List[Dict[str, float]]:
@@ -311,7 +316,7 @@ def run_dataset_ablation(
     print(f"\n########## Exp6 context ablation: {dataset_name.upper()} ##########")
     print(
         f"  selector={selector}, tau={tau}, temperature={temperature}, "
-        f"n_permutations={n_permutations}, max_test={MAX_TEST}, "
+        f"stall_eps={stall_eps}, n_permutations={n_permutations}, max_test={MAX_TEST}, "
         f"sizes={SIZES}"
     )
 
@@ -346,7 +351,8 @@ def run_dataset_ablation(
                 X_test=X_test, y_test=y_test, y_pred=y_pred, y_target=y_target,
                 actionable_idx=actionable_idx, immutable_idx=immutable_idx,
                 clf=clf, reg=reg,
-                tau=tau, temperature=temperature, n_permutations=n_permutations,
+                tau=tau, temperature=temperature, stall_eps=stall_eps,
+                n_permutations=n_permutations,
             )
             rows.append(row)
 
@@ -529,6 +535,8 @@ def main() -> None:
                         help=f"Flip probability threshold (default: {TAU}).")
     parser.add_argument("--temperature", type=float, default=TEMPERATURE,
                         help=f"Committed-value temperature (default: {TEMPERATURE} ≈ MAP).")
+    parser.add_argument("--stall-eps", type=float, default=1e-6,
+                        help="No-progress tolerance for revisit-enabled loop (default: 1e-6).")
     parser.add_argument("--n-permutations", type=int, default=N_PERMUTATIONS,
                         help=f"Imputation permutations (default: {N_PERMUTATIONS}).")
     parser.add_argument("--max-test", type=int, default=None,
@@ -543,6 +551,7 @@ def main() -> None:
             selector=args.selector,
             tau=args.tau,
             temperature=args.temperature,
+            stall_eps=args.stall_eps,
             n_permutations=args.n_permutations,
             max_test=args.max_test,
         )

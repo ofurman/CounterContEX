@@ -58,6 +58,7 @@ def generate_counterfactuals(
     tau: float = TAU,
     budget: Optional[int] = None,
     temperature: float = TEMPERATURE,
+    stall_eps: float = 1e-6,
     n_permutations: int = N_PERMUTATIONS,
     max_context: int = MAX_CONTEXT,
     max_test: Optional[int] = None,
@@ -86,7 +87,8 @@ def generate_counterfactuals(
     print(f"\n=== Experiment 4 (greedy): {dataset_name.upper()} ===")
     print(f"  selector={selector}, context_type={context_type}, tau={tau}, "
           f"budget={budget}, temperature={temperature}, "
-          f"n_permutations={n_permutations}, max_context={max_context}")
+          f"stall_eps={stall_eps}, n_permutations={n_permutations}, "
+          f"max_context={max_context}")
 
     bundle = load_dataset(dataset_name)
     X_train = bundle.X_train
@@ -151,6 +153,7 @@ def generate_counterfactuals(
                 tau=tau,
                 budget=eff_budget,
                 temperature=temperature,
+                stall_eps=stall_eps,
             )
             X_cf[i] = x_cf
             changed_per_point[i] = changed
@@ -173,6 +176,7 @@ def generate_counterfactuals(
         "tau": tau,
         "budget": eff_budget,
         "temperature": temperature,
+        "stall_eps": stall_eps,
         "n_permutations": n_permutations,
         "max_context": max_context,
         "changed_per_point": changed_per_point,
@@ -227,7 +231,10 @@ def evaluate_and_report(
 
     # --- Greedy-specific keys ---
     flipped = np.asarray(info["flipped_per_point"], dtype=bool)
-    l0_all = np.array([len(c) for c in info["changed_per_point"]], dtype=float)
+    # With revisits, the ordered commit path may contain duplicate feature
+    # indices. L0 sparsity is the number of distinct changed columns; steps is
+    # the commit count.
+    l0_all = np.array([len(set(c)) for c in info["changed_per_point"]], dtype=float)
     steps_all = np.asarray(info["steps_per_point"], dtype=float)
 
     # L0 / steps reported over VALID (flipped) CFs (matches the success criterion);
@@ -290,6 +297,7 @@ def write_examples(
         "",
         f"Selector: {info['selector']}, context: {info['context_type']}, "
         f"tau: {info['tau']}, temperature: {info['temperature']}, "
+        f"stall_eps: {info.get('stall_eps', 1e-6)}, "
         f"n_permutations: {info['n_permutations']}, max_context: {info['max_context']}",
         "",
     ]
@@ -308,7 +316,7 @@ def write_examples(
             f"## Example {rank + 1} (idx={i}, {status})",
             f"Factual class: {y_pred[i]}, CF target: {y_target[i]}, "
             f"CF predicted: {y_cf_pred[i]}",
-            f"L0 (features changed): {len(recourse)}",
+            f"L0 (distinct features changed): {len(set(recourse))}; steps: {len(recourse)}",
             f"Recourse path (ordered): {recourse_names}",
             "",
             "| Feature | Factual | Counterfactual | Delta |",
@@ -334,6 +342,7 @@ def run_dataset(
     tau: float = TAU,
     budget: Optional[int] = None,
     temperature: float = TEMPERATURE,
+    stall_eps: float = 1e-6,
     n_permutations: int = N_PERMUTATIONS,
     max_context: int = MAX_CONTEXT,
     max_test: Optional[int] = None,
@@ -344,6 +353,7 @@ def run_dataset(
         tau=tau,
         budget=budget,
         temperature=temperature,
+        stall_eps=stall_eps,
         n_permutations=n_permutations,
         max_context=max_context,
         max_test=max_test,
@@ -368,6 +378,8 @@ def main() -> None:
                         help="Max features to change (default: |actionable|).")
     parser.add_argument("--temperature", type=float, default=TEMPERATURE,
                         help=f"Committed-value temperature (default: {TEMPERATURE} ≈ MAP).")
+    parser.add_argument("--stall-eps", type=float, default=1e-6,
+                        help="No-progress tolerance for revisit-enabled loop (default: 1e-6).")
     parser.add_argument("--n-permutations", type=int, default=N_PERMUTATIONS,
                         help=f"Imputation permutations (default: {N_PERMUTATIONS}).")
     parser.add_argument("--max-context", type=int, default=MAX_CONTEXT,
@@ -391,6 +403,7 @@ def main() -> None:
             tau=args.tau,
             budget=args.budget,
             temperature=args.temperature,
+            stall_eps=args.stall_eps,
             n_permutations=args.n_permutations,
             max_context=args.max_context,
             max_test=args.max_test,

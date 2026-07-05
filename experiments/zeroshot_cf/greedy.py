@@ -112,6 +112,7 @@ def greedy_counterfactual(
     tau: float = 0.5,
     budget: Optional[int] = None,
     temperature: float = 1e-9,
+    stall_eps: float = 1e-6,
 ) -> Tuple[np.ndarray, List[int], Dict]:
     """Greedily build a counterfactual for one factual point.
 
@@ -140,14 +141,21 @@ def greedy_counterfactual(
     temperature : float
         Sampling temperature for the committed value. ``1e-9`` = near-MAP
         (deterministic single-column commit).
+    stall_eps : float
+        No-progress tolerance. For ``prob_ascent`` the loop stops when the best
+        candidate raises target-class probability by at most this amount. For
+        ``class_divergence`` the loop stops at a fixed point: the same feature
+        is selected on consecutive steps and its committed value does not move.
 
     Returns
     -------
     (x_cf, changed, info)
         ``x_cf`` — the counterfactual (ndarray, shape (d,)).
-        ``changed`` — ordered list of changed column indices (L0 = ``len(changed)``).
+        ``changed`` — ordered list of committed column indices; duplicates are
+        possible when a feature is revisited. L0 sparsity is
+        ``len(set(changed))``.
         ``info`` — dict with ``flipped`` (bool), ``steps`` (int = len(changed)),
-        and ``history`` (per-step list of
+        ``distinct_changed`` (sorted unique column indices), and ``history`` (per-step list of
         ``(feature_idx, value, p_target_after, selection_score)``).
     """
     x = np.asarray(x, dtype=np.float64).copy()
@@ -167,9 +175,9 @@ def greedy_counterfactual(
         p_t = float(disc.predict_proba(rr)[0, y_target])
         return (pred == y_target and p_t >= tau), p_t
 
-    flipped, _ = _flip_state(x_cf)
+    flipped, p_t_current = _flip_state(x_cf)
     while not flipped and len(changed) < budget:
-        candidates = [j for j in actionable if j not in changed]
+        candidates = list(actionable)
         if not candidates:
             break
 
@@ -197,10 +205,17 @@ def greedy_counterfactual(
                 )[0]
             )
 
+        if selector == "prob_ascent":
+            gain = float(score - p_t_current)
+            if gain <= stall_eps:
+                break
+        elif history and history[-1][0] == j_star and abs(float(val) - x_cf[j_star]) <= stall_eps:
+            break
+
         x_cf[j_star] = val
         changed.append(j_star)
-        flipped, p_t = _flip_state(x_cf)
-        history.append((j_star, val, p_t, score))
+        flipped, p_t_current = _flip_state(x_cf)
+        history.append((j_star, val, p_t_current, score))
 
     # Immutability assert (extends the predecessor Stage-7 check): every
     # non-actionable column must be byte-identical to the factual.
@@ -212,5 +227,10 @@ def greedy_counterfactual(
             "immutables must be preserved exactly by construction."
         )
 
-    info = {"flipped": bool(flipped), "steps": len(changed), "history": history}
+    info = {
+        "flipped": bool(flipped),
+        "steps": len(changed),
+        "distinct_changed": sorted(set(changed)),
+        "history": history,
+    }
     return x_cf, changed, info

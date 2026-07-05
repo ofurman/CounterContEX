@@ -130,7 +130,7 @@ Targets stay modest — this remains an out-of-the-box exploration. "Success" = 
 | 2 | [Selector ablation (Strategy 1 vs 2)](stages/02-selector-ablation.md) | DONE | Run on remote DGX GPU (Decision #12). **`prob_ascent` wins decisively.** MOONS: 0.70 vs 0.64 validity. **HELOC (n=50): prob_ascent validity 0.90, L0 1.67, fail 0.10, frac_oob 0.04 — vs class_divergence 0.52, L0 14.27, fail 0.48.** Greedy+prob_ascent lifts HELOC validity 0.538→0.90 and L0 17→1.67 over one-pass. class_divergence degrades on HELOC (int-collapsed classifier cols weaken its TV-distance signal → budget exhaustion). Chosen downstream selector = **prob_ascent**. | (see git log) |
 | 3 | [kNN / context-selection support](stages/03-knn-context-selection.md) | DONE | `set_context` gains `selection={random,knn}` + `query` (kNN anchor); module-level `_knn_indices`; default `random` path byte-identical. `test_context.py` (6 cases a–e). Full suite 30 passed. Committed before Stage 2 since both touch `sampler.py` independently (Stages 2/3 are mutually independent per plan). | (see git log) |
 | 4 | [Context ablation (size × strategy)](stages/04-context-ablation.md) | DONE | 16-cell grid on remote DGX GPU at `prob_ascent`. MOONS n=100; **HELOC n=15** (bounded, Decision #13; full grid ~5.3 h). **Finding: bigger context HURTS HELOC** (random `frac_oob` 256→2048 0.13→0.53); **kNN beats random** at every size (LOF 1e6 vs 1e7–1e10). **Best: `knn_both@256` — frac_oob 0.000, LOF 1.98.** Recommended HELOC `(prob_ascent,256,knn_both)`, MOONS `(prob_ascent,512,random_both)`. `true_actionability=1.0` all cells. Consolidated REPORT.md §7c + exp6_summary verdict written. | (see git log) |
-| 5 | [Budget > \|A\| + feature revisiting (Exp7)](stages/05-budget-revisit.md) | PENDING | Phase C. Remove one-change-per-feature exclusion; unlimited revisits + no-progress guard (Decision #15); `l0_count` = distinct features; budget sweep to test MOONS validity lift. | |
+| 5 | [Budget > \|A\| + feature revisiting (Exp7)](stages/05-budget-revisit.md) | DONE | Preflight passed locally (CUDA/checkpoints/vendor/test_context). Implemented revisits + `--stall-eps` guard + distinct-L0 accounting + Exp7 sweep. MOONS n=100: validity 0.82 at every budget 2–64, no lift beyond \|A\|, steps_max=2, frac_oob=0, true_actionability=1.0. HELOC n=30: validity 0.80 at every budget 17–1000, saturates at budget 17 (steps_max=6), L0=1.83, frac_oob=0, LOF=1.85, true_actionability=1.0. Full `uv` suite 40 passed; `poetry` unavailable on host. | |
 | 6 | [MOONS trajectory plots (Exp8)](stages/06-moons-trajectories.md) | PENDING | Phase C. Per-step landings + selected feature + blocked-slice density. Depends on Stage 5. Next-meeting deliverable. | |
 | 7 | [Discrete dataset + validity check](stages/07-discrete-dataset.md) | PENDING | Phase C. Wire a categorical dataset (Decision #16); expect ≈1.0 validity, frac_oob≈0. | |
 | 8 | [Binning / routing audit (Exp9)](stages/08-binning-routing-audit.md) | PENDING | Phase C. Document ordered bar-dist + icdf commit; force low-cardinality int cols to regressor head; measure Δ proximity/validity on HELOC. | |
@@ -147,6 +147,29 @@ Phases: **A = Stage 1 (mechanism)**, **B = Stages 2–4 (ablations)**, **C = Sta
 This plan is built for **autonomous, unattended execution**. The guiding principle is
 **keep making progress**: resolve problems in place when you can, defer them when you
 can't, and never halt the whole plan over a single fixable or deferrable issue.
+
+### Required host preflight (blocks Stage 5+)
+
+Before starting the next pending stage, run the **Host preflight** in
+`resources/commands.md` on the execution host. This is a hard prerequisite for the Phase C
+experiment stages because the repo intentionally does not track the CEL vendor tree or the
+TabPFN v2 checkpoints.
+
+The preflight must verify all of the following before Stage 5 begins:
+
+- `tabpfn-extensions` imports successfully, so `ConditionalDensitySampler` can import
+  `TabPFNUnsupervisedModel`.
+- `cel` imports successfully and `load_dataset("moons")` / `load_dataset("heloc")` resolve
+  through `experiments/zeroshot_cf/vendor/counterfactuals`.
+- Both local v2 checkpoint files exist under `experiments/zeroshot_cf/models/`.
+- CUDA is visible when running with `TABPFN_DEVICE=cuda` on the DGX/GB10 host.
+- `uv run pytest experiments/zeroshot_cf/tests/test_context.py -q` passes as a lightweight
+  sampler/context smoke test.
+
+If this preflight fails, the stage is **not** allowed to start. Fix provisioning first; do
+not classify missing dependencies, missing vendor data, missing checkpoints, or CUDA
+unavailability as a deferrable stage backlog item. Spark is not required by the current
+Python experiment commands unless the execution environment separately mandates it.
 
 For each stage:
 
@@ -220,6 +243,9 @@ Leave empty until execution surfaces something.
 | # | Stage | Symptom | Root Cause | Resolution | Fixed By |
 |---|-------|---------|-----------|------------|----------|
 | 1 | 2 | `class_divergence` selector crashed `KeyError: 'logits'` on HELOC (worked on MOONS) at `greedy.py:_select_class_divergence`. | `model.fit`'s `infer_categorical_features` auto-routes HELOC low-cardinality integer columns to TabPFN's **classifier** head, so `predictive_distribution` returns `{"proba"}` not `{"logits","criterion"}`. MOONS is all-continuous → regressor only. The fitted classifier's `classes_` are int-cast (MinMax-[0,1] → all 0), so the true feature support is unrecoverable (expected-value shift infeasible). | Added `class_conditional_shift(dist_tgt, dist_cur)` helper handling both dict shapes: regressor → abs mean-shift (`mean_of_prediction`), classifier-routed → **total-variation distance** between the two class-proba vectors (both bounded [0,1], comparable for the argmax ranking). `predictive_distribution` classifier branch now returns `{"proba","classes"}`; `_select_class_divergence` delegates to the helper. Regression test `test_class_divergence_handles_classifier_column` (fails pre-fix, passes post). Full suite 31 passed. | fix subagent |
+| 2 | 5 | Exp7 budget sweep can waste hours recomputing larger budgets after every point already flipped or stalled below the next cap. | The initial driver treated each budget as independent even when the previous row's `steps_max` proved that a larger cap cannot affect any generated CF. | Added a saturation shortcut: when `steps_max < next_budget`, copy the identical metric row for remaining larger budgets with `runtime_s=0.0`. Used for HELOC after budget 17; MOONS was run before the shortcut and empirically matched across all budgets. | inline |
+| 3 | 5 | Required verification command `poetry run pytest` failed immediately with `poetry: command not found`. | This execution host is provisioned for the plan's `uv` workflow but does not have the Poetry binary installed. | Ran the project experiment suite through `uv` instead (`uv run pytest experiments/zeroshot_cf/tests -q`), matching the Phase C command resource; all 40 tests passed. | inline |
+| 4 | 5 | `git commit` failed with `Author identity unknown`. | The execution host had no local Git `user.name` / `user.email` configured. | Set repo-local Git identity to the author from the previous commit (`Oleksii Furman <oleksii.furman@gmail.com>`) and retried the commit. | inline |
 
 ---
 
@@ -358,3 +384,12 @@ Decisions made during autonomous execution should be appended below.
     combined/MI/entropy selector (#1), newer TabPFN backbone (#2), plausibility-in-selection
     (#3) — all explicitly punted in the meeting. Heavy-experiment stages (5/7/8) run on the
     remote DGX per Decision #12; 6/9 are local viz/synthesis.
+
+**Stage 5 (2026-07-05):**
+
+19. **Exp7 saturation shortcut.** If a completed budget row has `steps_max < next_budget`,
+    all later budgets are deterministic no-ops because every point has already flipped or
+    stalled before the larger cap can bind; copy identical rows for the remaining budgets
+    instead of rerunning them. This avoided rerunning HELOC budgets 34–1000 after budget 17
+    (`steps_max=6`). MOONS was run before this shortcut and empirically matched across all
+    budgets.

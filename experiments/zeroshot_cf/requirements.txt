@@ -5,7 +5,8 @@
 tabpfn-extensions[all] @ git+https://github.com/PriorLabs/tabpfn-extensions.git
 
 # Counterfactuals evaluation harness
-cel @ git+https://github.com/ofurman/counterfactuals.git
+# Installed by experiments/zeroshot_cf/vendor_setup.py as an editable, patched
+# ce-library checkout under experiments/zeroshot_cf/vendor/counterfactuals.
 
 # Utilities
 scikit-learn>=1.2.0
