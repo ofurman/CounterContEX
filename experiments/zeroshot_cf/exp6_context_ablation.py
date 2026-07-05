@@ -192,6 +192,7 @@ def _run_cell(
             n_permutations=n_permutations,
             temperature=temperature,
             random_state=42 + target_cls,
+            categorical_features_indices=bundle.categorical_features_indices,
         )
 
         if selection == "random":

@@ -49,6 +49,7 @@ TAU = 0.5
 _DATASET_PARAMS = {
     "moons": {"max_test": 100},
     "heloc": {"max_test": 50},
+    "binary_cat": {"max_test": 50},
 }
 
 
@@ -78,8 +79,15 @@ def generate_counterfactuals(
     else:
         MAX_TEST = params["max_test"]
 
-    # Strategy 2 (class_divergence) requires a both-classes context pool.
-    if selector == "class_divergence":
+    bundle = load_dataset(dataset_name)
+
+    # Strategy 2 (class_divergence) requires a both-classes context pool. Native
+    # categorical datasets also use both classes: target-only categorical fits
+    # can have one-class feature support, and the classifier-head imputation path
+    # returns class ordinals for that degenerate support. Keeping both classes in
+    # context preserves feature support while the appended Y column still carries
+    # the class condition.
+    if selector == "class_divergence" or bundle.categorical_features_indices:
         context_type = "all_classes"
     else:
         context_type = "target_only"
@@ -90,7 +98,6 @@ def generate_counterfactuals(
           f"stall_eps={stall_eps}, n_permutations={n_permutations}, "
           f"max_context={max_context}")
 
-    bundle = load_dataset(dataset_name)
     X_train = bundle.X_train
     y_train = bundle.y_train
     X_test = bundle.X_test[:MAX_TEST]
@@ -135,6 +142,7 @@ def generate_counterfactuals(
             n_permutations=n_permutations,
             temperature=temperature,
             random_state=42 + target_cls,
+            categorical_features_indices=bundle.categorical_features_indices,
         )
         ctx_target = target_cls if context_type == "target_only" else None
         sampler.set_context(
@@ -365,7 +373,11 @@ def run_dataset(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Experiment 4: iterative greedy CF")
-    parser.add_argument("--dataset", choices=["moons", "heloc", "all"], default="moons")
+    parser.add_argument(
+        "--dataset",
+        default="moons",
+        help="Dataset name (moons, heloc, binary_cat, or all).",
+    )
     parser.add_argument(
         "--selector",
         choices=["prob_ascent", "class_divergence"],
@@ -389,7 +401,7 @@ def main() -> None:
                              "-1 for full split).")
     args = parser.parse_args()
 
-    datasets = ["moons", "heloc"] if args.dataset == "all" else [args.dataset]
+    datasets = ["moons", "heloc", "binary_cat"] if args.dataset == "all" else [args.dataset]
 
     # Clear examples file before appending.
     examples_path = RESULTS_DIR / "exp4_examples.md"

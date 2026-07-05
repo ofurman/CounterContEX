@@ -1,0 +1,2 @@
+dataset,selector,validity,lof_scores_cf,sparsity,actionability,true_actionability,proximity_l2_jaccard,frac_oob,l0_count_mean,l0_count_median,l0_count_max,steps_mean,steps_median,steps_max,failure_rate,n_actionable
+binary_cat,prob_ascent,1.0,1.0,0.3333333333333333,0.0,1.0,1.0,0.0,1.0,1.0,1.0,1.0,1.0,1.0,0.0,2

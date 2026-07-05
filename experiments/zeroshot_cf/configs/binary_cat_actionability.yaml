@@ -1,0 +1,8 @@
+dataset: binary_cat
+
+immutable_features:
+  - segment_code
+
+actionable_features:
+  - decision_code
+  - channel_code

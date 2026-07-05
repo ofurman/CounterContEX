@@ -409,6 +409,36 @@ untried knobs).
 
 ---
 
+## 7d. Native-Categorical Dataset Sanity Check (Exp4, Stage 7)
+
+Stage 7 adds `binary_cat`, a deterministic all-categorical synthetic dataset with three
+semantic binary columns (`decision_code`, `segment_code`, `channel_code`) encoded as stable
+integer codes 0/1. There is **no one-hot expansion** and no MinMax scaling of categorical
+codes. All three feature indices are passed explicitly to TabPFN as categorical; `segment_code`
+is immutable, while `decision_code` and `channel_code` are actionable. The label is controlled
+by `decision_code`, so a valid counterfactual should require exactly one categorical commit.
+
+Native-categorical Exp4 uses an **all-classes context pool** even with `prob_ascent`. A
+target-only categorical context can make the masked categorical feature's support one-class;
+in the classifier-head imputation path, that degenerate support returned the ordinal `0` for
+the target-1 case. Keeping both classes in context preserves the full categorical support,
+while the appended Y column still supplies class conditioning. This routing fix changed the
+bounded run from a one-direction failure to the expected symmetric behavior.
+
+Command:
+`uv run python experiments/zeroshot_cf/exp4_greedy_cf.py --dataset binary_cat --selector prob_ascent --budget 8 --n-permutations 1 --max-context 128 --max-test 50`
+
+| Dataset | n | Validity | l0_count_mean | steps_max | frac_oob | LOF | proximity_l2_jaccard | true_actionability | failure_rate |
+|---------|--:|---------:|--------------:|----------:|---------:|----:|---------------------:|-------------------:|-------------:|
+| binary_cat | 50 | **1.000** | **1.00** | 1 | **0.000** | 1.00 | 1.00 | **1.000** | **0.000** |
+
+The meeting prediction holds on a genuinely discrete/native-categorical regime: greedy +
+TabPFN reaches **100% validity**, changes one semantic categorical feature per point, keeps
+categorical commits in observed support `{0,1}`, preserves immutables exactly, and has
+`frac_oob=0` (binary categorical codes remain inside [0,1]).
+
+---
+
 ## 8. Files
 
 | Path | Description |
@@ -418,9 +448,10 @@ untried knobs).
 | `exp3_feature_ordering.py` | Experiment 3 (DAG ablation) runner |
 | `exp4_greedy_cf.py` | Experiment 4 (iterative greedy CF) runner |
 | `greedy.py` | Greedy loop + prob_ascent / class_divergence selectors |
+| `configs/binary_cat_actionability.yaml` | Native-categorical actionability split |
 | `refine.py` | Refinement sweep runner |
 | `configs/sweep.yaml` | Sweep configuration |
-| `results/exp4_greedy_{moons,heloc}_metrics.csv` | Exp 4 per-dataset greedy metrics |
+| `results/exp4_greedy_{moons,heloc,binary_cat}_metrics.csv` | Exp 4 per-dataset greedy metrics |
 | `results/exp4_examples.md` | Greedy CF examples + recourse paths |
 | `exp5_selector_ablation.py` | Experiment 5 (selector ablation) runner |
 | `exp6_context_ablation.py` | Experiment 6 (context ablation) runner |

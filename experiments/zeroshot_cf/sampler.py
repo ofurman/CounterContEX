@@ -172,6 +172,13 @@ class ConditionalDensitySampler:
         posterior sampling. Only affects numerical (regressor) columns.
     random_state : int
         Seed for numpy and torch RNGs to make subsampling deterministic.
+    categorical_features_indices : list[int] or None
+        Semantic categorical feature columns in the original feature matrix.
+        When provided, these columns are routed through TabPFN's classifier head
+        explicitly instead of relying on low-cardinality auto-inference.
+    force_numeric_cols : list[int] or None
+        Columns to remove from the explicit categorical set. This is a no-op for
+        the default continuous datasets and is used by later routing audits.
     """
 
     def __init__(
@@ -182,6 +189,8 @@ class ConditionalDensitySampler:
         n_permutations: int = 10,
         temperature: float = 1e-9,
         random_state: int = 0,
+        categorical_features_indices: Optional[List[int]] = None,
+        force_numeric_cols: Optional[List[int]] = None,
     ) -> None:
         self.clf = clf
         self.reg = reg
@@ -189,6 +198,8 @@ class ConditionalDensitySampler:
         self.n_permutations = n_permutations
         self.temperature = temperature
         self.random_state = random_state
+        self.categorical_features_indices = list(categorical_features_indices or [])
+        self.force_numeric_cols = set(force_numeric_cols or [])
 
         self.model = TabPFNUnsupervisedModel(tabpfn_clf=clf, tabpfn_reg=reg)
         self._n_original_features: Optional[int] = None
@@ -284,6 +295,14 @@ class ConditionalDensitySampler:
 
         self._n_original_features = X.shape[1]
 
+        categorical = sorted(
+            {
+                int(i)
+                for i in self.categorical_features_indices
+                if int(i) not in self.force_numeric_cols
+            }
+        )
+
         # Optionally append Y as the last (categorical) column
         if self.append_target:
             if y is None:
@@ -291,10 +310,11 @@ class ConditionalDensitySampler:
             y_col = np.asarray(y, dtype=np.float32).reshape(-1, 1)
             X_aug = np.concatenate([X, y_col], axis=1)
             last_idx = X_aug.shape[1] - 1
-            self.model.set_categorical_features([last_idx])
+            categorical = sorted(set(categorical + [last_idx]))
         else:
             X_aug = X
 
+        self.model.set_categorical_features(categorical)
         self.model.fit(X_aug)
         self._fitted = True
         return self

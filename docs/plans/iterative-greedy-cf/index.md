@@ -132,7 +132,7 @@ Targets stay modest — this remains an out-of-the-box exploration. "Success" = 
 | 4 | [Context ablation (size × strategy)](stages/04-context-ablation.md) | DONE | 16-cell grid on remote DGX GPU at `prob_ascent`. MOONS n=100; **HELOC n=15** (bounded, Decision #13; full grid ~5.3 h). **Finding: bigger context HURTS HELOC** (random `frac_oob` 256→2048 0.13→0.53); **kNN beats random** at every size (LOF 1e6 vs 1e7–1e10). **Best: `knn_both@256` — frac_oob 0.000, LOF 1.98.** Recommended HELOC `(prob_ascent,256,knn_both)`, MOONS `(prob_ascent,512,random_both)`. `true_actionability=1.0` all cells. Consolidated REPORT.md §7c + exp6_summary verdict written. | (see git log) |
 | 5 | [Budget > \|A\| + feature revisiting (Exp7)](stages/05-budget-revisit.md) | DONE | Preflight passed locally (CUDA/checkpoints/vendor/test_context). Implemented revisits + `--stall-eps` guard + distinct-L0 accounting + Exp7 sweep. MOONS n=100: validity 0.82 at every budget 2–64, no lift beyond \|A\|, steps_max=2, frac_oob=0, true_actionability=1.0. HELOC n=30: validity 0.80 at every budget 17–1000, saturates at budget 17 (steps_max=6), L0=1.83, frac_oob=0, LOF=1.85, true_actionability=1.0. Full `uv` suite 40 passed; `poetry` unavailable on host. | |
 | 6 | [MOONS trajectory plots (Exp8)](stages/06-moons-trajectories.md) | DONE | Added `exp8_moons_trajectories.py`; generated `results/figures/moons_trajectories.png`, `moons_blocked_slice.png`, and README. Near-boundary plot uses 30 trajectories; bounded fallback scan found stalled row 128 for the blocked-slice panel. Exp8 offline run passed; `uv` suite 40 passed; `poetry` unavailable on host. | |
-| 7 | [Discrete dataset + validity check](stages/07-discrete-dataset.md) | PENDING | Phase C. Wire a categorical dataset (Decision #16); expect ≈1.0 validity, frac_oob≈0. | |
+| 7 | [Discrete dataset + validity check](stages/07-discrete-dataset.md) | DONE | Added native all-categorical `binary_cat` (3 binary semantic columns, no one-hot) + generic actionability config + explicit sampler categorical routing. Exp4 `prob_ascent` uses all-classes context for native categoricals to avoid one-class support collapse; n=50 result: validity 1.00, L0 1.00, frac_oob 0.00, LOF 1.00, true_actionability 1.00. Full `uv` suite 44 passed; `poetry` unavailable on host. | (see git log) |
 | 8 | [Binning / routing audit (Exp9)](stages/08-binning-routing-audit.md) | PENDING | Phase C. Document ordered bar-dist + icdf commit; force low-cardinality int cols to regressor head; measure Δ proximity/validity on HELOC. | |
 | 9 | [Consolidated table + REPORT](stages/09-consolidated-table.md) | PENDING | Phase C. Surface `proximity_l2_jaccard` as a first-class column; fold in Stages 5–8. The headline "tabelka". Depends on 5–8. | |
 
@@ -247,6 +247,8 @@ Leave empty until execution surfaces something.
 | 3 | 5 | Required verification command `poetry run pytest` failed immediately with `poetry: command not found`. | This execution host is provisioned for the plan's `uv` workflow but does not have the Poetry binary installed. | Ran the project experiment suite through `uv` instead (`uv run pytest experiments/zeroshot_cf/tests -q`), matching the Phase C command resource; all 40 tests passed. | inline |
 | 4 | 5 | `git commit` failed with `Author identity unknown`. | The execution host had no local Git `user.name` / `user.email` configured. | Set repo-local Git identity to the author from the previous commit (`Oleksii Furman <oleksii.furman@gmail.com>`) and retried the commit. | inline |
 | 5 | 6 | Required verification command `poetry run pytest` failed immediately with `poetry: command not found`; an initial bare `python -m py_compile` check also failed with `python: command not found`. | Same host provisioning as Stage 5: the experiment environment is managed through `uv`, with no Poetry or bare `python` shim installed. | Re-ran checks through `uv run python`; Exp8 script compiled and `uv run pytest experiments/zeroshot_cf/tests -q` passed 40/40. | inline |
+| 6 | 7 | Initial `binary_cat` Exp4 run had validity 0.48 and only flipped target-0 points; target-1 categorical commits stayed at `decision_code=0` despite classifier probabilities assigning class 1 near 1.0. | `prob_ascent` used target-only context. For semantic categorical columns this can create one-class feature support; the classifier-head imputation path returned the support ordinal `0` for the target-1 one-class fit. | Native-categorical Exp4 runs now use an all-classes context pool while retaining class conditioning through appended Y. This preserves full categorical support and restored symmetric commits; bounded `binary_cat` run reached validity 1.0. | inline |
+| 7 | 7 | Required verification command `poetry run pytest` failed immediately with `poetry: command not found`. | Same host provisioning as Stages 5–6: the experiment environment is managed through `uv`, with no Poetry binary installed. | Ran the full experiment test suite through `uv` instead (`uv run pytest experiments/zeroshot_cf/tests -q`); all 44 tests passed. Guardrails (`src/tabpfn` diff and `tabpfn_client` grep) passed. | inline |
 
 ---
 
@@ -403,3 +405,19 @@ Decisions made during autonomous execution should be appended below.
     representative stalled point for `moons_blocked_slice.png`. This keeps the headline figure
     readable while satisfying the stage requirement that the blocked-slice panel show an actual
     stalled case when one exists in the bounded pool.
+
+**Stage 7 (2026-07-06):**
+
+21. **Discrete sanity dataset = synthetic `binary_cat`.** Rather than adapting a CEL config whose
+    preprocessing conventions are one-hot/continuous oriented, Stage 7 uses a small deterministic
+    all-categorical synthetic dataset with three binary semantic columns and label
+    `Y=decision_code`. Codes stay as integer 0/1 values (no scaling, no one-hot); all three
+    feature indices are passed explicitly as categorical to TabPFN. `segment_code` is immutable,
+    `decision_code`/`channel_code` are actionable. This directly tests the meeting's genuinely
+    discrete premise while keeping `frac_oob` meaningful under the existing [0,1] metric.
+
+22. **Native-categorical `prob_ascent` uses all-classes context.** Target-only categorical
+    context caused degenerate one-class feature support and asymmetric commits (Fixed Issue #6).
+    For datasets with explicit categorical features, Exp4 now keeps both classes in context and
+    relies on the appended Y column for class conditioning. Continuous MOONS/HELOC defaults are
+    unchanged.

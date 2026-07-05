@@ -1,64 +1,125 @@
-# Experiment 4 (greedy): CF Examples — MOONS
+# Experiment 4 (greedy): CF Examples — BINARY_CAT
 
-Selector: prob_ascent, context: target_only, tau: 0.5, temperature: 1e-09, n_permutations: 3, max_context: 256
+Selector: prob_ascent, context: all_classes, tau: 0.5, temperature: 1e-09, stall_eps: 1e-06, n_permutations: 1, max_context: 128
 
 ## Example 1 (idx=0, VALID (flipped))
-Factual class: 1, CF target: 0, CF predicted: 0
-L0 (features changed): 1
-Recourse path (ordered): ['1']
+Factual class: 0, CF target: 1, CF predicted: 1
+L0 (distinct features changed): 1; steps: 1
+Recourse path (ordered): ['decision_code']
 
 | Feature | Factual | Counterfactual | Delta |
 |---------|---------|---------------|-------|
-| 0 | 0.7692 | 0.7692 | +0  |
-| 1 | -0.4074 | 0.5831 | +0.9905 * |
+| decision_code | 0 | 1 | +1 * |
+| segment_code | 1 | 1 | +0  |
+| channel_code | 1 | 1 | +0  |
 
 ---
 
 ## Example 2 (idx=1, VALID (flipped))
-Factual class: 0, CF target: 1, CF predicted: 1
-L0 (features changed): 1
-Recourse path (ordered): ['0']
-
-| Feature | Factual | Counterfactual | Delta |
-|---------|---------|---------------|-------|
-| 0 | -0.807 | 1.939 | +2.746 * |
-| 1 | 0.2121 | 0.2121 | +0  |
-
----
-
-## Example 3 (idx=3, VALID (flipped))
-Factual class: 0, CF target: 1, CF predicted: 1
-L0 (features changed): 1
-Recourse path (ordered): ['0']
-
-| Feature | Factual | Counterfactual | Delta |
-|---------|---------|---------------|-------|
-| 0 | -0.8687 | 1.801 | +2.67 * |
-| 1 | 0.02874 | 0.02874 | +0  |
-
----
-
-## Example 4 (idx=5, VALID (flipped))
 Factual class: 1, CF target: 0, CF predicted: 0
-L0 (features changed): 1
-Recourse path (ordered): ['1']
+L0 (distinct features changed): 1; steps: 1
+Recourse path (ordered): ['decision_code']
 
 | Feature | Factual | Counterfactual | Delta |
 |---------|---------|---------------|-------|
-| 0 | 0.2535 | 0.2535 | +0  |
-| 1 | -0.3404 | 0.9999 | +1.34 * |
+| decision_code | 1 | 0 | -1 * |
+| segment_code | 0 | 0 | +0  |
+| channel_code | 1 | 1 | +0  |
 
 ---
 
-## Example 5 (idx=7, VALID (flipped))
-Factual class: 0, CF target: 1, CF predicted: 1
-L0 (features changed): 2
-Recourse path (ordered): ['0', '1']
+## Example 3 (idx=2, VALID (flipped))
+Factual class: 1, CF target: 0, CF predicted: 0
+L0 (distinct features changed): 1; steps: 1
+Recourse path (ordered): ['decision_code']
 
 | Feature | Factual | Counterfactual | Delta |
 |---------|---------|---------------|-------|
-| 0 | -0.5887 | 2.096 | +2.684 * |
-| 1 | 0.8983 | 0.3765 | -0.5218 * |
+| decision_code | 1 | 0 | -1 * |
+| segment_code | 0 | 0 | +0  |
+| channel_code | 1 | 1 | +0  |
+
+---
+
+## Example 4 (idx=3, VALID (flipped))
+Factual class: 1, CF target: 0, CF predicted: 0
+L0 (distinct features changed): 1; steps: 1
+Recourse path (ordered): ['decision_code']
+
+| Feature | Factual | Counterfactual | Delta |
+|---------|---------|---------------|-------|
+| decision_code | 1 | 0 | -1 * |
+| segment_code | 0 | 0 | +0  |
+| channel_code | 1 | 1 | +0  |
+
+---
+
+## Example 5 (idx=4, VALID (flipped))
+Factual class: 0, CF target: 1, CF predicted: 1
+L0 (distinct features changed): 1; steps: 1
+Recourse path (ordered): ['decision_code']
+
+| Feature | Factual | Counterfactual | Delta |
+|---------|---------|---------------|-------|
+| decision_code | 0 | 1 | +1 * |
+| segment_code | 0 | 0 | +0  |
+| channel_code | 0 | 0 | +0  |
+
+---
+
+# Experiment 4 (greedy): CF Examples — BINARY_CAT
+
+Selector: prob_ascent, context: all_classes, tau: 0.5, temperature: 1e-09, stall_eps: 1e-06, n_permutations: 1, max_context: 64
+
+## Example 1 (idx=0, VALID (flipped))
+Factual class: 0, CF target: 1, CF predicted: 1
+L0 (distinct features changed): 1; steps: 1
+Recourse path (ordered): ['decision_code']
+
+| Feature | Factual | Counterfactual | Delta |
+|---------|---------|---------------|-------|
+| decision_code | 0 | 1 | +1 * |
+| segment_code | 1 | 1 | +0  |
+| channel_code | 1 | 1 | +0  |
+
+---
+
+## Example 2 (idx=1, VALID (flipped))
+Factual class: 1, CF target: 0, CF predicted: 0
+L0 (distinct features changed): 1; steps: 1
+Recourse path (ordered): ['decision_code']
+
+| Feature | Factual | Counterfactual | Delta |
+|---------|---------|---------------|-------|
+| decision_code | 1 | 0 | -1 * |
+| segment_code | 0 | 0 | +0  |
+| channel_code | 1 | 1 | +0  |
+
+---
+
+## Example 3 (idx=2, VALID (flipped))
+Factual class: 1, CF target: 0, CF predicted: 0
+L0 (distinct features changed): 1; steps: 1
+Recourse path (ordered): ['decision_code']
+
+| Feature | Factual | Counterfactual | Delta |
+|---------|---------|---------------|-------|
+| decision_code | 1 | 0 | -1 * |
+| segment_code | 0 | 0 | +0  |
+| channel_code | 1 | 1 | +0  |
+
+---
+
+## Example 4 (idx=3, VALID (flipped))
+Factual class: 1, CF target: 0, CF predicted: 0
+L0 (distinct features changed): 1; steps: 1
+Recourse path (ordered): ['decision_code']
+
+| Feature | Factual | Counterfactual | Delta |
+|---------|---------|---------------|-------|
+| decision_code | 1 | 0 | -1 * |
+| segment_code | 0 | 0 | +0  |
+| channel_code | 1 | 1 | +0  |
 
 ---
 

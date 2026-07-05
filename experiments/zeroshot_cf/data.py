@@ -1,14 +1,15 @@
 """Dataset loading for the zero-shot CF experiment.
 
-Loads HELOC and MOONS via cel, applies MinMax scaling (fit on train),
-and provides the HELOC actionable/immutable feature split.
+Loads HELOC and MOONS via cel, applies MinMax scaling (fit on train), and also
+provides a small native-categorical synthetic dataset for the discrete greedy-CF
+sanity check.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Protocol, Tuple
 
 import numpy as np
 import yaml
@@ -34,10 +35,55 @@ class DatasetBundle:
     feature_names: List[str]
     numerical_features_indices: List[int]
     categorical_features_indices: List[int]
-    method_dataset: MethodDataset  # for inverse_transform back to original space
+    method_dataset: MethodDataset | "_IdentityDataset"  # for inverse_transform
 
     def inverse_transform(self, X: np.ndarray) -> np.ndarray:
         return self.method_dataset.inverse_transform(X)
+
+
+class _IdentityDataset(Protocol):
+    def inverse_transform(self, X: np.ndarray) -> np.ndarray: ...
+
+
+class _IdentityMethodDataset:
+    """Minimal MethodDataset stand-in for already-interpretable synthetic data."""
+
+    def inverse_transform(self, X: np.ndarray) -> np.ndarray:
+        return np.asarray(X)
+
+
+def _load_binary_cat() -> DatasetBundle:
+    """Return a deterministic all-categorical binary dataset.
+
+    The label is exactly the first categorical feature. Every feature is a
+    semantic categorical column encoded as stable integer codes 0/1, with no
+    scaling and no one-hot expansion. The construction repeats the full binary
+    cube so train and test both contain complete observed support.
+    """
+    rng = np.random.default_rng(42)
+    cube = np.array(
+        [[a, b, c] for a in (0, 1) for b in (0, 1) for c in (0, 1)],
+        dtype=np.float64,
+    )
+    X = np.tile(cube, (80, 1))
+    y = X[:, 0].astype(np.int64)
+
+    perm = rng.permutation(len(X))
+    split = int(0.8 * len(X))
+    train_idx = perm[:split]
+    test_idx = perm[split:]
+
+    return DatasetBundle(
+        name="binary_cat",
+        X_train=X[train_idx].astype(np.float64),
+        X_test=X[test_idx].astype(np.float64),
+        y_train=y[train_idx],
+        y_test=y[test_idx],
+        feature_names=["decision_code", "segment_code", "channel_code"],
+        numerical_features_indices=[],
+        categorical_features_indices=[0, 1, 2],
+        method_dataset=_IdentityMethodDataset(),
+    )
 
 
 def load_dataset(name: str) -> DatasetBundle:
@@ -46,6 +92,9 @@ def load_dataset(name: str) -> DatasetBundle:
     Split is 80/20 stratified with random_state=42 (cel default).
     Scaling is fit on X_train only.
     """
+    if name == "binary_cat":
+        return _load_binary_cat()
+
     config_path = CEL_REPO / "config" / "datasets" / f"{name}.yaml"
     if not config_path.exists():
         raise FileNotFoundError(f"Dataset config not found: {config_path}")
@@ -74,8 +123,9 @@ def get_actionable_immutable(
 ) -> Tuple[List[int], List[int]]:
     """Return (actionable_idx, immutable_idx) in the scaled feature matrix column order.
 
-    For 'heloc': uses configs/heloc_actionability.yaml (Decision #2).
-    For 'moons': both features are actionable, no immutables.
+    For datasets with configs/<name>_actionability.yaml, use that generic
+    actionability split. For 'moons': both features are actionable, no
+    immutables.
 
     Args:
         name: Dataset name ('heloc' or 'moons').
@@ -91,18 +141,37 @@ def get_actionable_immutable(
         n = len(dataset.feature_names)
         return list(range(n)), []
 
-    if name == "heloc":
-        cfg_path = CONFIGS_DIR / "heloc_actionability.yaml"
+    cfg_path = CONFIGS_DIR / f"{name}_actionability.yaml"
+    if cfg_path.exists():
         with open(cfg_path) as f:
             cfg = yaml.safe_load(f)
-        immutable_names: List[str] = cfg["immutable_features"]
 
         if dataset is None:
-            dataset = load_dataset("heloc")
+            dataset = load_dataset(name)
 
         feature_names = dataset.feature_names
+        immutable_names: List[str] = cfg.get("immutable_features", [])
+        unknown_immutable = sorted(set(immutable_names) - set(feature_names))
+        if unknown_immutable:
+            raise ValueError(
+                f"Unknown immutable features in {cfg_path}: {unknown_immutable}"
+            )
         immutable_idx = [feature_names.index(fn) for fn in immutable_names]
-        actionable_idx = [i for i in range(len(feature_names)) if i not in immutable_idx]
+        actionable_names = cfg.get("actionable_features")
+        if actionable_names is None:
+            actionable_idx = [
+                i for i in range(len(feature_names)) if i not in immutable_idx
+            ]
+        else:
+            unknown_actionable = sorted(set(actionable_names) - set(feature_names))
+            if unknown_actionable:
+                raise ValueError(
+                    f"Unknown actionable features in {cfg_path}: {unknown_actionable}"
+                )
+            actionable_idx = [feature_names.index(fn) for fn in actionable_names]
         return actionable_idx, immutable_idx
 
-    raise ValueError(f"Unknown dataset: {name!r}. Supported: 'heloc', 'moons'.")
+    raise ValueError(
+        f"Unknown dataset/actionability split: {name!r}. Add "
+        f"{cfg_path.name} or use 'moons'."
+    )
