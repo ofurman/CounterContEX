@@ -68,10 +68,12 @@ uv run python experiments/zeroshot_cf/exp8_moons_trajectories.py --max-test 30
 # → results/figures/moons_trajectories.png (+ blocked-slice panels)
 ```
 
-## Stage 7 — discrete dataset (Exp4 on the new dataset)
+## Stage 7 — native-categorical dataset (Exp4 on the new dataset)
 
 ```bash
-uv run python experiments/zeroshot_cf/exp4_greedy_cf.py --dataset <discrete_name> --selector prob_ascent --max-test 50
+# <native_cat_name> is the adapted/synthetic dataset with one categorical variable per
+# column (integer/category-coded), no one-hot expansion, and explicit TabPFN categorical indices.
+uv run python experiments/zeroshot_cf/exp4_greedy_cf.py --dataset <native_cat_name> --selector prob_ascent --max-test 50
 ```
 
 ## Stage 8 — routing override (Exp9)

@@ -99,18 +99,20 @@ Targets stay modest — this remains an out-of-the-box exploration. "Success" = 
 - `exp9_routing_audit.py` — classifier-routing override experiment (Stage 8).
 - `tests/test_greedy.py` — greedy loop + selector unit tests (Stage 1; extended in Stage 5 for revisiting + no-progress guard).
 - `tests/test_context.py` — kNN context-selection unit tests (Stage 3).
-- `tests/test_discrete_dataset.py` — discrete-dataset load + Exp4 smoke (Stage 7).
+- `tests/test_discrete_dataset.py` — native-categorical dataset load + sampler-routing + Exp4 smoke (Stage 7).
 - `tests/test_routing.py` — classifier↔regressor routing override (Stage 8).
 
 ### New config / data (Phase C)
-- `configs/<name>_actionability.yaml` + (if synthetic) `vendor/counterfactuals/{data,config/datasets}/<name>.*` — discrete dataset (Stage 7).
+- `experiments/zeroshot_cf/configs/<name>_actionability.yaml` + (if synthetic or adapted)
+  `experiments/zeroshot_cf/vendor/counterfactuals/{data,config/datasets}/<name>.*` —
+  native-categorical dataset without one-hot expansion (Stage 7).
 - `results/figures/` — MOONS trajectory PNGs + README (Stage 6).
 - `results/exp7_*`, `results/exp9_*`, `results/binning_audit.md`, `results/summary_table.{md,csv}` (Stages 5/8/9).
 
 ### Modified
 - `greedy.py` — Phase C: remove the one-change-per-feature exclusion (`:172–174`), add the `--stall-eps` no-progress guard, keep `budget` decoupled from `|A|` (Stage 5); add a routing-override pass-through (Stage 8). Default behaviour preserved (`budget=None`, no forced-numeric cols).
-- `exp4_greedy_cf.py` — Phase C: `l0_count_*` counts **distinct** features changed (not commit-list length, which can now repeat), keep `steps_*`; add `--stall-eps` and `--force-numeric-cols` flags (Stages 5/8).
-- `sampler.py` — add `fixed_target` pass-through to `sample_feature()` so the greedy commit can sample class-conditionally (Stage 1, prerequisite — default `None` preserves existing behaviour); add `predictive_distribution()` helper (Stage 1); extend `set_context()` with `selection={random,knn}` and `pool={target,both}` (Stage 3). Existing behaviour (random subsample, `append_target=False` sampling) preserved as the default.
+- `exp4_greedy_cf.py` — Phase C: `l0_count_*` counts **distinct** features changed (not commit-list length, which can now repeat), keep `steps_*`; add `--stall-eps`; allow Stage-7 dataset names beyond `{moons,heloc,all}`; thread explicit categorical indices / `--force-numeric-cols` into sampler construction (Stages 5/7/8).
+- `sampler.py` — add `fixed_target` pass-through to `sample_feature()` so the greedy commit can sample class-conditionally (Stage 1, prerequisite — default `None` preserves existing behaviour); add `predictive_distribution()` helper (Stage 1); extend `set_context()` with `selection={random,knn}` and `pool={target,both}` (Stage 3); accept explicit `categorical_features_indices` and force-numeric overrides so Stage 7 uses TabPFN native categorical handling instead of one-hot (Stages 7/8). Existing behaviour (random subsample, `append_target=False` sampling) preserved as the default.
 - `tests/conftest.py` — host the shared `models` fixture (lifted from `test_sampler.py`/`test_ordering.py` in Stage 1; today `conftest.py` only does `sys.path` setup).
 - `results/REPORT.md` (this plan's results section), `results/exp4_*`, `results/exp5_*`, `results/exp6_*` CSV/MD artefacts.
 
@@ -333,16 +335,23 @@ Decisions made during autonomous execution should be appended below.
     single pass cannot move. Consequence: `l0_count` (distinct features) and `steps` (commits)
     now diverge — both reported; `l0_count` uses `len(set(changed))`.
 
-16. **Discrete dataset = prefer an existing CEL-configured categorical dataset** (e.g.
-    `german_credit` / `adult_census` / `bank_marketing`) with a clean immutable/actionable
-    split, over synthesizing one; synthesize only if none is cleanly discrete. The dataset
-    loader already supports categoricals (one-hot via CEL YAML); no loader code change needed.
-    Final choice recorded at execution time.
+16. **Discrete dataset uses TabPFN native categorical handling, not one-hot.** Prefer an
+    existing CEL-configured categorical dataset (e.g. `german_credit` / `adult_census` /
+    `bank_marketing`) only after adapting it into a native-categorical variant whose YAML omits
+    `one_hot_encode`; synthesize an all-categorical dataset if the meeting's genuinely-discrete
+    premise matters more than reusing public data. Categorical variables remain one semantic
+    column each, encoded as stable integer/category codes for sklearn compatibility, and their
+    indices are passed explicitly to TabPFN. This requires Stage-7 loader/runner plumbing:
+    generic actionability config loading, Exp4 dataset-name support beyond `{moons,heloc,all}`,
+    and sampler support for explicit categorical/numerical indices.
 
 17. **Routing override goes through the sampler/runner, NOT `src/tabpfn`.** Forcing
-    low-cardinality integer columns to the regressor (bar-distribution) head is done via the
-    existing `categorical_features_indices` plumbing exposed as an Exp4/Exp9 `--force-numeric-cols`
-    flag (default `none` = current behaviour). The zero-architecture-change guarantee holds.
+    low-cardinality integer columns to the regressor (bar-distribution) head is done via the same
+    explicit modality plumbing exposed as an Exp4/Exp9 `--force-numeric-cols` flag (default
+    `none` = current behaviour). If TabPFN still auto-infers numeric low-cardinality columns as
+    categorical despite explicit indices, configure the model inference settings for these runs
+    (for example `MIN_UNIQUE_FOR_NUMERICAL_FEATURES=0`) and record the exact choice. The
+    zero-architecture-change guarantee holds.
 
 18. **Phase C scope.** Materialized as stages: budget+revisit (5), MOONS plots (6), discrete
     dataset (7), binning/routing audit (8), consolidated table (9). Deferred to Backlog:
