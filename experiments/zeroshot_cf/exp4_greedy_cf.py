@@ -53,6 +53,40 @@ _DATASET_PARAMS = {
 }
 
 
+def parse_force_numeric_cols(spec: str | None, bundle) -> List[int]:
+    """Resolve a force-numeric CLI spec to original feature indices.
+
+    ``none`` keeps current routing. ``all`` means all original feature columns.
+    Otherwise the spec is a comma-separated list of integer indices and/or
+    feature names.
+    """
+    if spec is None or str(spec).strip().lower() in ("", "none"):
+        return []
+    spec = str(spec).strip()
+    if spec.lower() == "all":
+        return list(range(len(bundle.feature_names)))
+
+    resolved: List[int] = []
+    for raw in spec.split(","):
+        token = raw.strip()
+        if not token:
+            continue
+        if token.lstrip("-").isdigit():
+            idx = int(token)
+        else:
+            if token not in bundle.feature_names:
+                raise ValueError(f"Unknown feature in --force-numeric-cols: {token!r}")
+            idx = bundle.feature_names.index(token)
+        if idx < 0 or idx >= len(bundle.feature_names):
+            raise ValueError(
+                f"--force-numeric-cols index {idx} out of bounds for "
+                f"{len(bundle.feature_names)} features"
+            )
+        if idx not in resolved:
+            resolved.append(idx)
+    return resolved
+
+
 def generate_counterfactuals(
     dataset_name: str,
     selector: str = "prob_ascent",
@@ -63,6 +97,7 @@ def generate_counterfactuals(
     n_permutations: int = N_PERMUTATIONS,
     max_context: int = MAX_CONTEXT,
     max_test: Optional[int] = None,
+    force_numeric_cols: Optional[List[int]] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict]:
     """Generate greedy CFs for one dataset. Returns (X_test, y_test, X_cf, info)."""
     from experiments.zeroshot_cf.checkpoints import get_models
@@ -80,6 +115,7 @@ def generate_counterfactuals(
         MAX_TEST = params["max_test"]
 
     bundle = load_dataset(dataset_name)
+    force_numeric_cols = list(force_numeric_cols or [])
 
     # Strategy 2 (class_divergence) requires a both-classes context pool. Native
     # categorical datasets also use both classes: target-only categorical fits
@@ -96,7 +132,7 @@ def generate_counterfactuals(
     print(f"  selector={selector}, context_type={context_type}, tau={tau}, "
           f"budget={budget}, temperature={temperature}, "
           f"stall_eps={stall_eps}, n_permutations={n_permutations}, "
-          f"max_context={max_context}")
+          f"max_context={max_context}, force_numeric_cols={force_numeric_cols or 'none'}")
 
     X_train = bundle.X_train
     y_train = bundle.y_train
@@ -143,6 +179,7 @@ def generate_counterfactuals(
             temperature=temperature,
             random_state=42 + target_cls,
             categorical_features_indices=bundle.categorical_features_indices,
+            force_numeric_cols=force_numeric_cols,
         )
         ctx_target = target_cls if context_type == "target_only" else None
         sampler.set_context(
@@ -187,6 +224,7 @@ def generate_counterfactuals(
         "stall_eps": stall_eps,
         "n_permutations": n_permutations,
         "max_context": max_context,
+        "force_numeric_cols": force_numeric_cols,
         "changed_per_point": changed_per_point,
         "flipped_per_point": flipped_per_point,
         "steps_per_point": steps_per_point,
@@ -354,6 +392,7 @@ def run_dataset(
     n_permutations: int = N_PERMUTATIONS,
     max_context: int = MAX_CONTEXT,
     max_test: Optional[int] = None,
+    force_numeric_cols: Optional[List[int]] = None,
 ) -> Dict[str, float]:
     X_test, y_test, X_cf, info = generate_counterfactuals(
         dataset_name,
@@ -365,6 +404,7 @@ def run_dataset(
         n_permutations=n_permutations,
         max_context=max_context,
         max_test=max_test,
+        force_numeric_cols=force_numeric_cols,
     )
     metrics = evaluate_and_report(dataset_name, X_test, y_test, X_cf, info)
     write_examples(dataset_name, X_test, X_cf, info)
@@ -399,6 +439,12 @@ def main() -> None:
     parser.add_argument("--max-test", type=int, default=None,
                         help="Number of test points (default: moons=100, heloc=50; "
                              "-1 for full split).")
+    parser.add_argument(
+        "--force-numeric-cols",
+        default="none",
+        help="Columns forced to the regressor path: none, all, or comma-separated "
+             "indices/names (default: none).",
+    )
     args = parser.parse_args()
 
     datasets = ["moons", "heloc", "binary_cat"] if args.dataset == "all" else [args.dataset]
@@ -409,6 +455,11 @@ def main() -> None:
         examples_path.unlink()
 
     for ds in datasets:
+        from experiments.zeroshot_cf.data import load_dataset
+
+        force_numeric_cols = parse_force_numeric_cols(
+            args.force_numeric_cols, load_dataset(ds)
+        )
         run_dataset(
             ds,
             selector=args.selector,
@@ -419,6 +470,7 @@ def main() -> None:
             n_permutations=args.n_permutations,
             max_context=args.max_context,
             max_test=args.max_test,
+            force_numeric_cols=force_numeric_cols,
         )
 
     print("\nDone.")

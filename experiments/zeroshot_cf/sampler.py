@@ -17,6 +17,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 import torch
+import tabpfn_extensions.unsupervised.unsupervised as _tabpfn_unsup
 
 from tabpfn_extensions.unsupervised import TabPFNUnsupervisedModel
 
@@ -177,8 +178,10 @@ class ConditionalDensitySampler:
         When provided, these columns are routed through TabPFN's classifier head
         explicitly instead of relying on low-cardinality auto-inference.
     force_numeric_cols : list[int] or None
-        Columns to remove from the explicit categorical set. This is a no-op for
-        the default continuous datasets and is used by later routing audits.
+        Original feature columns to force through the regressor/bar-distribution
+        path even if TabPFN's unsupervised wrapper would auto-detect them as
+        low-cardinality categoricals. Explicit non-forced categorical columns
+        and the appended Y column remain categorical.
     """
 
     def __init__(
@@ -315,7 +318,27 @@ class ConditionalDensitySampler:
             X_aug = X
 
         self.model.set_categorical_features(categorical)
-        self.model.fit(X_aug)
+        if self.force_numeric_cols:
+            # tabpfn_extensions.unsupervised.fit() re-runs low-cardinality
+            # categorical inference even after set_categorical_features(). For
+            # the routing audit we need caller intent to be authoritative for
+            # only the requested columns: keep explicit categoricals (including
+            # appended Y) and all other auto-detected categoricals, but filter
+            # forced original feature indices from the inferred list.
+            old_infer = _tabpfn_unsup.infer_categorical_features
+            forced = set(self.force_numeric_cols)
+
+            def _infer_except_forced(X_np, categorical_features=None):
+                inferred = old_infer(X_np, categorical_features)
+                return [int(i) for i in inferred if int(i) not in forced]
+
+            try:
+                _tabpfn_unsup.infer_categorical_features = _infer_except_forced
+                self.model.fit(X_aug)
+            finally:
+                _tabpfn_unsup.infer_categorical_features = old_infer
+        else:
+            self.model.fit(X_aug)
         self._fitted = True
         return self
 
