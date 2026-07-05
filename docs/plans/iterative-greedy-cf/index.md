@@ -131,7 +131,7 @@ Targets stay modest — this remains an out-of-the-box exploration. "Success" = 
 | 3 | [kNN / context-selection support](stages/03-knn-context-selection.md) | DONE | `set_context` gains `selection={random,knn}` + `query` (kNN anchor); module-level `_knn_indices`; default `random` path byte-identical. `test_context.py` (6 cases a–e). Full suite 30 passed. Committed before Stage 2 since both touch `sampler.py` independently (Stages 2/3 are mutually independent per plan). | (see git log) |
 | 4 | [Context ablation (size × strategy)](stages/04-context-ablation.md) | DONE | 16-cell grid on remote DGX GPU at `prob_ascent`. MOONS n=100; **HELOC n=15** (bounded, Decision #13; full grid ~5.3 h). **Finding: bigger context HURTS HELOC** (random `frac_oob` 256→2048 0.13→0.53); **kNN beats random** at every size (LOF 1e6 vs 1e7–1e10). **Best: `knn_both@256` — frac_oob 0.000, LOF 1.98.** Recommended HELOC `(prob_ascent,256,knn_both)`, MOONS `(prob_ascent,512,random_both)`. `true_actionability=1.0` all cells. Consolidated REPORT.md §7c + exp6_summary verdict written. | (see git log) |
 | 5 | [Budget > \|A\| + feature revisiting (Exp7)](stages/05-budget-revisit.md) | DONE | Preflight passed locally (CUDA/checkpoints/vendor/test_context). Implemented revisits + `--stall-eps` guard + distinct-L0 accounting + Exp7 sweep. MOONS n=100: validity 0.82 at every budget 2–64, no lift beyond \|A\|, steps_max=2, frac_oob=0, true_actionability=1.0. HELOC n=30: validity 0.80 at every budget 17–1000, saturates at budget 17 (steps_max=6), L0=1.83, frac_oob=0, LOF=1.85, true_actionability=1.0. Full `uv` suite 40 passed; `poetry` unavailable on host. | |
-| 6 | [MOONS trajectory plots (Exp8)](stages/06-moons-trajectories.md) | PENDING | Phase C. Per-step landings + selected feature + blocked-slice density. Depends on Stage 5. Next-meeting deliverable. | |
+| 6 | [MOONS trajectory plots (Exp8)](stages/06-moons-trajectories.md) | DONE | Added `exp8_moons_trajectories.py`; generated `results/figures/moons_trajectories.png`, `moons_blocked_slice.png`, and README. Near-boundary plot uses 30 trajectories; bounded fallback scan found stalled row 128 for the blocked-slice panel. Exp8 offline run passed; `uv` suite 40 passed; `poetry` unavailable on host. | |
 | 7 | [Discrete dataset + validity check](stages/07-discrete-dataset.md) | PENDING | Phase C. Wire a categorical dataset (Decision #16); expect ≈1.0 validity, frac_oob≈0. | |
 | 8 | [Binning / routing audit (Exp9)](stages/08-binning-routing-audit.md) | PENDING | Phase C. Document ordered bar-dist + icdf commit; force low-cardinality int cols to regressor head; measure Δ proximity/validity on HELOC. | |
 | 9 | [Consolidated table + REPORT](stages/09-consolidated-table.md) | PENDING | Phase C. Surface `proximity_l2_jaccard` as a first-class column; fold in Stages 5–8. The headline "tabelka". Depends on 5–8. | |
@@ -246,6 +246,7 @@ Leave empty until execution surfaces something.
 | 2 | 5 | Exp7 budget sweep can waste hours recomputing larger budgets after every point already flipped or stalled below the next cap. | The initial driver treated each budget as independent even when the previous row's `steps_max` proved that a larger cap cannot affect any generated CF. | Added a saturation shortcut: when `steps_max < next_budget`, copy the identical metric row for remaining larger budgets with `runtime_s=0.0`. Used for HELOC after budget 17; MOONS was run before the shortcut and empirically matched across all budgets. | inline |
 | 3 | 5 | Required verification command `poetry run pytest` failed immediately with `poetry: command not found`. | This execution host is provisioned for the plan's `uv` workflow but does not have the Poetry binary installed. | Ran the project experiment suite through `uv` instead (`uv run pytest experiments/zeroshot_cf/tests -q`), matching the Phase C command resource; all 40 tests passed. | inline |
 | 4 | 5 | `git commit` failed with `Author identity unknown`. | The execution host had no local Git `user.name` / `user.email` configured. | Set repo-local Git identity to the author from the previous commit (`Oleksii Furman <oleksii.furman@gmail.com>`) and retried the commit. | inline |
+| 5 | 6 | Required verification command `poetry run pytest` failed immediately with `poetry: command not found`; an initial bare `python -m py_compile` check also failed with `python: command not found`. | Same host provisioning as Stage 5: the experiment environment is managed through `uv`, with no Poetry or bare `python` shim installed. | Re-ran checks through `uv run python`; Exp8 script compiled and `uv run pytest experiments/zeroshot_cf/tests -q` passed 40/40. | inline |
 
 ---
 
@@ -393,3 +394,12 @@ Decisions made during autonomous execution should be appended below.
     instead of rerunning them. This avoided rerunning HELOC budgets 34–1000 after budget 17
     (`steps_max=6`). MOONS was run before this shortcut and empirically matched across all
     budgets.
+
+**Stage 6 (2026-07-06):**
+
+20. **Blocked-slice panel may use a bounded fallback scan.** The main trajectory figure plots
+    the requested near-boundary subset (`--max-test`, default 30). If those rows all flip, Exp8
+    evaluates additional near-boundary rows up to `--fallback-pool` (default 100) only to find a
+    representative stalled point for `moons_blocked_slice.png`. This keeps the headline figure
+    readable while satisfying the stage requirement that the blocked-slice panel show an actual
+    stalled case when one exists in the bounded pool.
