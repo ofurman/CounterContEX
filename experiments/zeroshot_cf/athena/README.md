@@ -85,3 +85,31 @@ If `10000` is larger than the available training pool, the driver reports
 
 For `class_divergence`, target-only strategies are skipped by the existing Exp6
 logic because that selector needs both classes in context.
+
+## Exp7: Multi-Pass Budget × Classifier-Label Conditioning
+
+Follow-up on the Exp6 v3 residual failures (`knn_both` only, sizes 512/1024,
+HELOC + MOONS). Same environment/setup as above. Submit with:
+
+```bash
+bash experiments/zeroshot_cf/athena/submit_exp7_v3_sweep.sh
+```
+
+Edit `exp7_v3_cases.tsv`; tab-separated columns are:
+
+```text
+dataset  sizes  max_test  n_permutations  temperature  max_rounds  labels  tag
+```
+
+- `max_rounds`: greedy passes over the actionable columns. `1` reproduces the
+  Exp6 single-pass budget; `3` lets the loop re-edit columns (re-conditioned
+  on the current CF) with a strict-improvement guard in rounds >= 2.
+- `labels`: `disc` conditions the context on `disc.predict(X_train)` (aligns
+  the generator with the validity oracle); `data` keeps Exp6's ground-truth
+  `y_train` conditioning.
+
+The default case file runs both datasets at `max_rounds=3,labels=disc` (extra
+budget + label alignment; the reported `validity_r1` column isolates the label
+effect) and at `max_rounds=1,labels=disc` (Exp6 budget, label effect alone).
+Outputs land in `experiments/zeroshot_cf/results/athena/<tag>/` as
+`exp7_multipass_<dataset>.csv` + `exp7_summary.md`.

@@ -1,0 +1,10 @@
+# dataset	sizes	max_test	n_permutations	temperature	max_rounds	labels	tag
+# Exp7: knn_both only, contexts 512/1024. Two levers vs the Exp6 v3 baseline:
+#   max_rounds=3 + labels=disc  — extra budget AND classifier-label conditioning
+#   max_rounds=1 + labels=disc  — Exp6 budget, isolates the label effect alone
+# (validity_r1 inside the max_rounds=3 runs already isolates the label effect,
+#  but the max_rounds=1 rows give it as an independent confirmation run.)
+heloc	512,1024	50	3	1e-9	3	disc	heloc_v3_exp7_knnboth_r3_disc
+moons	512,1024	100	3	1e-9	3	disc	moons_v3_exp7_knnboth_r3_disc
+heloc	512,1024	50	3	1e-9	1	disc	heloc_v3_exp7_knnboth_r1_disc
+moons	512,1024	100	3	1e-9	1	disc	moons_v3_exp7_knnboth_r1_disc

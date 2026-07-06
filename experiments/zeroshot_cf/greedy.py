@@ -112,6 +112,7 @@ def greedy_counterfactual(
     tau: float = 0.5,
     budget: Optional[int] = None,
     temperature: float = 1e-9,
+    max_rounds: int = 1,
 ) -> Tuple[np.ndarray, List[int], Dict]:
     """Greedily build a counterfactual for one factual point.
 
@@ -136,18 +137,37 @@ def greedy_counterfactual(
         Probability threshold for the flip: stop when ``predict == y_target``
         AND ``predict_proba[y_target] >= tau``. Default 0.5 ≡ hard flip.
     budget : int or None
-        Max number of features to change. Defaults to ``len(actionable_idx)``.
+        Max number of features to change **per round**. Defaults to
+        ``len(actionable_idx)``.
     temperature : float
         Sampling temperature for the committed value. ``1e-9`` = near-MAP
         (deterministic single-column commit).
+    max_rounds : int
+        Number of greedy passes over the actionable columns. Within a round
+        each column may be edited at most once (the original constraint);
+        ``max_rounds=1`` (default) is byte-identical to the single-pass
+        behaviour. In rounds >= 2 a column edited in an earlier round becomes
+        eligible again — its re-draw is conditioned on the *current* ``x_cf``
+        (the other columns have moved since it was set), so repeated rounds
+        are coordinate ascent toward the target-class conditional mode.
+        Two guards apply in rounds >= 2 only:
+        (a) an edit is committed only if it **strictly increases**
+        ``predict_proba[y_target]`` — for ``prob_ascent`` no candidate can
+        beat the argmax, so a non-improving argmax ends the round; and
+        (b) if a round commits nothing, the loop stops early — no
+        single-column near-MAP edit improves ``p_target``, i.e. a fixed
+        point, and at near-zero temperature further rounds are no-ops.
 
     Returns
     -------
     (x_cf, changed, info)
         ``x_cf`` — the counterfactual (ndarray, shape (d,)).
-        ``changed`` — ordered list of changed column indices (L0 = ``len(changed)``).
-        ``info`` — dict with ``flipped`` (bool), ``steps`` (int = len(changed)),
-        and ``history`` (per-step list of
+        ``changed`` — **distinct** changed column indices in first-touch order
+        (L0 = ``len(changed)``; a column re-edited in a later round is not
+        repeated).
+        ``info`` — dict with ``flipped`` (bool), ``steps`` (int = total edits
+        committed, >= ``len(changed)`` when ``max_rounds > 1``), ``rounds``
+        (int = rounds entered), and ``history`` (per-edit list of
         ``(feature_idx, value, p_target_after, selection_score)``).
     """
     x = np.asarray(x, dtype=np.float64).copy()
@@ -155,11 +175,15 @@ def greedy_counterfactual(
     actionable = list(actionable_idx)
     if budget is None:
         budget = len(actionable)
+    if max_rounds < 1:
+        raise ValueError(f"max_rounds must be >= 1, got {max_rounds}")
     y_current = 1 - int(y_target)  # binary task
 
     x_cf = x.copy()
-    changed: List[int] = []
+    changed: List[int] = []  # distinct columns, first-touch order (= L0)
     history: List[tuple] = []
+    total_edits = 0
+    rounds_used = 0
 
     def _flip_state(row: np.ndarray) -> Tuple[bool, float]:
         rr = row.reshape(1, -1)
@@ -167,40 +191,68 @@ def greedy_counterfactual(
         p_t = float(disc.predict_proba(rr)[0, y_target])
         return (pred == y_target and p_t >= tau), p_t
 
-    flipped, _ = _flip_state(x_cf)
-    while not flipped and len(changed) < budget:
-        candidates = [j for j in actionable if j not in changed]
-        if not candidates:
+    flipped, p_t = _flip_state(x_cf)
+    for rnd in range(max_rounds):
+        if flipped:
             break
+        rounds_used = rnd + 1
+        edited_this_round: List[int] = []
 
-        if selector == "prob_ascent":
-            j_star, score, val = _select_prob_ascent(
-                sampler, disc, x_cf, y_target, candidates, temperature
-            )
-        elif selector == "class_divergence":
-            j_star, score, val = _select_class_divergence(
-                sampler, x_cf, y_target, y_current, candidates
-            )
-        else:
-            raise ValueError(
-                f"Unknown selector {selector!r}; expected 'prob_ascent' or "
-                "'class_divergence'."
-            )
+        while not flipped and len(edited_this_round) < budget:
+            candidates = [j for j in actionable if j not in edited_this_round]
+            if not candidates:
+                break
 
-        if val is None:
-            val = float(
-                sampler.sample_feature(
-                    x_cf.reshape(1, -1),
-                    target_col=j_star,
-                    sample_temperature=temperature,
-                    fixed_target=y_target,
-                )[0]
-            )
+            if selector == "prob_ascent":
+                j_star, score, val = _select_prob_ascent(
+                    sampler, disc, x_cf, y_target, candidates, temperature
+                )
+            elif selector == "class_divergence":
+                j_star, score, val = _select_class_divergence(
+                    sampler, x_cf, y_target, y_current, candidates
+                )
+            else:
+                raise ValueError(
+                    f"Unknown selector {selector!r}; expected 'prob_ascent' or "
+                    "'class_divergence'."
+                )
 
-        x_cf[j_star] = val
-        changed.append(j_star)
-        flipped, p_t = _flip_state(x_cf)
-        history.append((j_star, val, p_t, score))
+            if val is None:
+                val = float(
+                    sampler.sample_feature(
+                        x_cf.reshape(1, -1),
+                        target_col=j_star,
+                        sample_temperature=temperature,
+                        fixed_target=y_target,
+                    )[0]
+                )
+
+            if rnd > 0:
+                # Strict-improvement acceptance in re-visit rounds. For
+                # prob_ascent ``score`` already is p_target after the trial
+                # edit; for class_divergence it is a divergence, so p must be
+                # probed with one extra disc call.
+                if selector == "prob_ascent":
+                    p_trial = score
+                else:
+                    trial = x_cf.copy()
+                    trial[j_star] = val
+                    p_trial = float(
+                        disc.predict_proba(trial.reshape(1, -1))[0, y_target]
+                    )
+                if p_trial <= p_t:
+                    break  # end this round; round-level guard decides the rest
+
+            x_cf[j_star] = val
+            edited_this_round.append(j_star)
+            if j_star not in changed:
+                changed.append(j_star)
+            total_edits += 1
+            flipped, p_t = _flip_state(x_cf)
+            history.append((j_star, val, p_t, score))
+
+        if rnd > 0 and not edited_this_round:
+            break  # fixed point: no single-column edit improves p_target
 
     # Immutability assert (extends the predecessor Stage-7 check): every
     # non-actionable column must be byte-identical to the factual.
@@ -212,5 +264,10 @@ def greedy_counterfactual(
             "immutables must be preserved exactly by construction."
         )
 
-    info = {"flipped": bool(flipped), "steps": len(changed), "history": history}
+    info = {
+        "flipped": bool(flipped),
+        "steps": total_edits,
+        "rounds": rounds_used,
+        "history": history,
+    }
     return x_cf, changed, info
