@@ -134,7 +134,7 @@ Targets stay modest — this remains an out-of-the-box exploration. "Success" = 
 | 6 | [MOONS trajectory plots (Exp8)](stages/06-moons-trajectories.md) | DONE | Added `exp8_moons_trajectories.py`; generated `results/figures/moons_trajectories.png`, `moons_blocked_slice.png`, and README. Near-boundary plot uses 30 trajectories; bounded fallback scan found stalled row 128 for the blocked-slice panel. Exp8 offline run passed; `uv` suite 40 passed; `poetry` unavailable on host. | |
 | 7 | [Discrete dataset + validity check](stages/07-discrete-dataset.md) | DONE | Added native all-categorical `binary_cat` (3 binary semantic columns, no one-hot) + generic actionability config + explicit sampler categorical routing. Exp4 `prob_ascent` uses all-classes context for native categoricals to avoid one-class support collapse; n=50 result: validity 1.00, L0 1.00, frac_oob 0.00, LOF 1.00, true_actionability 1.00. Full `uv` suite 44 passed; `poetry` unavailable on host. | (see git log) |
 | 8 | [Binning / routing audit (Exp9)](stages/08-binning-routing-audit.md) | DONE | Added binning audit note, `--force-numeric-cols` routing override, Exp9 runner, and 4 routing tests. HELOC has 5 classifier-routed low-cardinality columns. Bounded Exp9 smoke (`n=1`, `budget=1`, `n_perm=1`) found override kept validity 1.0, improved proximity 0.346→0.133 and LOF 1.86→1.08, frac_oob 0. Full `n=30`/`budget=17` run hit `prob_ascent` O(\|A\|²) worst-case and is deferred to Backlog #4. Full `uv` suite 48 passed; `poetry` unavailable on host. | (see git log) |
-| 9 | [Consolidated table + REPORT](stages/09-consolidated-table.md) | PENDING | Phase C. Surface `proximity_l2_jaccard` as a first-class column; fold in Stages 5–8. The headline "tabelka". Depends on 5–8. | |
+| 9 | [Consolidated table + REPORT](stages/09-consolidated-table.md) | DONE | Added `results/summary_table.{md,csv}` with proximity as a first-class column, updated REPORT §7e with the next-meeting digest/table/routing verdict, and added proximity grids to Exp6 summaries/generator. Full `uv` suite 48 passed; `poetry` unavailable on host. Backlog remains OPEN (4 items). | |
 
 Statuses: `PENDING` -> `IN_PROGRESS` -> `DONE` | `BLOCKED` | `SKIPPED`
 
@@ -251,6 +251,7 @@ Leave empty until execution surfaces something.
 | 7 | 7 | Required verification command `poetry run pytest` failed immediately with `poetry: command not found`. | Same host provisioning as Stages 5–6: the experiment environment is managed through `uv`, with no Poetry binary installed. | Ran the full experiment test suite through `uv` instead (`uv run pytest experiments/zeroshot_cf/tests -q`); all 44 tests passed. Guardrails (`src/tabpfn` diff and `tabpfn_client` grep) passed. | inline |
 | 8 | 8 | Required verification command `poetry run pytest` failed immediately with `poetry: command not found`. | Same host provisioning as Stages 5–7: the experiment environment is managed through `uv`, with no Poetry binary installed. | Ran the full experiment test suite through `uv` instead (`uv run pytest experiments/zeroshot_cf/tests -q`); all 48 tests passed. | inline |
 | 9 | 8 | Full Exp9 (`--max-test 30`, natural HELOC `budget=17`) and a reduced `--max-test 5 --budget 5` attempt did not finish in practical time after the forced-numeric override repeatedly exhausted the greedy budget. | With revisits enabled, `prob_ascent` evaluates every actionable candidate at every commit. For HELOC this makes the override cell hit the known O(\|A\|²) worst case: up to 17 candidates × 17 steps per point, plus per-query kNN context fits. | Added an explicit `--budget` knob to Exp9, documented the limitation, produced a bounded smoke artefact (`--max-test 1 --budget 1 --n-permutations 1`), and deferred the statistically stable full run to Backlog #4. | inline |
+| 10 | 9 | Required verification command `poetry run pytest` failed immediately with `poetry: command not found`. | Same host provisioning as Stages 5–8: the experiment environment is managed through `uv`, with no Poetry binary installed. | Validated the summary CSV with `uv run python`, ran the full experiment test suite through `uv run pytest experiments/zeroshot_cf/tests -q` (48 passed), and ran guardrails for `src/tabpfn` and `tabpfn_client`. | inline |
 
 ---
 
@@ -440,3 +441,11 @@ Decisions made during autonomous execution should be appended below.
     their budget. The committed Exp9 artefact is therefore explicitly labeled as a smoke diagnostic
     (`max_test=1, budget=1, n_permutations=1`), sufficient to verify the override path and direction
     on one row but not a stable HELOC estimate. The stable run is Backlog #4.
+
+**Stage 9 (2026-07-06):**
+
+25. **One-pass baseline integer L0 is left blank in the consolidated table.** Exp2 emits
+    fractional `sparsity` but not distinct integer `l0_count_mean`, `steps_mean`, or greedy
+    `failure_rate`. The table records the full-split one-pass validity/proximity/LOF/OOB values
+    and notes that HELOC masks all 17 actionables, but it does not back-compute a pseudo-L0 from
+    fractional sparsity.

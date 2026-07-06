@@ -29,6 +29,15 @@ Selector: `prob_ascent` · cells: 16 · n_test: 100
 | 1024 | 1.254 | 1.341 | 1.254 | 1.341 |
 | 2048 | 1.254 | 1.341 | 1.254 | 1.341 |
 
+**proximity_l2_jaccard**
+
+| size \ strategy | random_target | random_both | knn_target | knn_both |
+|---|---|---|---|---|
+| 256 | 0.5975 | 0.6352 | 0.5232 | 0.2634 |
+| 512 | 0.6138 | 0.6589 | 0.6138 | 0.3841 |
+| 1024 | 0.6138 | 0.6605 | 0.6138 | 0.6605 |
+| 2048 | 0.6138 | 0.6605 | 0.6138 | 0.6605 |
+
 **frac_oob**
 
 | size \ strategy | random_target | random_both | knn_target | knn_both |
@@ -73,6 +82,15 @@ Selector: `prob_ascent` · cells: 16 · n_test: 15
 | 512 | 1.5 | 1.5 | 1.833 | 1.5 |
 | 1024 | 1.636 | 1.5 | 1.5 | 1.5 |
 | 2048 | 1.714 | 1.714 | 1.5 | 1.636 |
+
+**proximity_l2_jaccard**
+
+| size \ strategy | random_target | random_both | knn_target | knn_both |
+|---|---|---|---|---|
+| 256 | 0.6371 | 0.6098 | 0.6515 | 0.6225 |
+| 512 | 0.6107 | 0.6102 | 0.6915 | 0.6204 |
+| 1024 | 0.6649 | 0.752 | 0.6388 | 0.6098 |
+| 2048 | 0.6801 | 0.6798 | 0.6355 | 0.6654 |
 
 **frac_oob**
 
@@ -142,4 +160,3 @@ Greedy + a **small, relevance-selected (kNN) context** is what salvages HELOC. C
 with Stage 2 (greedy + `prob_ascent` lifts HELOC validity 0.538 → 0.90 and L0 17 → 1.67 vs
 one-pass), Stage 4 shows the remaining plausibility gap closes with `knn_both@256`
 (`frac_oob` 0.65 → 0.00). **Bigger context is not the lever — relevant context is.**
-

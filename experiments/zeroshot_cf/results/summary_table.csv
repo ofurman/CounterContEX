@@ -1,0 +1,7 @@
+dataset,config,validity,failure_rate,l0_count_mean,steps_mean,proximity_l2_jaccard,lof_scores_cf,frac_oob,true_actionability,n_test,source,notes
+moons,one_pass_mask_all_full,0.995,,,,0.67423,1.059873,0.01,1.0,200,exp2_moons_metrics.csv,Full split one-pass baseline; integer L0/steps/failure_rate not emitted by Exp2.
+heloc,one_pass_mask_all_full,0.538241,,,,1.690471,5682014774.035,0.652964,0.998566,2092,exp2_heloc_metrics.csv,Full split one-pass baseline; all 17 actionables masked but integer L0/steps/failure_rate not emitted by Exp2.
+moons,greedy_prob_ascent_random_both_512_budget2,0.82,0.18,1.329268,1.329268,0.658896,1.026722,0.0,1.0,100,exp7_budget_moons.csv,Stage-4 recommended config and best/saturated Stage-5 budget cell.
+heloc,greedy_prob_ascent_knn_both_256_budget17,0.8,0.2,1.833333,1.833333,0.664572,1.848451,0.0,1.0,30,exp7_budget_heloc.csv,Stage-4 recommended config and best/saturated Stage-5 budget cell.
+binary_cat,greedy_prob_ascent_native_categorical,1.0,0.0,1.0,1.0,1.0,1.0,0.0,1.0,50,exp4_greedy_binary_cat_metrics.csv,Stage-7 native categorical sanity check.
+heloc,routing_override_force_numeric_smoke,1.0,0.0,1.0,1.0,0.133333,1.082047,0.0,1.0,1,exp9_routing_heloc.csv,Stage-8 bounded smoke only; stable n=30 estimate deferred to Backlog #4.

@@ -482,7 +482,13 @@ def write_summary() -> None:
         "",
     ]
 
-    headline = ["validity", "l0_count_mean", "frac_oob", "lof_scores_cf"]
+    headline = [
+        "validity",
+        "l0_count_mean",
+        "proximity_l2_jaccard",
+        "frac_oob",
+        "lof_scores_cf",
+    ]
     for ds, rows in dataset_rows.items():
         n_test = rows[0].get("n_test", "?") if rows else "?"
         selector = rows[0].get("selector", "?") if rows else "?"

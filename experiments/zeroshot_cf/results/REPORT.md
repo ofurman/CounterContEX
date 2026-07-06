@@ -439,6 +439,55 @@ categorical commits in observed support `{0,1}`, preserves immutables exactly, a
 
 ---
 
+## 7e. Follow-up Synthesis (Exp7–Exp9 + Stage 9) — Proximity Surfaced
+
+**Next-meeting digest.**
+
+- **Budget/revisiting did not lift MOONS beyond the Stage-4 ceiling**: validity stays
+  **0.82** for budgets 2→64; every row flips or stalls by 2 commits. The trajectory
+  figures in `results/figures/moons_trajectories.png` and
+  `results/figures/moons_blocked_slice.png` show where the near-MAP path lands and stalls.
+- **HELOC remains the main win** at the recommended greedy context: `knn_both@256` reaches
+  validity **0.80** at n=30 with `frac_oob=0`, LOF **1.85**, proximity **0.665**, and
+  distinct L0 **1.83**. This preserves the Stage-4 plausibility fix at a larger n than the
+  context grid.
+- **Native categorical sanity check passes cleanly**: `binary_cat` reaches **1.00**
+  validity with one semantic categorical commit, `frac_oob=0`, and true actionability 1.0.
+- **Routing override is promising but only smoke-tested**: forcing five HELOC
+  low-cardinality integer columns through the numeric/bar path improved proximity
+  **0.346 → 0.133** and LOF **1.86 → 1.08** on n=1, but the stable n=30 run remains
+  deferred to plan Backlog #4.
+
+### Consolidated headline table
+
+`proximity_l2_jaccard` is now present in the headline table below and in
+`results/summary_table.{md,csv}`. Lower is better for L0, steps, proximity, LOF, and
+`frac_oob`; higher is better for validity and true actionability.
+
+| dataset | config | validity | failure_rate | l0_count_mean | steps_mean | proximity_l2_jaccard | LOF | frac_oob | true_actionability | n_test |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| moons | one_pass_mask_all_full | 0.995 | — | — | — | 0.6742 | 1.060 | 0.010 | 1.000 | 200 |
+| heloc | one_pass_mask_all_full | 0.538 | — | — | — | 1.6905 | 5.68e9 | 0.653 | 0.999 | 2092 |
+| moons | greedy_prob_ascent_random_both_512_budget2 | 0.820 | 0.180 | 1.329 | 1.329 | 0.6589 | 1.027 | 0.000 | 1.000 | 100 |
+| heloc | greedy_prob_ascent_knn_both_256_budget17 | 0.800 | 0.200 | 1.833 | 1.833 | 0.6646 | 1.848 | 0.000 | 1.000 | 30 |
+| binary_cat | greedy_prob_ascent_native_categorical | 1.000 | 0.000 | 1.000 | 1.000 | 1.0000 | 1.000 | 0.000 | 1.000 | 50 |
+| heloc | routing_override_force_numeric_smoke | 1.000 | 0.000 | 1.000 | 1.000 | 0.1333 | 1.082 | 0.000 | 1.000 | 1 |
+
+The one-pass rows are the predecessor full-split baseline. They keep integer L0, steps, and
+greedy failure-rate blank because Exp2 only emitted fractional `sparsity`; the HELOC
+one-pass mechanism still masks all 17 actionables. The MOONS/HELOC greedy rows are the
+Stage-4 recommended configs and Stage-5 best/saturated budget cells.
+
+### Routing / binning verdict
+
+The binning audit found that the risk is not TabPFN's ordered bar distribution itself; it is
+the automatic classifier routing of low-cardinality integer columns. Exp9 implements a
+sampler-level `--force-numeric-cols` override without touching `src/tabpfn/**`. The bounded
+smoke run confirms the override path and improves proximity on the sampled HELOC row, but
+the natural-budget n=30 run hit the known `prob_ascent` O(|A|^2) worst case and is deferred.
+
+---
+
 ## 8. Files
 
 | Path | Description |
@@ -459,6 +508,7 @@ categorical commits in observed support `{0,1}`, preserves immutables exactly, a
 | `results/exp5_summary.md` | Exp 5 selector ablation tables + chosen selector |
 | `results/exp6_context_{moons,heloc}.csv` | Exp 6 context grid (size × strategy) metrics |
 | `results/exp6_summary.md` | Exp 6 context ablation grids + recommended config |
+| `results/summary_table.{md,csv}` | Consolidated Stage-9 headline table with proximity surfaced |
 | `results/exp1_{moons,heloc}.csv` | Per-feature reconstruction metrics |
 | `results/exp1_summary.md` | Exp 1 summary + gate verdict |
 | `results/exp2_{moons,heloc}_metrics.csv` | Exp 2 per-dataset metrics |
