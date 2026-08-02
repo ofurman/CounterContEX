@@ -140,7 +140,10 @@ REGISTRY_COLS = [
     ("validity_target", "Validity", 4),
     ("proximity_l1_jaccard", "L1", 4),
     ("proximity_l2_jaccard", "L2", 4),
-    ("eps_sparsity", "ε-spars", 4),
+    # The registry's all-rows ε-sparsity, NOT the reference's valid-only one. The two
+    # scorers emit the same name for different formulas; exp7_sweep_table namespaces
+    # the registry version so this table cannot show a valid-only number as registry.
+    ("registry__eps_sparsity", "ε-spars (all rows)", 4),
     ("isolation_forest_scores_cf", "IsoForest", 4),
     ("coverage", "Coverage", 4),
 ]

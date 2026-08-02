@@ -86,6 +86,23 @@ UNRELIABLE = [
     "pairwise_diversity_mixed",
 ]
 
+# Metric names emitted by BOTH scorers under DIFFERENT formulas. The reference
+# version keeps the bare name (it is the convention to read); the registry version
+# is namespaced ``registry__<name>``. Any other name collision is treated as a bug
+# and raises, so a future divergence cannot slip through as a silent overwrite.
+#
+#   eps_sparsity — registry: mean over ALL rows (exp4_metrics_table.eps_sparsity)
+#                  reference: mean over VALID rows only (reference_metrics.eps_sparsity)
+COLLIDING_METRICS = {"eps_sparsity"}
+
+
+def _both_nan(a: Any, b: Any) -> bool:
+    try:
+        return bool(np.isnan(a)) and bool(np.isnan(b))
+    except (TypeError, ValueError):
+        return False
+
+
 # The headline columns, in reading order.
 DISPLAY_COLUMNS = [
     "dataset",
@@ -174,7 +191,19 @@ def score_run(npz_path: Path) -> Dict[str, Any]:
         if key in ("dataset", "set", "n", "validity"):
             continue  # validity == validity_target, already carried
         name = f"UNRELIABLE__{key}" if key in UNRELIABLE else key
-        row.setdefault(name, value)
+        if name in COLLIDING_METRICS:
+            # Same column name, DIFFERENT formula in the two scorers. eps_sparsity is
+            # the live case: the registry averages over all rows, the reference over
+            # valid rows only (0.4456 vs 0.4633 on heloc/frozen). Silently keeping one
+            # would label a valid-only number as the registry's. Namespace it instead.
+            name = f"registry__{name}"
+        elif name in row and row[name] != value and not _both_nan(row[name], value):
+            raise AssertionError(
+                f"{npz_path.name}: column {name!r} disagrees between scorers "
+                f"({row[name]!r} vs {value!r}) — add it to COLLIDING_METRICS if the "
+                "two formulas genuinely differ."
+            )
+        row[name] = value
 
     # Cross-check: the two scorers must agree on validity. They compute it from the
     # same arrays and the same cached discriminator, so a mismatch means one of them
