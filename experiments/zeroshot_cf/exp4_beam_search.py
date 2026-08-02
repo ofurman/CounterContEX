@@ -164,9 +164,29 @@ def cell_paths(dataset_name: str, tag: str, run_id: Optional[str]) -> Dict[str, 
     }
 
 
+# Written by sync-to-plgrid.sh into the synced tree. The cluster checkout is an
+# rsync of the working tree with .git excluded, so `git rev-parse` there returns
+# nothing and a cluster array would otherwise carry no code provenance at all.
+COMMIT_STAMP = REPO_ROOT / ".plgrid-commit"
+
+
 def _git_commit() -> str:
-    """Short HEAD hash, or 'unknown'. Cluster runs are rsynced from a working tree,
-    so this is the only in-artifact record of which code produced an array."""
+    """Short HEAD hash, or 'unknown'.
+
+    Resolution order: an explicit ``CX_GIT_COMMIT`` override, then the stamp file
+    dropped by ``sync-to-plgrid.sh`` (the cluster case — no .git present), then a
+    real git call (the local case).
+    """
+    env = os.environ.get("CX_GIT_COMMIT", "").strip()
+    if env:
+        return env
+    try:
+        if COMMIT_STAMP.is_file():
+            stamped = COMMIT_STAMP.read_text().strip()
+            if stamped:
+                return stamped
+    except OSError:
+        pass
     try:
         out = subprocess.run(
             ["git", "-C", str(REPO_ROOT), "rev-parse", "--short", "HEAD"],

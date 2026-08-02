@@ -186,3 +186,6 @@ data/
 # Plan-runner / experiment run artifacts (regenerated each run)
 logs/
 .plan_runner_done
+
+# Working-tree provenance stamp written by plgrid/sync-to-plgrid.sh
+.plgrid-commit

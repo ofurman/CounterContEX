@@ -68,6 +68,23 @@ for required in \
     echo "    ok  ${required}"
 done
 
+# Code provenance. The sync excludes .git, so `git rev-parse` on the cluster
+# returns nothing and a cluster-generated array would carry no record of the code
+# that produced it. Stamp the working-tree state into a file that travels with the
+# sync; exp4_beam_search.py reads it into every npz's config_json.
+#
+# The -dirty suffix is the honest part: this syncs the WORKING TREE, not a git ref,
+# so a clean hash alone would overstate reproducibility if there are uncommitted
+# edits. Push the branch before syncing to keep runs attributable.
+COMMIT="$(git -C "${REPO}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+if ! git -C "${REPO}" diff --quiet HEAD 2>/dev/null; then
+    COMMIT="${COMMIT}-dirty"
+fi
+printf '%s\n' "${COMMIT}" > "${REPO}/.plgrid-commit"
+echo ""
+echo "=== code provenance stamp ==="
+echo "    ${COMMIT}"
+
 echo ""
 echo "=== code -> \$HOME/projects/${PROJECT_NAME} ==="
 ssh "${REMOTE}" "mkdir -p projects/${PROJECT_NAME}/logs"
