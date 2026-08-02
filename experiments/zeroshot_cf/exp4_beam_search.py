@@ -14,24 +14,42 @@ Context: all_classes (mandatory — a constant Y in context trips TabPFN's
 constant-feature validator; Y must vary so the appended-Y conditioning works).
 For MOONS (no immutables), Set 1 ≡ Set 2.
 
-Outputs:
-  results/exp4_<dataset>_<set>_metrics.csv   — per-dataset, per-regime metric row
-  results/exp4_summary.md                    — combined two-regime table + notes
+Outputs (no ``--run-id`` — the original, unchanged layout):
+  results/arrays/exp4_<dataset>_<set>_cfs.npz    — raw generated arrays
+  results/exp4_<dataset>_<set>_metrics.csv       — per-dataset, per-regime metric row
+  results/exp4_summary.md                        — combined two-regime table + notes
+
+Outputs with ``--run-id <slug>`` (Exp 7 hyperparameter sweep). A sweep runs the same
+cell many times under different beam settings, so every artifact is config-tagged and
+lands in its own namespace — nothing above is touched:
+  results/arrays/sweep/exp4_<dataset>_<set>__<run-id>_cfs.npz
+  results/sweep/exp4_<dataset>_<set>__<run-id>_metrics.csv
+  results/sweep/exp4_summary__<run-id>.md
+
+The full resolved config is stored *inside* the npz (``config_json``), so a saved
+array carries the settings that produced it and never has to be inferred from its
+filename.
 
 Usage:
   uv run python experiments/zeroshot_cf/exp4_beam_search.py --dataset all --set both
   uv run python experiments/zeroshot_cf/exp4_beam_search.py --dataset heloc \\
       --set fromscratch --beam-width 8 --lambda-actionable 1.0
+  uv run python experiments/zeroshot_cf/exp4_beam_search.py --dataset heloc \\
+      --set frozen --max-test -1 --run-id bw16 --beam-width 16
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import json
+import os
+import re
+import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -43,6 +61,11 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 # Raw generated CF arrays (gitignored) — lets metrics be recomputed without
 # re-running the ~0.85 s/CF beam search.
 ARRAYS_DIR = RESULTS_DIR / "arrays"
+# Exp 7 sweep namespace. Deliberately a *subdirectory*: the existing scorers glob
+# ARRAYS_DIR non-recursively (``arrays/exp4_*_cfs.npz``), so config-tagged runs are
+# invisible to them and the four historical cells keep their exact meaning.
+SWEEP_ARRAYS_DIR = ARRAYS_DIR / "sweep"
+SWEEP_RESULTS_DIR = RESULTS_DIR / "sweep"
 
 N_ESTIMATORS = 4
 MAX_CONTEXT = 256
@@ -65,6 +88,98 @@ _DATASET_PARAMS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Exp 7 sweep plumbing: run ids, candidate-probability presets, provenance
+# ---------------------------------------------------------------------------
+
+# Named candidate_probs presets. ``interior`` is the historical default (encoded as
+# None so BeamConfig.probs() derives it from n_candidates); ``tail`` is the sweep's
+# alternative — it reaches the distribution tails, where the larger feature moves are.
+CANDIDATE_PROB_PRESETS: Dict[str, Optional[List[float]]] = {
+    "interior": None,
+    "tail": [0.05, 0.25, 0.5, 0.75, 0.95],
+}
+
+# Run ids go into filenames that are parsed back by splitting on "__", so they must
+# not contain an underscore themselves.
+_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]*$")
+
+
+def parse_run_id(value: Optional[str]) -> Optional[str]:
+    """Validate a sweep run id. Returns None for the unset/legacy case."""
+    if value is None or value == "":
+        return None
+    if not _RUN_ID_RE.match(value):
+        raise ValueError(
+            f"invalid --run-id {value!r}: use letters, digits, '-' and '.' only "
+            "(no underscores — they are the filename field separator)"
+        )
+    return value
+
+
+def parse_candidate_probs(value: Optional[str]) -> Optional[List[float]]:
+    """Parse ``--candidate-probs``: a preset name or a comma-separated prob list.
+
+    Returns None for the default interior grid, which ``BeamConfig.probs()`` derives
+    from ``n_candidates``. An explicit list *overrides* ``n_candidates``: the effective
+    branching factor becomes ``len(probs) + 1`` (the extra slot is the mode).
+    """
+    if value is None or value == "":
+        return None
+    if value in CANDIDATE_PROB_PRESETS:
+        return CANDIDATE_PROB_PRESETS[value]
+    try:
+        probs = [float(tok) for tok in value.split(",") if tok.strip() != ""]
+    except ValueError as exc:
+        raise ValueError(
+            f"invalid --candidate-probs {value!r}: expected a preset "
+            f"({sorted(CANDIDATE_PROB_PRESETS)}) or a comma-separated list of floats"
+        ) from exc
+    if not probs:
+        raise ValueError("--candidate-probs parsed to an empty list")
+    if not all(0.0 < p < 1.0 for p in probs):
+        raise ValueError(
+            f"--candidate-probs must all lie strictly in (0, 1), got {probs}"
+        )
+    return probs
+
+
+def cell_paths(dataset_name: str, tag: str, run_id: Optional[str]) -> Dict[str, Path]:
+    """Resolve the output paths for one (dataset, set, run_id) cell.
+
+    ``run_id=None`` reproduces the original Exp-4 filenames byte for byte; any other
+    value moves every artifact into the sweep namespace.
+    """
+    if run_id is None:
+        return {
+            "npz": ARRAYS_DIR / f"exp4_{dataset_name}_{tag}_cfs.npz",
+            "metrics_csv": RESULTS_DIR / f"exp4_{dataset_name}_{tag}_metrics.csv",
+            "summary": RESULTS_DIR / "exp4_summary.md",
+        }
+    return {
+        "npz": SWEEP_ARRAYS_DIR / f"exp4_{dataset_name}_{tag}__{run_id}_cfs.npz",
+        "metrics_csv": SWEEP_RESULTS_DIR
+        / f"exp4_{dataset_name}_{tag}__{run_id}_metrics.csv",
+        "summary": SWEEP_RESULTS_DIR / f"exp4_summary__{run_id}.md",
+    }
+
+
+def _git_commit() -> str:
+    """Short HEAD hash, or 'unknown'. Cluster runs are rsynced from a working tree,
+    so this is the only in-artifact record of which code produced an array."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        return out.stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
 def _actionable_order_by_coef(disc_model, actionable_idx: List[int]) -> List[int]:
     """Order actionable columns by descending |LR coefficient| (most class-informative
     first), so the strongest anchors are generated early in the chain."""
@@ -83,6 +198,8 @@ def generate_counterfactuals_beam(
     max_test: Optional[int] = None,
     freeze_immutable: bool = False,
     chunk_size: int = DEFAULT_CHUNK,
+    candidate_probs: Optional[Sequence[float]] = None,
+    n_estimators: int = N_ESTIMATORS,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict]:
     """Generate beam-search CFs for one dataset. Returns (X_test, y_test, X_cf, info).
 
@@ -101,6 +218,12 @@ def generate_counterfactuals_beam(
         BeamConfig,
         build_generation_ordering,
         generate_cf_beam,
+    )
+
+    # Resolve the branching factor once, up front: with an explicit candidate_probs
+    # list the n_candidates argument no longer determines it (K = len(probs) + mode).
+    n_candidates_effective = (
+        n_candidates if candidate_probs is None else len(list(candidate_probs)) + 1
     )
     from experiments.zeroshot_cf.checkpoints import get_models
     from experiments.zeroshot_cf.data import get_actionable_immutable, load_dataset
@@ -123,7 +246,9 @@ def generate_counterfactuals_beam(
     print(
         f"  beam_width={beam_width}, n_candidates={n_candidates}, "
         f"lambda_actionable={lambda_actionable}, lambda_immutable={lambda_immutable}, "
-        f"max_context={max_context}, freeze_immutable={freeze_immutable}"
+        f"max_context={max_context}, freeze_immutable={freeze_immutable}, "
+        f"n_estimators={n_estimators}, candidate_probs="
+        f"{'interior grid' if candidate_probs is None else list(candidate_probs)}"
     )
 
     bundle = load_dataset(dataset_name)
@@ -153,7 +278,7 @@ def generate_counterfactuals_beam(
     )
 
     print("Loading TabPFN models …")
-    _, reg = get_models(n_estimators=N_ESTIMATORS)
+    _, reg = get_models(n_estimators=n_estimators)
 
     X_cf = np.empty((n, d), dtype=np.float64)
     immutable_drift = np.full(n, np.nan)
@@ -174,6 +299,7 @@ def generate_counterfactuals_beam(
             lambda_actionable=lambda_actionable,
             lambda_immutable=lambda_immutable,
             max_context=max_context,
+            candidate_probs=candidate_probs,
             random_state=42 + target_cls,
         )
         n_gen = len(actionable_idx) if freeze_immutable else d
@@ -236,6 +362,15 @@ def generate_counterfactuals_beam(
             "lambda_immutable": lambda_immutable,
             "max_context": max_context,
             "freeze_immutable": freeze_immutable,
+            "candidate_probs": (
+                None if candidate_probs is None else [float(p) for p in candidate_probs]
+            ),
+            # What BeamConfig actually branched on, after the n_candidates-vs-explicit
+            # -probs resolution. This is the number to report, not n_candidates.
+            "n_candidates_effective": n_candidates_effective,
+            "n_estimators": n_estimators,
+            "chunk_size": chunk_size,
+            "max_test": MAX_TEST,
         },
     )
 
@@ -312,18 +447,59 @@ _SETS = [
 ]
 
 
-def run_dataset(dataset_name: str, tag: str, freeze_immutable: bool, **kwargs) -> Dict:
+# Config keys copied out of ``info`` into the npz and into every sweep table. These
+# are exactly the knobs a run can differ by, so a saved array is self-describing.
+CONFIG_KEYS = [
+    "beam_width",
+    "n_candidates",
+    "n_candidates_effective",
+    "candidate_probs",
+    "lambda_actionable",
+    "lambda_immutable",
+    "max_context",
+    "n_estimators",
+    "chunk_size",
+    "max_test",
+    "freeze_immutable",
+]
+
+
+def run_dataset(
+    dataset_name: str,
+    tag: str,
+    freeze_immutable: bool,
+    run_id: Optional[str] = None,
+    **kwargs,
+) -> Dict:
+    t_run = time.perf_counter()
     X_test, y_test, X_cf, info = generate_counterfactuals_beam(
         dataset_name, freeze_immutable=freeze_immutable, **kwargs
+    )
+    elapsed = time.perf_counter() - t_run
+
+    paths = cell_paths(dataset_name, tag, run_id)
+
+    config = {k: info[k] for k in CONFIG_KEYS}
+    config.update(
+        {
+            "dataset": dataset_name,
+            "set": tag,
+            "run_id": run_id or "default",
+            "n": int(X_cf.shape[0]),
+            "git_commit": _git_commit(),
+            "elapsed_s": round(elapsed, 2),
+            "slurm_job_id": os.environ.get("SLURM_JOB_ID", ""),
+            "device": os.environ.get("TABPFN_DEVICE", ""),
+        }
     )
 
     # Persist the raw generated arrays. Generation is the expensive step (~0.85 s/CF
     # on HELOC), so saving them means any new metric can be computed later without
-    # re-running the search.
-    ARRAYS_DIR.mkdir(parents=True, exist_ok=True)
-    npz_path = ARRAYS_DIR / f"exp4_{dataset_name}_{tag}_cfs.npz"
+    # re-running the search. config_json rides along so the settings that produced
+    # the array can never drift from it.
+    paths["npz"].parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
-        npz_path,
+        paths["npz"],
         X_cf=X_cf,
         X_test=X_test,
         y_test=y_test,
@@ -332,8 +508,9 @@ def run_dataset(dataset_name: str, tag: str, freeze_immutable: bool, **kwargs) -
         immutable_idx=np.asarray(info["immutable_idx"], dtype=np.int64),
         chosen_valid=info["chosen_valid"],
         immutable_drift=info["immutable_drift"],
+        config_json=np.array(json.dumps(config, sort_keys=True)),
     )
-    print(f"  Saved arrays → {npz_path}")
+    print(f"  Saved arrays → {paths['npz']}")
 
     metrics = evaluate_and_report_beam(
         dataset_name, X_test, y_test, X_cf, info, write_csv=False
@@ -341,10 +518,12 @@ def run_dataset(dataset_name: str, tag: str, freeze_immutable: bool, **kwargs) -
     row = {
         "dataset": dataset_name,
         "set": tag,
+        "run_id": run_id or "default",
         "freeze_immutable": freeze_immutable,
         **metrics,
     }
-    csv_path = RESULTS_DIR / f"exp4_{dataset_name}_{tag}_metrics.csv"
+    csv_path = paths["metrics_csv"]
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
     with open(csv_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(row.keys()))
         writer.writeheader()
@@ -353,7 +532,9 @@ def run_dataset(dataset_name: str, tag: str, freeze_immutable: bool, **kwargs) -
     return row
 
 
-def write_summary(all_rows: List[Dict], settings: Dict) -> None:
+def write_summary(
+    all_rows: List[Dict], settings: Dict, run_id: Optional[str] = None
+) -> None:
     lines = [
         "# Experiment 4: Counterfactuals via Task-Guided Beam Search",
         "",
@@ -367,10 +548,14 @@ def write_summary(all_rows: List[Dict], settings: Dict) -> None:
         "generated, conditioned only on `Y=target`. The factual enters only via the "
         "proximity penalty.",
         "",
-        f"Settings: beam_width={settings['beam_width']}, "
+        f"Settings: run_id={run_id or 'default'}, "
+        f"beam_width={settings['beam_width']}, "
         f"n_candidates={settings['n_candidates']}, "
         f"lambda_actionable={settings['lambda_actionable']}, "
-        f"max_context={settings['max_context']}, context_type=all_classes. "
+        f"max_context={settings['max_context']}, "
+        f"n_estimators={settings['n_estimators']}, "
+        f"candidate_probs={settings['candidate_probs'] or 'interior grid'}, "
+        "context_type=all_classes. "
         "(For MOONS and LAW, which have no immutables, Set 1 ≡ Set 2.)",
         "",
         "## Metrics",
@@ -436,7 +621,11 @@ def write_summary(all_rows: List[Dict], settings: Dict) -> None:
         "",
         "Full comparison vs. Exp 2 (imputation baseline) is in `results/REPORT.md §8`.",
     ]
-    out = RESULTS_DIR / "exp4_summary.md"
+    # Sweep runs get their own summary file. A shared exp4_summary.md would be
+    # rewritten by whichever config finished last and would report one arbitrary
+    # cell of the sweep as if it were the result.
+    out = cell_paths("_", "_", run_id)["summary"]
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines) + "\n")
     print(f"\nWrote {out}")
 
@@ -473,9 +662,44 @@ def main() -> None:
         type=int,
         default=DEFAULT_CHUNK,
         help=f"Query points per batched beam call (default {DEFAULT_CHUNK}). "
-        "Bounds the per-step predict batch; results are chunk-invariant.",
+        "Bounds the per-step predict batch. NOTE: results are NOT chunk-invariant "
+        "— hold this fixed across any runs compared in one table.",
+    )
+    parser.add_argument(
+        "--candidate-probs",
+        type=str,
+        default=None,
+        help="Quantile probabilities for the icdf candidates (the mode is always "
+        "added as one extra). A preset name "
+        f"({', '.join(sorted(CANDIDATE_PROB_PRESETS))}) "
+        "or a comma-separated list, e.g. 0.05,0.25,0.5,0.75,0.95. Default: the "
+        "interior grid derived from --n-candidates. An explicit list OVERRIDES "
+        "--n-candidates (branching becomes len(probs)+1).",
+    )
+    parser.add_argument(
+        "--n-estimators",
+        type=int,
+        default=N_ESTIMATORS,
+        help=f"TabPFN ensemble members (default {N_ESTIMATORS}).",
+    )
+    parser.add_argument(
+        "--run-id",
+        type=str,
+        default=None,
+        help="Exp-7 sweep config slug (e.g. bw16, lam0, probs-tail). When set, every "
+        "artifact is config-tagged and written under results/sweep/ and "
+        "results/arrays/sweep/, leaving the untagged Exp-4 outputs untouched. "
+        "Letters, digits, '-' and '.' only. Omit to reproduce the original layout.",
     )
     args = parser.parse_args()
+
+    try:
+        run_id = parse_run_id(args.run_id)
+        candidate_probs = parse_candidate_probs(args.candidate_probs)
+    except ValueError as exc:
+        parser.error(str(exc))
+    if args.n_estimators < 1:
+        parser.error("--n-estimators must be >= 1")
     _ALL = ["moons", "heloc", "law"]
     datasets: List[str] = []
     for tok in (t.strip() for t in args.dataset.split(",")):
@@ -493,6 +717,8 @@ def main() -> None:
         n_candidates=args.n_candidates,
         lambda_actionable=args.lambda_actionable,
         max_context=args.max_context,
+        n_estimators=args.n_estimators,
+        candidate_probs=candidate_probs,
     )
     kwargs = dict(
         beam_width=args.beam_width,
@@ -504,14 +730,16 @@ def main() -> None:
         max_context=args.max_context,
         max_test=args.max_test,
         chunk_size=args.chunk_size,
+        candidate_probs=candidate_probs,
+        n_estimators=args.n_estimators,
     )
     all_rows = []
     for tag, freeze, label in sets:
         print(f"\n########## {label} ##########")
         for ds in datasets:
-            all_rows.append(run_dataset(ds, tag, freeze, **kwargs))
+            all_rows.append(run_dataset(ds, tag, freeze, run_id=run_id, **kwargs))
 
-    write_summary(all_rows, settings=settings)
+    write_summary(all_rows, settings=settings, run_id=run_id)
     print("\nExperiment 4 done.")
 
 

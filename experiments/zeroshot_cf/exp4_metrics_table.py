@@ -24,7 +24,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -61,14 +61,22 @@ def eps_sparsity(X_test: np.ndarray, X_cf: np.ndarray, cont: List[int]) -> float
     return float((rel > EPS_SPARSITY_THRESHOLD).mean())
 
 
-def score_cell(npz_path: Path) -> Dict[str, Any]:
+def score_cell(
+    npz_path: Path,
+    dataset_name: Optional[str] = None,
+    tag: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Score one saved cell. ``dataset_name``/``tag`` default to being parsed out of
+    the filename; pass them explicitly for config-tagged Exp-7 sweep arrays, whose
+    stems carry a ``__<run-id>`` suffix that this parse would mis-split."""
     from cel.metrics.utils import _METRIC_REGISTRY  # noqa: PLC0415
 
     from experiments.zeroshot_cf.data import load_dataset  # noqa: PLC0415
     from experiments.zeroshot_cf.discriminator import train_discriminator  # noqa: PLC0415
 
-    stem = npz_path.stem.replace("exp4_", "").replace("_cfs", "")
-    dataset_name, tag = stem.rsplit("_", 1)
+    if dataset_name is None or tag is None:
+        stem = npz_path.stem.replace("exp4_", "").replace("_cfs", "")
+        dataset_name, tag = stem.rsplit("_", 1)
 
     z = np.load(npz_path)
     X_cf = np.clip(z["X_cf"], 0.0, 1.0)

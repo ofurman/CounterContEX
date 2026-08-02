@@ -226,13 +226,23 @@ def _pairwise_diversity_mixed_reference(
 # ---------------------------------------------------------------------------
 
 
-def score_cell(npz_path: Path) -> Dict[str, Any]:
-    """Compute the reference Table-1 metrics for one saved (dataset, regime) cell."""
+def score_cell(
+    npz_path: Path,
+    dataset_name: Optional[str] = None,
+    tag: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Compute the reference Table-1 metrics for one saved (dataset, regime) cell.
+
+    ``dataset_name``/``tag`` default to being parsed out of the filename; pass them
+    explicitly for config-tagged Exp-7 sweep arrays, whose stems carry a
+    ``__<run-id>`` suffix that this parse would mis-split.
+    """
     from experiments.zeroshot_cf.data import load_dataset  # noqa: PLC0415
     from experiments.zeroshot_cf.discriminator import train_discriminator  # noqa: PLC0415
 
-    stem = npz_path.stem.replace("exp4_", "").replace("_cfs", "")
-    dataset_name, tag = stem.rsplit("_", 1)
+    if dataset_name is None or tag is None:
+        stem = npz_path.stem.replace("exp4_", "").replace("_cfs", "")
+        dataset_name, tag = stem.rsplit("_", 1)
 
     z = np.load(npz_path)
     X_cf_raw = z["X_cf"]
