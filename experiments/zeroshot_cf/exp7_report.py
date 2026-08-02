@@ -182,6 +182,23 @@ def render_axis_table(
       </div>"""
 
 
+def _level_sort_key(s: pd.Series) -> pd.Series:
+    """Order axis levels numerically where they are numbers.
+
+    A plain string sort puts max_context at 1024, 128, 256, 512, which reads as
+    noise rather than as a monotone axis. Non-numeric levels (the candidate_probs
+    strings) fall back to lexicographic order.
+
+    The base row carries no level (NaN) and is sorted to the top, so every table
+    opens with the baseline the rest of the rows are compared against.
+    """
+    non_null = s.notna()
+    numeric = pd.to_numeric(s, errors="coerce")
+    if non_null.any() and numeric[non_null].notna().all():
+        return numeric.fillna(-np.inf)
+    return s.astype(str).where(non_null, "")
+
+
 def cell_sections(df: pd.DataFrame, dataset: str, tag: str) -> str:
     grp = df[(df["dataset"] == dataset) & (df["set"] == tag)]
     if grp.empty:
@@ -211,7 +228,7 @@ def cell_sections(df: pd.DataFrame, dataset: str, tag: str) -> str:
                 "Chosen from the OFAT results, not pre-committed."
             )
         else:
-            block = block.sort_values("level", key=lambda s: s.astype(str))
+            block = block.sort_values("level", key=_level_sort_key)
             caption = (
                 f"Axis <code>{esc(axis)}</code>. {esc(AXIS_RATIONALE.get(axis, ''))} "
                 "Reference (dicoflex) convention: valid-CFs-only, median-log LOF."
