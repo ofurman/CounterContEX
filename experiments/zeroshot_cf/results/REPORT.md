@@ -426,18 +426,25 @@ It is run in **two regimes that differ only in whether immutables are masked**:
 - **Set 2 — from scratch** (no masking): *every* feature is generated, conditioned only on
   `Y=target`; the factual enters only via the proximity penalty. Immutables drift.
 
-For MOONS (no immutables) the two regimes are identical.
+For MOONS and LAW (no immutables) the two regimes are identical.
 
-### Results (n=30; beam_width=8, n_candidates=6, λ_actionable=1.0, all_classes)
+### Results (beam_width=8, n_candidates=6, λ_actionable=1.0, all_classes)
 
-| Dataset | Set | Validity | LOF | Proximity L2 | frac_oob | True-action | Immut drift |
-|---------|-----|---------|-----|-------------|---------|------------|------------|
-| MOONS | 1 ≡ 2 | **1.000** | 0.977 | 0.470 | **0.000** | 1.000 | 0.000 |
-| HELOC | **1 frozen** | 0.133 | 7.9e6 | 0.455 | **0.000** | **1.000** | 0.000 |
-| HELOC | **2 from scratch** | **1.000** | **1.006** | 0.830 | **0.000** | 0.000 | 0.115 |
+| Dataset | Set | n | Validity | LOF | Proximity L2 | frac_oob | True-action | Immut drift |
+|---------|-----|---|---------|-----|-------------|---------|------------|------------|
+| MOONS | 1 ≡ 2 | 100 | **1.000** | 0.977 | 0.470 | **0.000** | 1.000 | 0.000 |
+| HELOC | **1 frozen** | 30 | 0.233 | 7.9e6 | 0.466 | **0.000** | **1.000** | 0.000 |
+| HELOC | **2 from scratch** | 30 | **1.000** | **1.004** | 0.829 | **0.000** | 0.000 | 0.115 |
+| LAW | 1 ≡ 2 | 100 | **1.000** | 9.395 | 1.172 | **0.000** | **1.000** | 0.000 |
 
 For reference, the previous baseline — **Exp 2 (imputation, frozen immutables)** on HELOC:
 validity 0.52, LOF 3.1e9, frac_oob 0.72, proximity 1.67, true_action 1.0.
+
+*Re-run note (2026-07-19): HELOC + LAW re-run on this machine (`TABPFN_DEVICE=auto`, MPS).
+HELOC reproduced the qualitative two-regime split; the exact frozen validity is noisy at
+n=30 (0.13 in the original run → 0.23 here), but the collapse relative to from-scratch (1.0)
+is stable. HELOC from-scratch is unchanged (LOF 1.006 → 1.004). MOONS row is from the prior
+run.*
 
 ### The finding: actionability vs validity+plausibility is a *fundamental* tension on HELOC
 
@@ -469,6 +476,33 @@ validity 0.52, LOF 3.1e9, frac_oob 0.72, proximity 1.67, true_action 1.0.
 instances zero-shot (Set 2). Whether that counts as a *counterfactual* depends on whether
 actionability (fixed immutables) is required — and on HELOC that requirement is in direct
 conflict with validity, because the protected features carry most of the class signal.
+
+### LAW (n=100) — first dataset with one-hot categoricals
+
+Law (`lsat, gpa, zfygpa` + one-hot `sex`×2, `race`×8 = 13 cols; target `pass_bar`) follows
+the cel `law.yaml` config, which marks **all** features actionable — so there are no
+immutables and **Set 1 ≡ Set 2** (identical metrics, like MOONS). All 13 columns are
+generated from scratch conditioned on `Y=target`.
+
+- **Validity 1.0, frac_oob 0.0.** The beam flips every point to the target class (per the LR
+  oracle, test-acc ~76%) with zero out-of-bounds cells.
+- **One-hot integrity holds.** Despite generating the 10 one-hot columns via *continuous*
+  bar-distribution quantiles, the autoregressive conditioning + `[0,1]` rejection snap them
+  to **near-valid one-hots**: generated `sex`/`race` blocks come out ≈`0.999 / 0.001` with
+  per-group row-sums ≈ 1.0. The categorical concern going in turned out to be minor — TabPFN
+  learns the one-hot structure from the in-context rows.
+- **But the CFs are modal, not per-instance.** From-scratch generation on Law collapses to
+  ~the same target-class profile regardless of the factual (e.g. every class-0→1 CF lands on
+  the same `sex__2≈1, race__7≈1` mode). Hence **high proximity L2 (1.17)** and **elevated LOF
+  (9.4)** — an order of magnitude worse plausibility than MOONS/HELOC from-scratch (≈1.0),
+  because the modal point sits in a moderate-density region and every CF piles onto it. This
+  is the from-scratch regime's known limitation (no per-instance anchoring when *all* features
+  are actionable) surfacing on a low-dimensional dataset, not a categorical-encoding failure.
+
+**Law take-away**: with everything actionable, from-scratch beam is valid and in-bounds but
+degenerates to a single plausible "approved" archetype rather than a minimal, individualized
+counterfactual. A per-instance result on Law would need either an immutable anchor (fairness
+convention: freeze `sex`/`race`) or a proximity λ large enough to bite (O(20–100)).
 
 ### Recommended next steps (do not oversell)
 1. **Validity-aware exploration for Set 1** — steer per-step candidates toward the target

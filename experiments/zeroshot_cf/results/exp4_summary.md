@@ -5,16 +5,13 @@ Two regimes, identical beam settings — they differ **only** in whether the imm
 - **Set 1 (frozen immutables)** — immutables are *observed* (held at the factual value); the beam generates only the actionable features. Directly comparable to the Exp 2/3 imputation baseline; `true_actionability = 1.0`.
 - **Set 2 (from scratch)** — *no* feature is masked; every feature is generated, conditioned only on `Y=target`. The factual enters only via the proximity penalty.
 
-Settings: beam_width=8, n_candidates=6, lambda_actionable=1.0, max_context=256, context_type=all_classes. (For MOONS, which has no immutables, Set 1 ≡ Set 2.)
+Settings: beam_width=8, n_candidates=6, lambda_actionable=1.0, max_context=256, context_type=all_classes. (For MOONS and LAW, which have no immutables, Set 1 ≡ Set 2.)
 
 ## Metrics
 
 | Dataset | Set | Validity | LOF | Proximity L2 | OOB frac | Immut drift | True-action |
 |---------|-----|---------|-----|-------------|---------|------------|------------|
-| moons | frozen | 1.000 | 0.977 | 0.4697 | 0.000 | 0.0000 | 1.000 |
-| heloc | frozen | 0.133 | 7918099.357 | 0.4546 | 0.000 | 0.0000 | 1.000 |
-| moons | fromscratch | 1.000 | 0.977 | 0.4697 | 0.000 | 0.0000 | 1.000 |
-| heloc | fromscratch | 1.000 | 1.006 | 0.8303 | 0.000 | 0.1153 | 0.000 |
+| law | fromscratch | 1.000 | 10.124 | 1.1299 | 0.000 | 0.0000 | 1.000 |
 
 ## Notes
 
