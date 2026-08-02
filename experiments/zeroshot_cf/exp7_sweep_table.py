@@ -155,6 +155,46 @@ def read_config(npz_path: Path) -> Dict[str, Any]:
         return json.loads(str(z["config_json"].item()))
 
 
+def merge_scorer_rows(
+    reference: Dict[str, Any], registry: Dict[str, Any], context: str = ""
+) -> Dict[str, Any]:
+    """Merge the two scorers' outputs into one flat row.
+
+    Three rules, in order:
+
+    1. The reference (dicoflex) convention keeps the bare column name — it is the
+       one to read.
+    2. Names in ``UNRELIABLE`` are prefixed so they cannot be picked up by accident.
+    3. Names in ``COLLIDING_METRICS`` — same name, genuinely different formula — get
+       the registry version namespaced ``registry__<name>`` so both survive.
+
+    Any *other* name that appears in both with different values raises: it means a
+    formula diverged without anyone noticing, and silently keeping one of them is how
+    a mislabelled number reaches a paper table.
+    """
+    out: Dict[str, Any] = {}
+    for key, value in reference.items():
+        if key in ("dataset", "set"):
+            continue
+        out[f"UNRELIABLE__{key}" if key in UNRELIABLE else key] = value
+
+    for key, value in registry.items():
+        if key in ("dataset", "set", "n", "validity"):
+            continue  # validity == validity_target, already carried
+        name = f"UNRELIABLE__{key}" if key in UNRELIABLE else key
+        if name in COLLIDING_METRICS:
+            name = f"registry__{name}"
+        elif name in out and out[name] != value and not _both_nan(out[name], value):
+            where = f"{context}: " if context else ""
+            raise AssertionError(
+                f"{where}column {name!r} disagrees between scorers "
+                f"({out[name]!r} vs {value!r}) — add it to COLLIDING_METRICS if the "
+                "two formulas genuinely differ."
+            )
+        out[name] = value
+    return out
+
+
 def score_run(npz_path: Path) -> Dict[str, Any]:
     """Score one saved array under both metric conventions."""
     from experiments.zeroshot_cf import exp4_metrics_table, reference_metrics  # noqa: PLC0415
@@ -180,30 +220,7 @@ def score_run(npz_path: Path) -> Dict[str, Any]:
             value = "interior" if value is None else ",".join(str(p) for p in value)
         row[key] = value
 
-    # Reference convention first — it is the one to read.
-    for key, value in reference.items():
-        if key in ("dataset", "set"):
-            continue
-        name = f"UNRELIABLE__{key}" if key in UNRELIABLE else key
-        row[name] = value
-
-    for key, value in registry.items():
-        if key in ("dataset", "set", "n", "validity"):
-            continue  # validity == validity_target, already carried
-        name = f"UNRELIABLE__{key}" if key in UNRELIABLE else key
-        if name in COLLIDING_METRICS:
-            # Same column name, DIFFERENT formula in the two scorers. eps_sparsity is
-            # the live case: the registry averages over all rows, the reference over
-            # valid rows only (0.4456 vs 0.4633 on heloc/frozen). Silently keeping one
-            # would label a valid-only number as the registry's. Namespace it instead.
-            name = f"registry__{name}"
-        elif name in row and row[name] != value and not _both_nan(row[name], value):
-            raise AssertionError(
-                f"{npz_path.name}: column {name!r} disagrees between scorers "
-                f"({row[name]!r} vs {value!r}) — add it to COLLIDING_METRICS if the "
-                "two formulas genuinely differ."
-            )
-        row[name] = value
+    row.update(merge_scorer_rows(reference, registry, context=npz_path.name))
 
     # Cross-check: the two scorers must agree on validity. They compute it from the
     # same arrays and the same cached discriminator, so a mismatch means one of them

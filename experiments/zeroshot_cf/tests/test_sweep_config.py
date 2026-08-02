@@ -31,7 +31,11 @@ from experiments.zeroshot_cf.exp4_beam_search import (
     parse_candidate_probs,
     parse_run_id,
 )
-from experiments.zeroshot_cf.exp7_sweep_table import parse_cell_name
+from experiments.zeroshot_cf.exp7_sweep_table import (
+    COLLIDING_METRICS,
+    merge_scorer_rows,
+    parse_cell_name,
+)
 
 # The glob the pre-existing scorers use to find Exp-4 cells.
 LEGACY_GLOB = "exp4_*_cfs.npz"
@@ -190,3 +194,53 @@ def test_filename_round_trips_through_the_aggregator(dataset, tag, run_id):
     got_dataset, got_tag, got_run_id = parse_cell_name(npz)
     assert (got_dataset, got_tag) == (dataset, tag)
     assert got_run_id == (run_id or "default")
+
+
+# ---------------------------------------------------------------------------
+# 6. Merging the two scorers must not lose or mislabel a metric
+# ---------------------------------------------------------------------------
+
+
+def test_colliding_metric_keeps_both_conventions():
+    """``eps_sparsity`` is emitted by both scorers under different formulas — the
+    registry averages over all rows, the reference over valid rows only. On
+    heloc/frozen these are 0.4456 and 0.4633. Keeping only one would print a
+    valid-only number in a column labelled 'registry'."""
+    assert "eps_sparsity" in COLLIDING_METRICS
+    merged = merge_scorer_rows(
+        reference={"eps_sparsity": 0.4633, "validity_target": 0.3762},
+        registry={"eps_sparsity": 0.4456, "coverage": 1.0},
+    )
+    assert merged["eps_sparsity"] == 0.4633, "bare name is the reference convention"
+    assert merged["registry__eps_sparsity"] == 0.4456
+    assert merged["coverage"] == 1.0
+
+
+def test_unreliable_metrics_are_prefixed_out_of_reach():
+    merged = merge_scorer_rows(
+        reference={"validity_vs_true": 0.72, "lof_score_median_log": 0.03},
+        registry={"lof_scores_cf": 6.5e6, "sparsity": 1.0},
+    )
+    assert "validity_vs_true" not in merged
+    assert "lof_scores_cf" not in merged and "sparsity" not in merged
+    assert merged["UNRELIABLE__lof_scores_cf"] == 6.5e6
+    # The reportable plausibility number keeps its plain name.
+    assert merged["lof_score_median_log"] == 0.03
+
+
+def test_undeclared_collision_raises_rather_than_overwriting():
+    """The guard that stops a future formula divergence from silently picking one
+    side. Without it the merge would keep whichever scorer ran last."""
+    with pytest.raises(AssertionError, match="disagrees between scorers"):
+        merge_scorer_rows(
+            reference={"proximity_l1_continuous": 0.0625},
+            registry={"proximity_l1_continuous": 0.9999},
+        )
+
+
+def test_identical_values_in_both_scorers_are_not_a_collision():
+    merged = merge_scorer_rows(
+        reference={"disc_accuracy": 0.7232},
+        registry={"disc_accuracy": 0.7232},
+    )
+    assert merged["disc_accuracy"] == 0.7232
