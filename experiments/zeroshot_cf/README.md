@@ -164,3 +164,38 @@ HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/exp4_beam_search.py \
 HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/exp4_beam_search.py \
     --dataset heloc --set fromscratch --lambda-actionable 20 --max-test 20
 ```
+
+### Run Experiment 7 (beam-search hyperparameter sweep)
+
+Exp 4's grid was produced with one never-varied configuration. Exp 7 varies five
+axes around those defaults. Generation runs on PLGrid; scoring runs locally.
+
+`--run-id` is what makes a sweep possible: without it every run overwrites the same
+`arrays/exp4_<dataset>_<set>_cfs.npz` and rewrites `exp4_summary.md`. With it, all
+artifacts move into a sweep namespace (`results/arrays/sweep/`, `results/sweep/`)
+and the untagged Exp-4 outputs are left untouched. The full resolved config — plus
+the code commit and Slurm job id — is stored inside each npz as `config_json`.
+
+```bash
+# One configuration (the --run-id slug may not contain underscores)
+HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/exp4_beam_search.py \
+    --dataset heloc --set frozen --max-test -1 --chunk-size 4096 \
+    --run-id lam0 --lambda-actionable 0.0
+
+# Tail candidate quantiles instead of the default interior grid. An explicit list
+# overrides --n-candidates: branching becomes len(probs) + 1 (the extra is the mode).
+    --run-id probs-tail --candidate-probs tail
+    --run-id probs-custom --candidate-probs 0.05,0.5,0.95
+
+# The whole sweep, on Helios — one job per cell, configs sequential within a job
+CELL=heloc:frozen bash plgrid/submit.sh plgrid/30_beam_sweep.sbatch
+CELL=law:frozen   bash plgrid/submit.sh plgrid/30_beam_sweep.sbatch
+
+# Score every config-tagged array under both metric conventions, then render
+uv run python experiments/zeroshot_cf/exp7_sweep_table.py
+uv run python experiments/zeroshot_cf/exp7_report.py
+```
+
+`--chunk-size` is **not** a sweep axis and stays 4096 everywhere: TabPFN's
+predictions depend on the composition of the predict batch, so varying it would
+confound every other axis.
