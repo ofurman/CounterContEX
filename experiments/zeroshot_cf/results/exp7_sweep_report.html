@@ -903,12 +903,22 @@ CELL=heloc:fromscratch CONFIGS="base|" bash plgrid/submit.sh plgrid/30_beam_swee
 CELL=law:fromscratch   CONFIGS="base|" bash plgrid/submit.sh plgrid/30_beam_sweep.sbatch
 # FORCE=1 defeats the resume guard when regenerating
 
-# 3. pull the arrays back and score locally (no GPU needed)
-rsync -a helios:'$PLG_GROUPS_STORAGE/plggcfsgenwro/$USER/countercontex/results/arrays/sweep/' \
-  experiments/zeroshot_cf/results/arrays/sweep/
+# 3. the targeted combinations, chosen after reading the OFAT results
+CELL=heloc:frozen CONFIGS="
+ctx2048|--max-context 2048
+ctx4096|--max-context 4096
+ctx1024-lam0|--max-context 1024 --lambda-actionable 0.0
+ctx2048-lam0|--max-context 2048 --lambda-actionable 0.0
+ctx2048-lam0-bw4|--max-context 2048 --lambda-actionable 0.0 --beam-width 4
+ctx2048-tail|--max-context 2048 --candidate-probs tail
+" bash plgrid/submit.sh plgrid/30_beam_sweep.sbatch
+
+# 4. pull the arrays back (verifies every file by SHA-256) and score locally.
+#    Scoring needs no GPU: generation on PLGrid, scoring local.
+bash plgrid/pull-from-plgrid.sh
 uv run python experiments/zeroshot_cf/exp7_sweep_table.py
 
-# 4. render this report
+# 5. render this report
 uv run python experiments/zeroshot_cf/exp7_report.py</code></pre>
     <p class="prose">
       A single configuration, run directly:
