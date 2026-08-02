@@ -1,295 +1,678 @@
-<title>Beam-search counterfactuals on HELOC and Law: full-split results</title>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <style>
+    /* minimal reset — supplied by the artifact host when published, inlined here
+       so the standalone file renders identically offline. */
+    *, *::before, *::after { box-sizing: border-box; }
+    * { margin: 0; }
+    img, svg { display: block; max-width: 100%; }
+    table { border-collapse: collapse; }
+  </style>
+
+<title>Beam-search counterfactuals on TabPFN — Exp 4 results</title>
+
 <style>
   :root {
-    --paper: #f4f2ec;
-    --ink: #1a1c22;
-    --muted: #5b6068;
-    --hair: #d8d4c8;
-    --card: #fbfaf6;
-    --accent: #1f6f68;      /* deep teal */
-    --accent-soft: #d6e7e4;
-    --good: #2f7d51;
-    --warn: #b5811b;
-    --bad: #b0432c;
-    --grid: #e7e3d8;
-    --shadow: 0 1px 2px rgba(26,28,34,.05), 0 6px 18px rgba(26,28,34,.05);
-    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, ui-serif, serif;
-    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --paper:      #F6F7F9;
+    --panel:      #FFFFFF;
+    --ink:        #131820;
+    --muted:      #616C7C;
+    --rule:       #DCE0E7;
+    --accent:     #1F5F8B;
+    --accent-dim: #E4EDF4;
+    --good:       #2C6E52;
+    --warn:       #8A5A0F;
+    --bad:        #A63A2E;
+    --bad-dim:    #F5E4E1;
+
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --sans:  system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono:  ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   }
+
   @media (prefers-color-scheme: dark) {
     :root {
-      --paper: #14161b; --ink: #e8e6df; --muted: #9aa0a8; --hair: #2b2e36;
-      --card: #191c22; --accent: #5bb8ae; --accent-soft: #1d322f;
-      --good: #6bbd88; --warn: #d6a53f; --bad: #e0765b; --grid: #262a32;
-      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.35);
+      --paper:      #0E1116;
+      --panel:      #161B22;
+      --ink:        #E6E9EE;
+      --muted:      #98A2B2;
+      --rule:       #262D38;
+      --accent:     #6FA8CF;
+      --accent-dim: #172531;
+      --good:       #6FBF95;
+      --warn:       #D9A441;
+      --bad:        #E2796A;
+      --bad-dim:    #2C1A18;
     }
   }
-  :root[data-theme="light"] {
-    --paper: #f4f2ec; --ink: #1a1c22; --muted: #5b6068; --hair: #d8d4c8;
-    --card: #fbfaf6; --accent: #1f6f68; --accent-soft: #d6e7e4;
-    --good: #2f7d51; --warn: #b5811b; --bad: #b0432c; --grid: #e7e3d8;
-    --shadow: 0 1px 2px rgba(26,28,34,.05), 0 6px 18px rgba(26,28,34,.05);
-  }
+
   :root[data-theme="dark"] {
-    --paper: #14161b; --ink: #e8e6df; --muted: #9aa0a8; --hair: #2b2e36;
-    --card: #191c22; --accent: #5bb8ae; --accent-soft: #1d322f;
-    --good: #6bbd88; --warn: #d6a53f; --bad: #e0765b; --grid: #262a32;
-    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.35);
+    --paper:      #0E1116;
+    --panel:      #161B22;
+    --ink:        #E6E9EE;
+    --muted:      #98A2B2;
+    --rule:       #262D38;
+    --accent:     #6FA8CF;
+    --accent-dim: #172531;
+    --good:       #6FBF95;
+    --warn:       #D9A441;
+    --bad:        #E2796A;
+    --bad-dim:    #2C1A18;
   }
 
-  * { box-sizing: border-box; }
+  :root[data-theme="light"] {
+    --paper:      #F6F7F9;
+    --panel:      #FFFFFF;
+    --ink:        #131820;
+    --muted:      #616C7C;
+    --rule:       #DCE0E7;
+    --accent:     #1F5F8B;
+    --accent-dim: #E4EDF4;
+    --good:       #2C6E52;
+    --warn:       #8A5A0F;
+    --bad:        #A63A2E;
+    --bad-dim:    #F5E4E1;
+  }
+
   body {
-    margin: 0; background: var(--paper); color: var(--ink);
-    font-family: var(--sans); line-height: 1.6;
-    font-size: 17px; -webkit-font-smoothing: antialiased;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
   }
-  .wrap { max-width: 940px; margin: 0 auto; padding: 0 24px 120px; }
-  .col { max-width: 68ch; }
 
-  /* ---- masthead ---- */
-  header { padding: 72px 0 40px; border-bottom: 2px solid var(--ink); margin-bottom: 8px; }
-  .kicker {
-    font-family: var(--mono); font-size: 12px; letter-spacing: .18em;
-    text-transform: uppercase; color: var(--accent); margin: 0 0 20px;
+  .wrap {
+    max-width: 940px;
+    margin: 0 auto;
+    padding: 4rem 1.5rem 6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 3.25rem;
   }
+
+  .prose { max-width: 68ch; }
+
+  /* ---------- masthead ---------- */
+
+  .masthead { display: flex; flex-direction: column; gap: 1rem; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
   h1 {
-    font-family: var(--serif); font-weight: 600; font-size: clamp(30px, 5vw, 46px);
-    line-height: 1.08; letter-spacing: -.01em; margin: 0 0 18px; text-wrap: balance;
+    font-family: var(--serif);
+    font-size: clamp(2rem, 5vw, 3rem);
+    line-height: 1.1;
+    font-weight: 600;
+    text-wrap: balance;
+    letter-spacing: -0.015em;
   }
-  .standfirst { font-size: 20px; color: var(--muted); margin: 0; max-width: 60ch; }
-  .runmeta {
-    display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 28px;
-    font-family: var(--mono); font-size: 12.5px; color: var(--muted);
+
+  .standfirst {
+    font-family: var(--serif);
+    font-size: 1.2rem;
+    line-height: 1.5;
+    color: var(--muted);
+    max-width: 60ch;
   }
-  .runmeta b { color: var(--ink); font-weight: 600; }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    color: var(--muted);
+    border-top: 1px solid var(--rule);
+    padding-top: 1rem;
+  }
+  .meta b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- at a glance ---------- */
+
+  .cells {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+
+  .cell {
+    background: var(--panel);
+    padding: 1.15rem 1.25rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+
+  .cell-name {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+
+  .cell-val {
+    font-family: var(--serif);
+    font-size: 2.15rem;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .cell-val.is-low { color: var(--bad); }
+
+  .meter { height: 3px; background: var(--rule); overflow: hidden; }
+  .meter span { display: block; height: 100%; background: var(--accent); }
+  .meter span.is-low { background: var(--bad); }
+
+  .cell-note { font-size: 0.78rem; color: var(--muted); line-height: 1.4; }
+
+  /* ---------- sections ---------- */
+
+  section { display: flex; flex-direction: column; gap: 1.1rem; }
 
   h2 {
-    font-family: var(--serif); font-weight: 600; font-size: 26px;
-    letter-spacing: -.01em; margin: 64px 0 6px; text-wrap: balance;
+    font-family: var(--serif);
+    font-size: 1.6rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--ink);
   }
-  h2 .n { font-family: var(--mono); font-size: 14px; color: var(--accent); margin-right: 10px; font-weight: 400; }
-  h3 { font-family: var(--sans); font-weight: 700; font-size: 16px; margin: 32px 0 8px; }
-  p { margin: 14px 0; }
-  a { color: var(--accent); }
+
+  h3 {
+    font-family: var(--sans);
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  p { max-width: 68ch; }
+  p + p { margin-top: 0.9rem; }
+
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--accent-dim);
+    padding: 0.1em 0.35em;
+    border-radius: 2px;
+  }
+
   strong { font-weight: 650; }
-  .lead { font-size: 18.5px; }
 
-  /* ---- KPI tiles ---- */
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin: 28px 0 8px; }
-  .tile {
-    background: var(--card); border: 1px solid var(--hair); border-radius: 10px;
-    padding: 18px 18px 16px; box-shadow: var(--shadow);
+  /* ---------- findings ---------- */
+
+  .finding {
+    display: grid;
+    grid-template-columns: 2.6rem 1fr;
+    gap: 0 1.1rem;
+    align-items: start;
   }
-  .tile .lab { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
-  .tile .val { font-family: var(--serif); font-size: 34px; font-weight: 600; line-height: 1; margin: 10px 0 6px; font-variant-numeric: tabular-nums; }
-  .tile .sub { font-size: 13px; color: var(--muted); }
-  .tile.good .val { color: var(--good); }
-  .tile.bad  .val { color: var(--bad); }
 
-  /* ---- tables ---- */
-  .scroller { overflow-x: auto; margin: 22px 0; border: 1px solid var(--hair); border-radius: 10px; background: var(--card); box-shadow: var(--shadow); }
-  table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
-  caption { text-align: left; font-family: var(--mono); font-size: 12px; color: var(--muted); padding: 14px 16px 0; letter-spacing: .04em; }
-  th, td { padding: 11px 14px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  th:first-child, td:first-child { text-align: left; white-space: nowrap; }
-  thead th { font-family: var(--mono); font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); border-bottom: 1.5px solid var(--hair); font-weight: 600; }
-  tbody tr { border-bottom: 1px solid var(--grid); }
-  tbody tr:last-child { border-bottom: none; }
-  tbody td.dim { color: var(--muted); }
-  .cell-name { font-family: var(--mono); font-size: 13px; }
-  .pill { display: inline-block; font-family: var(--mono); font-size: 10.5px; padding: 2px 7px; border-radius: 20px; letter-spacing: .03em; }
-  .pill.frozen { background: var(--accent-soft); color: var(--accent); }
-  .pill.scratch { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
-  .v-good { color: var(--good); font-weight: 650; }
-  .v-bad { color: var(--bad); font-weight: 650; }
+  .finding-num {
+    font-family: var(--serif);
+    font-size: 1.9rem;
+    line-height: 1;
+    color: var(--rule);
+    font-variant-numeric: lining-nums;
+  }
 
-  /* ---- charts ---- */
-  figure { margin: 26px 0; }
-  figcaption { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 10px; }
-  .chart { width: 100%; background: var(--card); border: 1px solid var(--hair); border-radius: 10px; box-shadow: var(--shadow); padding: 20px 18px 8px; }
-  .bar-row { display: grid; grid-template-columns: 168px 1fr 56px; align-items: center; gap: 12px; margin: 9px 0; font-size: 13.5px; }
-  .bar-row .rl { font-family: var(--mono); font-size: 12px; color: var(--muted); text-align: right; }
-  .track { height: 20px; background: var(--grid); border-radius: 4px; overflow: hidden; }
-  .fill { height: 100%; border-radius: 4px; }
-  .bar-row .rv { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .finding-body { display: flex; flex-direction: column; gap: 0.85rem; }
 
-  .note { background: var(--card); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; padding: 14px 18px; margin: 22px 0; font-size: 15px; }
-  .note.warn { border-left-color: var(--warn); }
-  .glossary { display: grid; gap: 2px; margin: 18px 0; }
-  .gterm { display: grid; grid-template-columns: 210px 1fr; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--grid); }
-  .gterm code { font-family: var(--mono); font-size: 13px; color: var(--accent); }
-  .gterm .gd { font-size: 15px; color: var(--ink); }
-  .gterm .gd .m { color: var(--muted); }
-  @media (max-width: 620px) { .gterm { grid-template-columns: 1fr; gap: 3px; } .bar-row { grid-template-columns: 110px 1fr 48px; } }
-  footer { margin-top: 80px; padding-top: 24px; border-top: 1px solid var(--hair); font-family: var(--mono); font-size: 12px; color: var(--muted); }
-  .updown { font-family: var(--mono); font-size: 12px; }
+  .finding-head {
+    font-family: var(--serif);
+    font-size: 1.28rem;
+    line-height: 1.3;
+    font-weight: 600;
+    text-wrap: balance;
+  }
+
+  /* ---------- tables ---------- */
+
+  .scroller { overflow-x: auto; border: 1px solid var(--rule); }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+    background: var(--panel);
+  }
+
+  caption {
+    caption-side: top;
+    text-align: left;
+    font-size: 0.8rem;
+    color: var(--muted);
+    padding: 0 0 0.6rem;
+  }
+
+  th, td {
+    padding: 0.6rem 0.85rem;
+    text-align: right;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+
+  th {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+    border-bottom: 1px solid var(--ink);
+  }
+
+  th:first-child, td:first-child,
+  th:nth-child(2), td:nth-child(2) { text-align: left; }
+
+  tbody tr:last-child td { border-bottom: none; }
+
+  td.num { font-family: var(--mono); }
+  td.flag { color: var(--bad); font-weight: 600; }
+  td.good { color: var(--good); font-weight: 600; }
+
+  /* ---------- callout ---------- */
+
+  .callout {
+    background: var(--panel);
+    border-left: 3px solid var(--accent);
+    padding: 1.1rem 1.3rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  .callout.is-alert { border-left-color: var(--bad); background: var(--bad-dim); }
+  .callout p { max-width: 64ch; font-size: 0.94rem; }
+
+  .callout-label {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  pre {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    line-height: 1.6;
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    padding: 1rem 1.15rem;
+    overflow-x: auto;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+
+  ul { display: flex; flex-direction: column; gap: 0.55rem; padding-left: 1.15rem; max-width: 68ch; }
+  li::marker { color: var(--accent); }
+
+  .footer {
+    border-top: 1px solid var(--rule);
+    padding-top: 1.5rem;
+    font-size: 0.82rem;
+    color: var(--muted);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
 </style>
-
+</head>
+<body>
 <div class="wrap">
-<header>
-  <p class="kicker">Zero-shot counterfactuals · TabPFN v2 · Experiment 4b</p>
-  <h1>Beam-search counterfactuals, judged by the standard library metrics</h1>
-  <p class="standfirst">Full test-split results for HELOC and Law, scored with the exact metrics the <code>counterfactuals</code> (cel) library defines. Two generation regimes, one recurring lesson about what "valid" actually measures.</p>
-  <div class="runmeta">
-    <span><b>Datasets</b> HELOC (n=2092), Law (n=444)</span>
-    <span><b>Split</b> full 80/20 test, stratified</span>
-    <span><b>Compute</b> PLGrid Helios GH200</span>
-    <span><b>Scoring</b> cel registered metrics</span>
+
+  <header class="masthead">
+    <div class="eyebrow">Experiment 4 · zero-shot counterfactuals</div>
+    <h1>Beam search over TabPFN reaches perfect validity — but only by breaking the constraint</h1>
+    <p class="standfirst">
+      Four cells, two datasets, two regimes. The unconstrained regime flips every test
+      point; the one regime that respects immutable features flips 38%. Every miss was
+      reachable.
+    </p>
+    <div class="meta">
+      <span><b>Date</b> 2026-08-02</span>
+      <span><b>Branch</b> lukasz/zeroshot-cf-beam-search</span>
+      <span><b>Commit</b> 6dd2f5b</span>
+      <span><b>Oracle</b> sklearn LogisticRegression</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>The grid at a glance</h2>
+    <p class="prose">
+      Validity is the fraction of counterfactuals that land on the intended target class.
+      The target is defined by relabelling — <code>y_target = 1 − disc.predict(X_test)</code> —
+      so validity asks precisely: did we flip the model's own prediction?
+    </p>
+    <div class="cells">
+      <div class="cell">
+        <div class="cell-name">heloc / fromscratch</div>
+        <div class="cell-val">1.000</div>
+        <div class="meter"><span style="width:100%"></span></div>
+        <div class="cell-note">n = 2092. Changes all 23 features, including the 6 immutables.</div>
+      </div>
+      <div class="cell">
+        <div class="cell-name">heloc / frozen</div>
+        <div class="cell-val is-low">0.376</div>
+        <div class="meter"><span class="is-low" style="width:37.6%"></span></div>
+        <div class="cell-note">n = 2092. The only cell that actually tests the constraint.</div>
+      </div>
+      <div class="cell">
+        <div class="cell-name">law / fromscratch</div>
+        <div class="cell-val">1.000</div>
+        <div class="meter"><span style="width:100%"></span></div>
+        <div class="cell-note">n = 444. Generated on Helios GH200 in 86 s.</div>
+      </div>
+      <div class="cell">
+        <div class="cell-name">law / frozen</div>
+        <div class="cell-val">1.000</div>
+        <div class="meter"><span style="width:100%"></span></div>
+        <div class="cell-note">n = 444. Law has no immutables, so nothing is masked.</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Results</h2>
+
+    <div class="scroller">
+      <table>
+        <caption>Standard metrics, computed by the vendored <code>cel</code> registry's own metric classes. ε-sparsity ported from <code>dicoflex_metrics.py</code>.</caption>
+        <thead>
+          <tr>
+            <th>Dataset</th><th>Set</th><th>n</th><th>Validity</th><th>Coverage</th>
+            <th>L1</th><th>L2</th><th>Sparsity</th><th>ε-spars</th><th>LOF</th><th>IsoForest</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>heloc</td><td>fromscratch</td><td class="num">2092</td>
+            <td class="num good">1.0000</td><td class="num">1.0000</td>
+            <td class="num">2.6234</td><td class="num">0.8291</td><td class="num">1.0000</td>
+            <td class="num">0.7668</td><td class="num">1.0087</td><td class="num">0.1125</td>
+          </tr>
+          <tr>
+            <td>heloc</td><td>frozen</td><td class="num">2092</td>
+            <td class="num flag">0.3762</td><td class="num">1.0000</td>
+            <td class="num">1.4372</td><td class="num">0.5607</td><td class="num">0.7392</td>
+            <td class="num">0.4456</td><td class="num flag">6528790.5</td><td class="num">0.0777</td>
+          </tr>
+          <tr>
+            <td>law</td><td>fromscratch</td><td class="num">444</td>
+            <td class="num good">1.0000</td><td class="num">1.0000</td>
+            <td class="num">0.7314</td><td class="num">0.6912</td><td class="num">1.0000</td>
+            <td class="num">0.9047</td><td class="num">9.8291</td><td class="num">0.1142</td>
+          </tr>
+          <tr>
+            <td>law</td><td>frozen</td><td class="num">444</td>
+            <td class="num good">1.0000</td><td class="num">1.0000</td>
+            <td class="num">0.7445</td><td class="num">0.7001</td><td class="num">1.0000</td>
+            <td class="num">0.9234</td><td class="num">8.7217</td><td class="num">0.1116</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="scroller">
+      <table>
+        <caption>Reference (dicoflex) formulas — valid counterfactuals only, LOF as median of logs.</caption>
+        <thead>
+          <tr><th>Cell</th><th>Validity</th><th>Prox. L1 cont.</th><th>ε-sparsity</th><th>LOF median-log</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>heloc / fromscratch</td><td class="num good">1.000</td><td class="num">0.1141</td><td class="num">0.7668</td><td class="num">−0.0136</td></tr>
+          <tr><td>heloc / frozen</td><td class="num flag">0.376</td><td class="num">0.0625</td><td class="num">0.4633</td><td class="num">0.0345</td></tr>
+          <tr><td>law / fromscratch</td><td class="num good">1.000</td><td class="num">0.1676</td><td class="num">0.9047</td><td class="num">2.5272</td></tr>
+          <tr><td>law / frozen</td><td class="num good">1.000</td><td class="num">0.1866</td><td class="num">0.9234</td><td class="num">2.3555</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout">
+      <div class="callout-label">Reading the two tables</div>
+      <p>
+        <code>sparsity</code> uses exact float equality and saturates at 1.0 for
+        continuously-generated counterfactuals — it carries no information here. Use
+        ε-sparsity. The registry's LOF averages over <em>all</em> rows, which is where
+        HELOC frozen's 6.5×10⁶ comes from; the reference convention scores valid rows
+        only and takes a median of logs.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Findings</h2>
+
+    <div class="finding">
+      <div class="finding-num">1</div>
+      <div class="finding-body">
+        <div class="finding-head">Perfect validity is bought by dropping the constraint</div>
+        <p>
+          HELOC from-scratch hits validity 1.000 by rewriting essentially the whole row:
+          <code>l0_count_mean</code> 17.96 of 23, <code>true_actionability</code> 0.0,
+          <code>immutable_drift_mean</code> 0.112. It changes all six immutable features,
+          which makes it a sample from the target class rather than an actionable
+          counterfactual.
+        </p>
+        <p>
+          Law's 1.000 does not test the constraint either — Law has no immutable features,
+          so <code>freeze_immutable</code> masks nothing. Of four cells, exactly one poses
+          the real problem, and it scores <strong>0.376</strong>.
+        </p>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="finding-num">2</div>
+      <div class="finding-body">
+        <div class="finding-head">The 62% of misses were all reachable — this is a search failure, not an infeasible constraint</div>
+        <p>
+          The discriminator is logistic regression, so the ceiling is closed-form. Pin the
+          6 immutables at their factual values, let the 17 actionable features range over
+          [0,1], and take the extreme achievable logit by setting each free feature to 1 or
+          0 according to the sign of its weight:
+        </p>
+        <pre><code>target REACHABLE in principle        2092  (1.0000)
+target actually reached (validity)    787  (0.3762)
+reachable but MISSED                 1305
+hard infeasible                         0  (0.0000)</code></pre>
+        <p>
+          <strong>Zero rows are infeasible.</strong> The standing hypothesis — that freezing
+          immutables leaves a conditional distribution with no target-class mass — is dead in
+          its geometric form.
+        </p>
+        <p>
+          Nor are the misses near-misses. Median margin runs from −0.903 at the factual to
+          +20.373 at the best achievable point, and the generated counterfactual travels a
+          median <strong>0.3%</strong> of that distance. <strong>496 of the 1305 moved the
+          wrong way</strong>, ending further from the target than the factual started.
+          Successes and failures begin from nearly the same place (median factual margin
+          −0.695 vs −0.903), so difficulty does not explain the split.
+        </p>
+        <div class="callout">
+          <div class="callout-label">Caveat</div>
+          <p>
+            Beam search does not optimise the LR logit — it samples TabPFN's conditional to
+            stay on-manifold, with LR only as the scoring oracle. What this rules out is the
+            infeasibility explanation. What stays open is whether TabPFN's conditional given
+            the pinned features has no target-side mass, or the selector simply is not
+            pushing toward validity. The 496 backwards moves point at the second.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="finding-num">3</div>
+      <div class="finding-body">
+        <div class="finding-head">The LOF 6.5×10⁶ result was an artifact</div>
+        <p>
+          Previously treated as the project's central open question — a ~750,000× plausibility
+          gap against Law. Under the reference convention it is 0.0345 against from-scratch's
+          −0.0136. The gap does not exist.
+        </p>
+        <div class="scroller">
+          <table>
+            <caption>Aggregation choice, HELOC frozen.</caption>
+            <thead><tr><th>Aggregation</th><th>Value</th></tr></thead>
+            <tbody>
+              <tr><td>mean, all 2092 CFs</td><td class="num flag">6.53×10⁶</td></tr>
+              <tr><td>mean, 787 valid CFs</td><td class="num">1.06</td></tr>
+              <tr><td>median-log, 787 valid CFs</td><td class="num good">0.0345</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Exactly 115 rows carry LOF &gt; 10³ (max 1.19×10⁸), and they are byte-identical to
+          HELOC's 115-row duplicate block: the <strong>all-zeros row</strong>, the MinMax image
+          of the <code>−9</code> "no record" code, which appears 473 times in
+          <code>X_train</code>. A query point sitting on a 473-fold duplicated training point
+          has k-NN distance ≈ 0, so local reachability density diverges and the LOF ratio
+          explodes numerically. Freezing pins those rows there; from-scratch lets them escape.
+        </p>
+        <p>Frozen validity of 0.376 is untouched by any of this and stands.</p>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="finding-num">4</div>
+      <div class="finding-body">
+        <div class="finding-head">Relabelling makes one validity definition meaningless</div>
+        <p>
+          <code>exp4_beam_search.py:144</code> sets <code>y_target = 1 − disc.predict(X_test)</code>.
+          The <code>cel</code> registry defines validity against the <em>true</em> label as
+          <code>mean(y_cf_pred != y_test)</code>, which under relabelling reduces algebraically
+          to the discriminator's accuracy:
+        </p>
+        <div class="scroller">
+          <table>
+            <thead><tr><th>Dataset</th><th>Disc. accuracy</th><th>Registry validity</th></tr></thead>
+            <tbody>
+              <tr><td>heloc</td><td class="num">0.7232</td><td class="num">0.7232</td></tr>
+              <tr><td>law</td><td class="num">0.7815</td><td class="num">0.7815</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Identical to four decimals. Use <code>y_cf_pred == y_target</code>. The reference
+          repo's own pipelines target <code>1 − y_test</code>, where the two definitions
+          coincide — the divergence is specific to this project's protocol.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Numbers that must not be reported as published values</h2>
+    <ul>
+      <li>
+        <strong>Law <code>sparsity_categorical</code> = 1.000.</strong> The formula uses exact
+        float equality and assumes discrete one-hots. Beam search emits a continuous
+        relaxation — 0.0% of Law's categorical cells are exactly 0 or 1, and some rows carry
+        two columns near 1 within one group, so the output is not on the simplex. Decoded by
+        argmax, the real change rate is 0.235.
+      </li>
+      <li>
+        <strong><code>pairwise_diversity_mixed</code> is N/A, not 0.</strong> It measures spread
+        across the K counterfactuals a method proposes per factual; this method emits one. Run
+        verbatim it returns 0.0 for HELOC only because it groups by factual value and finds the
+        115-row duplicate block, whose deterministic counterfactuals are identical.
+      </li>
+      <li>
+        <strong>ε-sparsity is inflated by construction.</strong> The relative denominator
+        <code>|x| + 1e−8</code> on MinMax-scaled data means a feature at x ≈ 0 makes any change
+        count as significant.
+      </li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Provenance and open issues</h2>
+
+    <div class="callout is-alert">
+      <div class="callout-label">Hardware confound</div>
+      <p>
+        The two Law regimes were expected to be numerically identical and are not — they agree
+        on validity but differ throughout (LOF 9.83 vs 8.72). <code>law/frozen</code> was
+        generated locally on MPS, <code>law/fromscratch</code> on a GH200 under CUDA, and
+        TabPFN's outputs are not bitwise portable across backends. The difference cannot be
+        attributed to the regime until <code>law/frozen</code> is rerun on the cluster. The
+        HELOC comparison is unaffected — both cells share a backend.
+      </p>
+    </div>
+
+    <p class="prose">
+      Metric definitions are verbatim ports of <code>cel/metrics/dicoflex_metrics.py</code> at
+      commit <code>b9715ef</code> on <code>origin/ofurman/CFN_baselines</code>, the module wired
+      by <code>dicoflex.yaml</code> and identified as the source of the paper's Table 1. It is
+      absent from that repo's working tree and had to be read out of git history. Three of its
+      formulas differ from the generic registry: relative ε-sparsity, categorical sparsity over
+      one-hot columns rather than groups, and euclidean+hamming diversity.
+    </p>
+
+    <ul>
+      <li>
+        <strong>The 115 all-zeros HELOC rows are a missing-data code, not records.</strong> They
+        are 5.5% of the test split, they break LOF outright, and they touch every metric computed
+        on HELOC. Decide whether they belong in the evaluation set at all.
+      </li>
+      <li>
+        <strong><code>--chunk-size</code> changes results.</strong> TabPFN's predictions depend on
+        batch composition; chunk=40 vs chunk=7 differed by ~1.0 on a one-hot column. Pinned at
+        4096 so a whole target class is one call. Hold it fixed across compared cells.
+      </li>
+      <li>
+        <strong>Cluster runs are rsynced from the working tree, not a git ref.</strong> Until the
+        branch is pushed, no cluster result is reproducible from a commit.
+      </li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Reproduce</h2>
+    <pre><code># scoring only — reads results/arrays/*.npz, no GPU needed
+uv run python experiments/zeroshot_cf/exp4_metrics_table.py
+uv run python experiments/zeroshot_cf/reference_metrics.py
+
+# generation runs on the cluster
+CELLS="law:fromscratch" FORCE=1 bash plgrid/submit.sh \
+    --time=02:00:00 --mem=32G plgrid/20_beam_run.sbatch</code></pre>
+  </section>
+
+  <div class="footer">
+    <div>
+      Sources: <code>results/exp4_metrics_table.csv</code> ·
+      <code>results/exp4_reference_metrics.json</code> ·
+      <code>PROJECT_STATE.md</code>
+    </div>
+    <div>Law from-scratch generated on Helios GH200, job 20356027, 86 s, peak RSS 2.7 GB.</div>
   </div>
-</header>
 
-<div class="col">
-<p class="lead">Every number here comes from a full test split, not the small samples used while prototyping. That matters, because the small samples lied. HELOC frozen-regime validity read 0.13 at n=30 and 0.42 at n=2092. Same method, same settings, three times the number after a real sample. So treat any earlier figure from this project as provisional and these as the ones to cite.</p>
-
-<p>The generator is a task-guided beam search that builds a counterfactual feature by feature from TabPFN's conditional density, with a hard rejection of any value outside the training range. It runs in two regimes that differ only in whether the immutable features are held fixed:</p>
 </div>
-
-<div class="tiles">
-  <div class="tile"><div class="lab">HELOC · from-scratch</div><div class="val good">0.72</div><div class="sub">cel validity · LOF 1.01 (on-manifold)</div></div>
-  <div class="tile"><div class="lab">HELOC · frozen</div><div class="val">0.42</div><div class="sub">cel validity · LOF 6.5M (off-manifold)</div></div>
-  <div class="tile"><div class="lab">Law · both regimes</div><div class="val good">0.78</div><div class="sub">cel validity · LOF 8.7</div></div>
-  <div class="tile"><div class="lab">Out-of-bounds rate</div><div class="val good">0.00</div><div class="sub">every cell, by construction</div></div>
-</div>
-
-<div class="col">
-<h2><span class="n">01</span>The standard metrics, full split</h2>
-<p>The cel library's own metrics, computed by calling its registered metric classes directly on the generated counterfactuals. Arrows mark the good direction; for LOF, the <code>LOF test</code> column is the real-data reference.</p>
-</div>
-
-<div class="scroller">
-<table>
-  <caption>cel-standard metrics · counterfactuals judged by an sklearn LogisticRegression oracle · LOF/IF fit on the training split</caption>
-  <thead>
-    <tr>
-      <th>Cell</th>
-      <th>n</th>
-      <th>Validity <span class="updown">↑</span></th>
-      <th>Prox L2·Jac <span class="updown">↓</span></th>
-      <th>Prox L1·Jac <span class="updown">↓</span></th>
-      <th>Sparsity <span class="updown">↓</span></th>
-      <th>LOF cf <span class="updown">↓</span></th>
-      <th>LOF test</th>
-      <th>IF cf <span class="updown">↓</span></th>
-      <th>OOB <span class="updown">↓</span></th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td class="cell-name">HELOC <span class="pill scratch">from-scratch</span></td>
-      <td>2092</td>
-      <td class="v-good">0.723</td>
-      <td>0.829</td>
-      <td>2.623</td>
-      <td class="dim">1.000</td>
-      <td class="v-good">1.009</td>
-      <td class="dim">1.094</td>
-      <td>0.113</td>
-      <td>0.000</td>
-    </tr>
-    <tr>
-      <td class="cell-name">HELOC <span class="pill frozen">frozen</span></td>
-      <td>2092</td>
-      <td class="v-bad">0.423</td>
-      <td>0.561</td>
-      <td>1.437</td>
-      <td class="dim">0.739</td>
-      <td class="v-bad">6.5M</td>
-      <td class="dim">1.094</td>
-      <td>0.078</td>
-      <td>0.001</td>
-    </tr>
-    <tr>
-      <td class="cell-name">Law <span class="pill frozen">frozen</span> <span class="pill scratch">≡ scratch</span></td>
-      <td>444</td>
-      <td class="v-good">0.782</td>
-      <td>0.700</td>
-      <td>0.745</td>
-      <td class="dim">1.000</td>
-      <td>8.722</td>
-      <td class="dim">1.222</td>
-      <td>0.112</td>
-      <td>0.000</td>
-    </tr>
-  </tbody>
-</table>
-</div>
-
-<div class="col">
-<div class="note">
-<strong>Why Law shows one row.</strong> The cel <code>law.yaml</code> config marks every feature actionable, so Law has no immutable columns. With nothing to freeze, the two regimes run the identical code path and produce identical numbers. Only HELOC, which has six frozen history and age fields, splits into two rows.
-</div>
-
-<h2><span class="n">02</span>HELOC: the actionability-plausibility conflict is real at scale</h2>
-<p>The two HELOC regimes trade the same way the small-sample runs suggested, and the full split makes the trade sharper rather than softer.</p>
-
-<p><strong>From-scratch generates valid, believable applicants.</strong> When the beam is free to regenerate every feature, it lands on the target class for 72% of cases and the results sit right on the data manifold: LOF 1.01 against a test-set reference of 1.09, and not a single out-of-bounds cell in 2092 counterfactuals. The catch is in the fine print. These are not edits to the person in front of you. The immutable fields drift by 0.11 on average, so what you get is "a plausible approved applicant", not "this applicant, minimally changed". True actionability is zero by construction.</p>
-
-<p><strong>Frozen keeps the person intact but pays for it twice.</strong> Pin the history and age fields to their real values and the counterfactual stops being believable: LOF jumps to 6.5 million. Welding target-class financials onto an applicant's wrong-class credit history produces rows that are inside every individual feature range yet look like no real person. Validity also drops to 0.42. On HELOC the protected fields carry so much of the class signal that holding them fixed fights both goals at once.</p>
-</div>
-
-<figure>
-<div class="chart">
-  <div class="bar-row"><span class="rl">HELOC scratch</span><div class="track"><div class="fill" style="width:72.3%;background:var(--good)"></div></div><span class="rv">0.72</span></div>
-  <div class="bar-row"><span class="rl">Law both</span><div class="track"><div class="fill" style="width:78.2%;background:var(--good)"></div></div><span class="rv">0.78</span></div>
-  <div class="bar-row"><span class="rl">HELOC frozen</span><div class="track"><div class="fill" style="width:42.3%;background:var(--bad)"></div></div><span class="rv">0.42</span></div>
-  <div class="bar-row" style="margin-top:14px;border-top:1px dashed var(--hair);padding-top:14px"><span class="rl">oracle ceiling</span><div class="track" style="background:transparent"><div class="fill" style="width:76%;background:repeating-linear-gradient(90deg,var(--muted),var(--muted) 3px,transparent 3px,transparent 6px);opacity:.5"></div></div><span class="rv">~.76</span></div>
-</div>
-<figcaption>cel validity by cell. The dashed line marks the oracle ceiling from Section 04: the model reaches the target class on essentially every case, so the gap to 1.0 is the oracle disagreeing with the ground-truth label, not the generator failing.</figcaption>
-</figure>
-
-<div class="col">
-<h2><span class="n">03</span>Law: valid and close, once you measure distance correctly</h2>
-<p>Law is the first dataset here with categorical columns (sex and race, one-hot encoded into ten columns). That broke an assumption I had been carrying, and the correction changed the story.</p>
-
-<p>The beam generates those one-hot columns as continuous values, so I expected garbage: fractional memberships, categories summing to more than one. It does not happen. The autoregressive conditioning plus the range rejection snap them to near-clean one-hots, roughly 0.999 and 0.001, summing to one per group. TabPFN learns the encoding from the context rows.</p>
-
-<p>The distance number needed fixing too. Pure Euclidean over one-hot columns punishes a single category flip by about 1.41, which had inflated Law's proximity to look like a large edit. cel's <code>proximity_l2_jaccard</code> handles this correctly: Euclidean on the three continuous features, Jaccard on the categoricals, weighted by how many of each. Measured properly, Law counterfactuals are small. About 4.4 of 13 features move, the continuous part shifts by only 0.37 in L2, and roughly 24% of category assignments change. This retires the "mode collapse" reading from the earlier small-sample notes. These are modest, individualized edits.</p>
-
-<p>Plausibility is the one soft spot. Law's LOF is 8.7 against a test reference of 1.2, so the counterfactuals sit somewhat outside the dense part of the distribution. Not the catastrophe HELOC-frozen is, but not the near-perfect fit of HELOC from-scratch either.</p>
-
-<h2><span class="n">04</span>The number everyone will misread: validity</h2>
-</div>
-
-<div class="note warn">
-<strong>The generator reaches the target class almost every time.</strong> cel's <code>target_distance</code> is 0.000 for both HELOC from-scratch and Law, which means the oracle's prediction on the counterfactual equals the intended target class for every single instance. So why is validity 0.72 and 0.78 rather than 1.0?
-</div>
-
-<div class="col">
-<p>Because cel defines validity against the factual's <em>true</em> label, not the intended target. A counterfactual counts as valid when <code>predict(cf) != y_test</code>. When a factual was already misclassified by the oracle, its intended target equals its true label, so flipping to that target scores as invalid. The HELOC oracle is 72% accurate and the Law oracle 76%, and those accuracies are almost exactly the validity ceilings we see.</p>
-
-<p>This is worth stating plainly because it is easy to report the wrong number. Under the target-reached definition the project used earlier (<code>predict(cf) == y_target</code>), both cells score 1.0. Under cel's standard definition they score at the oracle's accuracy. Neither is wrong; they answer different questions. cel asks "did the label actually change from the truth"; the other asks "did we hit the class we aimed for". The gap between them is a property of the oracle, not the generator. It also flags a real design smell: the counterfactuals are generated by TabPFN but judged by a separate LogisticRegression, and the two models disagree on about a quarter of the data before any counterfactual exists.</p>
-
-<h2><span class="n">05</span>Sparsity and distance detail</h2>
-<p>cel's exact-equality sparsity saturates near 1.0 under continuous generation, so these tolerance-based counts (features changed by more than 1e-3) are the real sparsity read, with the categorical split broken out for Law.</p>
-</div>
-
-<div class="scroller">
-<table>
-  <caption>L0 = features changed beyond 1e-3 · continuous-only distance and category flip rate for Law</caption>
-  <thead>
-    <tr><th>Cell</th><th>L0 count</th><th>of features</th><th>Immutable drift</th><th>Prox L2 (continuous)</th><th>Category change rate</th></tr>
-  </thead>
-  <tbody>
-    <tr><td class="cell-name">HELOC from-scratch</td><td>17.96</td><td class="dim">23</td><td>0.112</td><td class="dim">n/a</td><td class="dim">n/a</td></tr>
-    <tr><td class="cell-name">HELOC frozen</td><td>10.76</td><td class="dim">17 actionable</td><td class="v-good">0.000</td><td class="dim">n/a</td><td class="dim">n/a</td></tr>
-    <tr><td class="cell-name">Law both</td><td>4.41</td><td class="dim">13</td><td class="v-good">0.000</td><td>0.367</td><td>0.235</td></tr>
-  </tbody>
-</table>
-</div>
-
-<div class="col">
-<h2><span class="n">06</span>How to read this together</h2>
-<p>If the goal is a plausible target-class example and you do not care about editing a specific person, HELOC from-scratch is the clear winner: valid at the oracle ceiling, indistinguishable from real data, nothing out of bounds. If the goal is a genuine counterfactual that respects what a person cannot change, HELOC frozen is honest about how hard that is on this dataset, and the plausibility collapse it shows is the finding, not a bug to tune away. Law sits in between: small, individualized, valid edits with slightly-off plausibility, and no immutability question because the dataset defines none.</p>
-
-<p>The single most useful takeaway is methodological. Validity depends entirely on which reference you score against, and a separate-oracle setup puts a hard ceiling on it equal to that oracle's accuracy. Any comparison against other counterfactual methods has to fix the oracle and the definition first, or the headline numbers are not talking about the same thing.</p>
-
-<div class="note">
-<strong>Provenance and honest caveats.</strong> HELOC from-scratch was generated on a Helios GH200 (CUDA); the other cells were generated earlier on Apple MPS. Expect small numeric drift between backends, not a change in conclusions. The beam settings are fixed across cells (beam width 8, 6 candidates, all-classes context of 256 rows, chunk size 4096, seed 42). Results are not chunk-invariant, so that chunk size is pinned. No external counterfactual baselines (DiCE, PPCEF) were run, so every comparison here is internal to the beam method.
-</div>
-</div>
-
-<footer>
-  Experiment 4b · zeroshot_cf · counterfactuals scored with the vendored cel library · full test split · generated from saved arrays in results/arrays/*.npz
-</footer>
-</div>
+</body>
+</html>
