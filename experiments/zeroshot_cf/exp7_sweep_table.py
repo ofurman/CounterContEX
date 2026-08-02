@@ -195,6 +195,57 @@ def merge_scorer_rows(
     return out
 
 
+def all_zero_row_breakdown(npz_path: Path, dataset_name: str) -> Dict[str, Any]:
+    """Validity with and without the all-zeros factual rows.
+
+    HELOC's test split contains a block of byte-identical all-zeros rows — the
+    MinMax image of the ``-9`` "no record" sentinel, not observations. They are 5.5%
+    of the split and are known to break all-rows LOF. Open-work item 3 is whether
+    they belong in the evaluation set at all, so every sweep row carries the number
+    computed both ways and the decision can be made on evidence.
+
+    Because the rows are byte-identical and generation is deterministic, they all
+    receive the *same* counterfactual: they are one query point counted n times, not
+    n independent attempts.
+    """
+    from experiments.zeroshot_cf.data import load_dataset  # noqa: PLC0415
+    from experiments.zeroshot_cf.discriminator import train_discriminator  # noqa: PLC0415
+
+    with np.load(npz_path, allow_pickle=False) as z:
+        X_test = z["X_test"]
+        X_cf = np.clip(z["X_cf"], 0.0, 1.0)
+        y_test = z["y_test"].astype(np.int64).squeeze()
+        y_target = z["y_target"].astype(np.int64).squeeze()
+
+    zero_mask = (X_test == 0.0).all(axis=1)
+    n_zero = int(zero_mask.sum())
+    if n_zero == 0:
+        return {
+            "n_allzero_rows": 0,
+            "validity_excl_allzero": float("nan"),
+            "validity_among_allzero": float("nan"),
+            "allzero_cfs_identical": True,
+        }
+
+    bundle = load_dataset(dataset_name)
+    disc = train_discriminator(
+        bundle.X_train, bundle.y_train, X_test, y_test, dataset_name
+    )
+    pred = np.asarray(disc.predict(X_cf)).squeeze()
+    keep = ~zero_mask
+    cf_zero = X_cf[zero_mask]
+    return {
+        "n_allzero_rows": n_zero,
+        "validity_excl_allzero": float((pred[keep] == y_target[keep]).mean()),
+        "validity_among_allzero": float(
+            (pred[zero_mask] == y_target[zero_mask]).mean()
+        ),
+        "allzero_cfs_identical": bool(
+            np.array_equal(cf_zero, np.tile(cf_zero[0], (n_zero, 1)))
+        ),
+    }
+
+
 def score_run(npz_path: Path) -> Dict[str, Any]:
     """Score one saved array under both metric conventions."""
     from experiments.zeroshot_cf import exp4_metrics_table, reference_metrics  # noqa: PLC0415
@@ -221,6 +272,7 @@ def score_run(npz_path: Path) -> Dict[str, Any]:
         row[key] = value
 
     row.update(merge_scorer_rows(reference, registry, context=npz_path.name))
+    row.update(all_zero_row_breakdown(npz_path, dataset_name))
 
     # Cross-check: the two scorers must agree on validity. They compute it from the
     # same arrays and the same cached discriminator, so a mismatch means one of them

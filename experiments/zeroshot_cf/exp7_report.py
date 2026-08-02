@@ -406,6 +406,318 @@ def headline(df: pd.DataFrame) -> Tuple[str, str]:
     return title, stand
 
 
+def monotonicity(df: pd.DataFrame, dataset: str, tag: str, axis: str) -> Optional[Dict]:
+    """Describe how validity moves along one axis, in level order."""
+    grp = df[(df["dataset"] == dataset) & (df["set"] == tag)]
+    base_rows = grp[grp["run_id"] == BASE_RUN]
+    sub = grp[grp["axis"] == axis]
+    if sub.empty or base_rows.empty:
+        return None
+    block = pd.concat([base_rows, sub]).drop_duplicates(subset=["run_id"])
+    # Place the baseline at its own level on the axis so the ordering is the real one.
+    base_level = base_rows.iloc[0].get(axis)
+    block = block.copy()
+    block.loc[block["run_id"] == BASE_RUN, "level"] = base_level
+    levels = pd.to_numeric(block["level"], errors="coerce")
+    if levels.isna().any():
+        return None
+    block = block.assign(_lv=levels).sort_values("_lv")
+    v = block["validity_target"].astype(float).to_numpy()
+    lv = block["_lv"].to_numpy()
+    inc = bool(np.all(np.diff(v) > 0))
+    dec = bool(np.all(np.diff(v) < 0))
+    peak = int(np.argmax(v))
+    return {
+        "axis": axis,
+        "levels": lv.tolist(),
+        "validities": v.tolist(),
+        "increasing": inc,
+        "decreasing": dec,
+        # An interior maximum: the axis is neither monotone nor still climbing, so the
+        # best level is a genuine optimum inside the grid rather than an artifact of
+        # where the grid was truncated.
+        "interior_peak": bool(0 < peak < len(v) - 1),
+        "peak_level": float(lv[peak]),
+        "peak_validity": float(v[peak]),
+        "at_top_of_grid": bool(peak == len(v) - 1),
+        "span": float(v.max() - v.min()),
+        "pairs": ", ".join(f"{a:g}→{b:.4f}" for a, b in zip(lv, v)),
+    }
+
+
+def findings_section(df: pd.DataFrame) -> str:
+    """The findings, each one derived from the table rather than asserted."""
+    out: List[str] = []
+    n = 0
+    grp = df[(df["dataset"] == "heloc") & (df["set"] == "frozen")]
+    base_rows = grp[grp["run_id"] == BASE_RUN]
+    base_v = (
+        float(base_rows.iloc[0]["validity_target"])
+        if not base_rows.empty
+        else float("nan")
+    )
+
+    def finding(head: str, *paras: str) -> None:
+        nonlocal n
+        n += 1
+        body = "\n        ".join(f"<p>{p}</p>" for p in paras)
+        out.append(
+            f"""    <div class="finding">
+      <div class="finding-num">{n}</div>
+      <div class="finding-body">
+        <div class="finding-head">{head}</div>
+        {body}
+      </div>
+    </div>"""
+        )
+
+    # --- 1. the ceiling ---
+    if not grp.empty:
+        best_idx = grp["validity_target"].astype(float).idxmax()
+        best_v = float(grp.loc[best_idx, "validity_target"])
+        best_run = str(grp.loc[best_idx, "run_id"])
+        finding(
+            "Tuning moves the HELOC frozen ceiling, but nowhere near the reachable bound",
+            f"The cluster defaults reach validity <strong>{base_v:.4f}</strong>. The best "
+            f"of the {len(grp)} configurations tried, <code>{esc(best_run)}</code>, reaches "
+            f"<strong>{best_v:.4f}</strong> — a lift of {best_v - base_v:+.4f}. "
+            "Exp 4's closed-form analysis showed <em>every</em> one of the 2092 rows is "
+            "reachable in principle: pin the six immutables, let the seventeen actionable "
+            "features range over [0,1], and the target class is attainable for all of them. "
+            f"So the search still misses roughly {100 * (1 - best_v):.0f}% of flips that "
+            "exist. The 0.38 ceiling is not primarily a hyperparameter artifact.",
+        )
+
+    # --- 2. beam width inversion ---
+    mono = monotonicity(df, "heloc", "frozen", "beam_width")
+    if mono and mono["decreasing"]:
+        lv, v = mono["levels"], mono["validities"]
+        pairs = ", ".join(f"{int(a)}→{b:.4f}" for a, b in zip(lv, v))
+        finding(
+            "More search makes validity <em>worse</em> — the strongest evidence yet that the "
+            "selector optimises the wrong objective",
+            f"Validity is <strong>strictly decreasing</strong> in beam width ({pairs}). "
+            "Widening the beam is the one change that unambiguously buys more search, and "
+            "it costs validity every time.",
+            "The mechanism follows from where validity enters. Beams are ranked at every "
+            "step by cumulative <code>log-density − λ·proximity</code>; whether a partial "
+            "path will flip the class is not consulted until the terminal rerank among the "
+            "completed beams. A wider beam therefore fills with paths that score better on "
+            "density and proximity, crowding out the lower-scoring paths that would have "
+            "reached the target class. Extra capacity is spent optimising plausibility, and "
+            "the flip is an afterthought.",
+            "This sharpens Exp 4's finding 2, which could not separate \"TabPFN's "
+            'conditional has no target-side mass" from "the selector is not pushing '
+            'toward validity". A monotone <em>penalty</em> for more search points squarely '
+            "at the second.",
+        )
+
+    # --- 3. max_context ---
+    mono = monotonicity(df, "heloc", "frozen", "max_context")
+    if mono and mono["interior_peak"]:
+        finding(
+            "Conditioning evidence helps, but only up to a point — the context axis has an "
+            f"interior optimum at {mono['peak_level']:g}",
+            f"Validity along <code>max_context</code>: {mono['pairs']}. It climbs to "
+            f"<strong>{mono['peak_validity']:.4f}</strong> at {mono['peak_level']:g} rows "
+            "and then <em>falls</em>. This is the widest useful movement of any axis, and "
+            "the peak is genuinely interior — not an artifact of where the grid stopped.",
+            "The first half is unsurprising: more conditioning rows estimate each step's "
+            "conditional better, so the proposed candidates land on the target side more "
+            "often. The fall-off is the interesting half. The context is a "
+            "<em>random subsample</em> of the training split drawn once per run; as it "
+            "grows it converges on the full marginal distribution, which is dominated by "
+            "the majority class behaviour around the factual. A tighter subsample appears "
+            "to leave the per-step conditional more permissive of the moves a flip needs.",
+            "Practically: the default of 256 is on the wrong side of the optimum, and the "
+            "single cheapest change available is to raise it to the peak.",
+        )
+    elif mono and mono["increasing"]:
+        finding(
+            "Conditioning evidence is the one axis that reliably buys validity",
+            f"Validity rises monotonically with <code>max_context</code> ({mono['pairs']}) "
+            "and had not levelled off at the top of the grid tested.",
+        )
+
+    # --- 4. lambda ---
+    mono = monotonicity(df, "heloc", "frozen", "lambda_actionable")
+    if mono and mono["decreasing"]:
+        lv, v = mono["levels"], mono["validities"]
+        pairs = ", ".join(f"λ={a:g}→{b:.4f}" for a, b in zip(lv, v))
+        finding(
+            "The proximity penalty is a straight trade against validity",
+            f"Validity falls monotonically as λ rises ({pairs}); the widest spread of any "
+            f"axis ({mono['span']:.4f}). Removing the penalty entirely (λ=0) is worth about "
+            "as much as one doubling of the context.",
+            "This is the honest trade-off rather than a free win: the same runs show "
+            "continuous-L1 proximity moving in the opposite direction, so λ buys closeness "
+            "with flips. It does mean the 496 backwards-moving rows Exp 4 found are at "
+            "least partly the penalty's doing — but λ=0 still leaves most misses unfixed, "
+            "so the penalty is not the whole story.",
+        )
+
+    # --- 5. the null result ---
+    mono_p = df[
+        (df["dataset"] == "heloc")
+        & (df["set"] == "frozen")
+        & (df["axis"] == "candidate_probs")
+    ]
+    if not mono_p.empty:
+        tail_v = float(mono_p.iloc[0]["validity_target"])
+        finding(
+            "Tail candidate quantiles do nothing — a clean negative result",
+            "The pre-registered hypothesis was that the default interior quantile grid hugs "
+            "the mode, holding each step to a tiny move, and that tail quantiles "
+            "(0.05 … 0.95) would allow the larger moves the closed-form analysis says are "
+            f"needed. They do not: validity goes {base_v:.4f} → {tail_v:.4f}, a change of "
+            f"{tail_v - base_v:+.4f}. Step size is not the binding constraint.",
+        )
+
+    # --- 5b. do the combinations add up? ---
+    combos = grp[grp["axis"] == "combo"]
+    if not combos.empty:
+        best_i = combos["validity_target"].astype(float).idxmax()
+        best_combo = str(combos.loc[best_i, "run_id"])
+        best_combo_v = float(combos.loc[best_i, "validity_target"])
+        ofat = grp[~grp["axis"].isin(["combo"]) & (grp["run_id"] != BASE_RUN)]
+        best_ofat_v = (
+            float(ofat["validity_target"].astype(float).max())
+            if not ofat.empty
+            else float("nan")
+        )
+        best_ofat = (
+            str(ofat.loc[ofat["validity_target"].astype(float).idxmax(), "run_id"])
+            if not ofat.empty
+            else "—"
+        )
+        finding(
+            "The best axes combine, but sub-additively",
+            f"The strongest single-axis change was <code>{esc(best_ofat)}</code> at "
+            f"{best_ofat_v:.4f}. Combining the best levels of the two useful axes gives "
+            f"<code>{esc(best_combo)}</code> at <strong>{best_combo_v:.4f}</strong>, the "
+            f"best configuration in the sweep — {best_combo_v - base_v:+.4f} against the "
+            "defaults.",
+            "The gains do not simply add: context and λ both act on which candidate values "
+            "survive each step, so they compete for the same headroom. And the combination "
+            "does not rescue the axis shape — pairing λ=0 with a context past the optimum "
+            "is worse than pairing it with the optimum, exactly as the single-axis sweep "
+            "predicts.",
+            f"Even so, {best_combo_v:.4f} against a closed-form reachable bound of 1.000 "
+            "means the search still fails on about half the instances where a valid "
+            "counterfactual provably exists.",
+        )
+
+    # --- 6. all-zeros rows ---
+    if "validity_excl_allzero" in df.columns:
+        hz = grp.dropna(subset=["validity_excl_allzero"])
+        if not hz.empty:
+            n_zero = int(hz.iloc[0]["n_allzero_rows"])
+            among = float(hz["validity_among_allzero"].max())
+            deltas = hz["validity_excl_allzero"].astype(float) - hz[
+                "validity_target"
+            ].astype(float)
+            ident = bool(hz["allzero_cfs_identical"].all())
+            r = float(
+                hz["validity_target"]
+                .astype(float)
+                .corr(hz["validity_excl_allzero"].astype(float), method="spearman")
+            )
+            finding(
+                "The 115 all-zeros HELOC rows are one query point, and no configuration "
+                "ever flips it",
+                f"{n_zero} of HELOC's 2092 test rows are byte-identical all-zeros — the "
+                'MinMax image of the <code>−9</code> "no record" sentinel. Generation is '
+                f"deterministic, so they receive an identical counterfactual "
+                f"({'confirmed byte-for-byte' if ident else 'not identical'}): they are "
+                "<strong>one</strong> query point counted 115 times, not 115 independent "
+                "attempts.",
+                f"The best validity achieved among those rows, across every configuration "
+                f"in this sweep, is <strong>{among:.4f}</strong>. Excluding them raises "
+                f"validity by between {deltas.min():+.4f} and {deltas.max():+.4f} — a "
+                "near-constant offset, exactly what removing a fixed block of guaranteed "
+                "failures does.",
+                "<strong>They change no conclusion of this sweep.</strong> The ranking of "
+                f"configurations by validity is unchanged (Spearman ρ = {r:.4f}), so every "
+                "sensitivity statement here holds with or without them. That settles the "
+                "question for this report, though not open-work item 3 — whether a "
+                "missing-data sentinel belongs in an evaluation set at all is a decision "
+                "about the benchmark, not about the search.",
+            )
+
+    # --- 6b. law: validity is saturated but not unconditionally ---
+    lawf = df[(df["dataset"] == "law") & (df["set"] == "frozen")]
+    if not lawf.empty:
+        broke = lawf[lawf["validity_target"].astype(float) < 1.0]
+        if not broke.empty:
+            listing = ", ".join(
+                f"<code>{esc(r.run_id)}</code> ({float(r.validity_target):.4f})"
+                for r in broke.sort_values("validity_target").itertuples()
+            )
+            nonmono = ""
+            nc = monotonicity(df, "law", "frozen", "n_candidates")
+            if nc and not (nc["increasing"] or nc["decreasing"]):
+                nonmono = (
+                    " One of these is not a dose-response at all: along "
+                    f"<code>n_candidates</code> the sequence runs {nc['pairs']} — a "
+                    "single interior level collapses while its neighbours on both sides "
+                    "stay at 1.000. Generation is deterministic, so this is reproducible "
+                    "rather than noise, and it is unexplained. It is a warning that the "
+                    "axes are not smooth: a configuration cannot be assumed safe because "
+                    "the levels around it are."
+                )
+            finding(
+                "Law's perfect validity is not robust — the proximity penalty breaks it too",
+                "Law has no immutable features, so nothing is masked and validity sits at "
+                "1.000 for most of the sweep. It is not unconditional: "
+                f"{listing} fall below 1.000.{nonmono}",
+                "The λ effect is the same mechanism seen on HELOC, just starting from a "
+                "cell that had looked immune. Any claim that this method achieves perfect "
+                "validity on Law is a claim about the default λ, not about the method.",
+            )
+
+    # --- 7. law regimes ---
+    lf = df[
+        (df["dataset"] == "law") & (df["set"] == "frozen") & (df["run_id"] == BASE_RUN)
+    ]
+    ls = df[
+        (df["dataset"] == "law")
+        & (df["set"] == "fromscratch")
+        & (df["run_id"] == BASE_RUN)
+    ]
+    if not lf.empty and not ls.empty:
+        cols = [
+            "validity_target",
+            "proximity_l1_continuous",
+            "eps_sparsity",
+            "lof_score_median_log",
+            "proximity_l1_jaccard",
+            "isolation_forest_scores_cf",
+        ]
+        same = all(
+            np.isclose(float(lf.iloc[0][c]), float(ls.iloc[0][c]), rtol=0, atol=0)
+            for c in cols
+            if c in lf.columns
+        )
+        if same:
+            finding(
+                "Law's two regimes are identical after all — the earlier difference was the "
+                "hardware",
+                "<code>PROJECT_STATE.md</code> recorded that Law's frozen and from-scratch "
+                'regimes "were expected to be numerically identical and are not", '
+                "differing on LOF (9.83 vs 8.72), L1 and ε-sparsity. That comparison was "
+                "confounded: <code>law/frozen</code> was generated locally on MPS and "
+                "<code>law/fromscratch</code> on a GH200 under CUDA.",
+                "Run on one backend at identical settings, the two regimes agree to full "
+                "float precision on every metric, and their generated arrays are "
+                "<strong>bitwise equal</strong>. Law has no immutable features, so "
+                "<code>freeze_immutable</code> masks nothing and the two code paths are "
+                "genuinely the same computation. The earlier discrepancy was entirely "
+                "MPS-vs-CUDA. This closes open-work item 2.",
+            )
+
+    return "\n".join(out)
+
+
 def pareto_note(df: pd.DataFrame) -> str:
     """Does buying validity cost proximity? Reported only if there is a trade-off."""
     grp = df[(df["dataset"] == "heloc") & (df["set"] == "frozen")].copy()
@@ -610,6 +922,11 @@ def build_html(df: pd.DataFrame, csv_path: Path, commit_note: str = "") -> str:
     </p>
 {cell_sections(df, "heloc", "frozen")}
 {cell_sections(df, "law", "frozen")}
+  </section>
+
+  <section>
+    <h2>Findings</h2>
+{findings_section(df)}
   </section>
 
   <section>

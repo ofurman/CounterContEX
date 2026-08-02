@@ -1,0 +1,930 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <style>
+    /* minimal reset — supplied by the artifact host when published, inlined here
+       so the standalone file renders identically offline. */
+    *, *::before, *::after { box-sizing: border-box; }
+    * { margin: 0; }
+    img, svg { display: block; max-width: 100%; }
+    table { border-collapse: collapse; }
+  </style>
+
+<title>Beam-search hyperparameter sweep — Exp 7 results</title>
+
+<style>
+  :root {
+    --paper:      #F6F7F9;
+    --panel:      #FFFFFF;
+    --ink:        #131820;
+    --muted:      #616C7C;
+    --rule:       #DCE0E7;
+    --accent:     #1F5F8B;
+    --accent-dim: #E4EDF4;
+    --good:       #2C6E52;
+    --warn:       #8A5A0F;
+    --bad:        #A63A2E;
+    --bad-dim:    #F5E4E1;
+
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --sans:  system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono:  ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:      #0E1116;
+      --panel:      #161B22;
+      --ink:        #E6E9EE;
+      --muted:      #98A2B2;
+      --rule:       #262D38;
+      --accent:     #6FA8CF;
+      --accent-dim: #172531;
+      --good:       #6FBF95;
+      --warn:       #D9A441;
+      --bad:        #E2796A;
+      --bad-dim:    #2C1A18;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:      #0E1116;
+    --panel:      #161B22;
+    --ink:        #E6E9EE;
+    --muted:      #98A2B2;
+    --rule:       #262D38;
+    --accent:     #6FA8CF;
+    --accent-dim: #172531;
+    --good:       #6FBF95;
+    --warn:       #D9A441;
+    --bad:        #E2796A;
+    --bad-dim:    #2C1A18;
+  }
+
+  :root[data-theme="light"] {
+    --paper:      #F6F7F9;
+    --panel:      #FFFFFF;
+    --ink:        #131820;
+    --muted:      #616C7C;
+    --rule:       #DCE0E7;
+    --accent:     #1F5F8B;
+    --accent-dim: #E4EDF4;
+    --good:       #2C6E52;
+    --warn:       #8A5A0F;
+    --bad:        #A63A2E;
+    --bad-dim:    #F5E4E1;
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 940px;
+    margin: 0 auto;
+    padding: 4rem 1.5rem 6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 3.25rem;
+  }
+
+  .prose { max-width: 68ch; }
+
+  /* ---------- masthead ---------- */
+
+  .masthead { display: flex; flex-direction: column; gap: 1rem; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  h1 {
+    font-family: var(--serif);
+    font-size: clamp(2rem, 5vw, 3rem);
+    line-height: 1.1;
+    font-weight: 600;
+    text-wrap: balance;
+    letter-spacing: -0.015em;
+  }
+
+  .standfirst {
+    font-family: var(--serif);
+    font-size: 1.2rem;
+    line-height: 1.5;
+    color: var(--muted);
+    max-width: 60ch;
+  }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    color: var(--muted);
+    border-top: 1px solid var(--rule);
+    padding-top: 1rem;
+  }
+  .meta b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- at a glance ---------- */
+
+  .cells {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+
+  .cell {
+    background: var(--panel);
+    padding: 1.15rem 1.25rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+
+  .cell-name {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+
+  .cell-val {
+    font-family: var(--serif);
+    font-size: 2.15rem;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .cell-val.is-low { color: var(--bad); }
+
+  .meter { height: 3px; background: var(--rule); overflow: hidden; }
+  .meter span { display: block; height: 100%; background: var(--accent); }
+  .meter span.is-low { background: var(--bad); }
+
+  .cell-note { font-size: 0.78rem; color: var(--muted); line-height: 1.4; }
+
+  /* ---------- sections ---------- */
+
+  section { display: flex; flex-direction: column; gap: 1.1rem; }
+
+  h2 {
+    font-family: var(--serif);
+    font-size: 1.6rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--ink);
+  }
+
+  h3 {
+    font-family: var(--sans);
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  p { max-width: 68ch; }
+  p + p { margin-top: 0.9rem; }
+
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--accent-dim);
+    padding: 0.1em 0.35em;
+    border-radius: 2px;
+  }
+
+  strong { font-weight: 650; }
+
+  /* ---------- findings ---------- */
+
+  .finding {
+    display: grid;
+    grid-template-columns: 2.6rem 1fr;
+    gap: 0 1.1rem;
+    align-items: start;
+  }
+
+  .finding-num {
+    font-family: var(--serif);
+    font-size: 1.9rem;
+    line-height: 1;
+    color: var(--rule);
+    font-variant-numeric: lining-nums;
+  }
+
+  .finding-body { display: flex; flex-direction: column; gap: 0.85rem; }
+
+  .finding-head {
+    font-family: var(--serif);
+    font-size: 1.28rem;
+    line-height: 1.3;
+    font-weight: 600;
+    text-wrap: balance;
+  }
+
+  /* ---------- tables ---------- */
+
+  .scroller { overflow-x: auto; border: 1px solid var(--rule); }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+    background: var(--panel);
+  }
+
+  caption {
+    caption-side: top;
+    text-align: left;
+    font-size: 0.8rem;
+    color: var(--muted);
+    padding: 0 0 0.6rem;
+  }
+
+  th, td {
+    padding: 0.6rem 0.85rem;
+    text-align: right;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+
+  th {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+    border-bottom: 1px solid var(--ink);
+  }
+
+  th:first-child, td:first-child,
+  th:nth-child(2), td:nth-child(2) { text-align: left; }
+
+  tbody tr:last-child td { border-bottom: none; }
+
+  td.num { font-family: var(--mono); }
+  td.flag { color: var(--bad); font-weight: 600; }
+  td.good { color: var(--good); font-weight: 600; }
+
+  /* ---------- callout ---------- */
+
+  .callout {
+    background: var(--panel);
+    border-left: 3px solid var(--accent);
+    padding: 1.1rem 1.3rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  .callout.is-alert { border-left-color: var(--bad); background: var(--bad-dim); }
+  .callout p { max-width: 64ch; font-size: 0.94rem; }
+
+  .callout-label {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  pre {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    line-height: 1.6;
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    padding: 1rem 1.15rem;
+    overflow-x: auto;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+
+  ul { display: flex; flex-direction: column; gap: 0.55rem; padding-left: 1.15rem; max-width: 68ch; }
+  li::marker { color: var(--accent); }
+
+  .footer {
+    border-top: 1px solid var(--rule);
+    padding-top: 1.5rem;
+    font-size: 0.82rem;
+    color: var(--muted);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">Experiment 7 · beam-search hyperparameter sweep</div>
+    <h1>Tuning lifts HELOC frozen validity, but not off the floor</h1>
+    <p class="standfirst">The best of 21 configurations (<code>ctx1024-lam0</code>) reaches 0.491 against the cluster baseline's 0.388, a lift of +0.103. Real but small: most of the gap the closed-form analysis found remains unreached.</p>
+    <div class="meta">
+      <span><b>Date</b> 2026-08-02</span>
+      <span><b>Branch</b> lukasz/zeroshot-cf-beam-search</span>
+      <span><b>Commit</b> 6931e21, e8bc0eb</span>
+      <span><b>Backend</b> Helios GH200 (CUDA)</span>
+      <span><b>Runs</b> 37</span>
+      <span><b>GPU time</b> 0.2 h</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>The sweep at a glance</h2>
+    <p class="prose">
+      The Exp-4 grid was produced with a single, never-varied hyperparameter
+      configuration — the <code>BeamConfig</code> defaults. This sweep varies five axes
+      one at a time around those defaults and rescores every run under both metric
+      conventions. Validity is <code>y_cf_pred == y_target</code>, where
+      <code>y_target = 1 − disc.predict(X_test)</code>.
+    </p>
+    <div class="cells">
+      <div class="cell">
+        <div class="cell-name">heloc / fromscratch · cluster defaults</div>
+        <div class="cell-val">1.000</div>
+        <div class="meter"><span class="" style="width:100.0%"></span></div>
+        <div class="cell-note">n = 2092. No config in the sweep beat the defaults.</div>
+      </div>
+      <div class="cell">
+        <div class="cell-name">heloc / frozen · cluster defaults</div>
+        <div class="cell-val is-low">0.388</div>
+        <div class="meter"><span class="is-low" style="width:38.8%"></span></div>
+        <div class="cell-note">n = 2092. Best of 21 configs: 0.491 (<code>ctx1024-lam0</code>).</div>
+      </div>
+      <div class="cell">
+        <div class="cell-name">law / fromscratch · cluster defaults</div>
+        <div class="cell-val">1.000</div>
+        <div class="meter"><span class="" style="width:100.0%"></span></div>
+        <div class="cell-note">n = 444. No config in the sweep beat the defaults.</div>
+      </div>
+      <div class="cell">
+        <div class="cell-name">law / frozen · cluster defaults</div>
+        <div class="cell-val">1.000</div>
+        <div class="meter"><span class="" style="width:100.0%"></span></div>
+        <div class="cell-note">n = 444. No config in the sweep beat the defaults.</div>
+      </div>
+    </div>
+    <div class="callout">
+      <div class="callout-label">Every comparison is against the cluster baseline</div>
+      <p>
+        The <code>base</code> run is the defaults re-run on the GH200, not the earlier
+        local MPS numbers. TabPFN's outputs are not bitwise portable across backends,
+        so comparing a swept config against the MPS baseline would confound the
+        hyperparameter effect with a CUDA-vs-MPS difference. Re-running the defaults
+        on this backend also closes open-work item 2 from <code>PROJECT_STATE.md</code>.
+      </p>
+    </div>
+    <div class="callout is-alert">
+      <div class="callout-label">This is a sensitivity analysis, not model selection</div>
+      <p>
+        Every configuration is scored on the <strong>test</strong> split, because that
+        is the split the counterfactual protocol generates for. Picking the
+        best-scoring configuration from this table and reporting its number as a
+        headline result would be tuning on test. The defensible readings are the
+        <em>shape</em> of each axis and the <em>span</em> of validity across it. A
+        specific winning configuration would need a held-out re-evaluation before it
+        could carry a published number.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Sensitivity ranking</h2>
+    <h3>heloc / frozen — the cell that tests the constraint</h3>
+      <div class="scroller">
+        <table>
+          <caption>Validity sensitivity per axis, most sensitive first. Span is
+            max − min across that axis's levels including the baseline.</caption>
+          <thead><tr>
+            <th>Axis</th><th>Levels</th><th>Min</th><th>Max</th><th>Span</th>
+            <th>Best run</th><th>Δ vs base</th>
+          </tr></thead>
+          <tbody>
+            <tr><td><code>lambda_actionable</code></td><td class="num">5</td><td class="num">0.1902</td><td class="num">0.4168</td><td class="num">0.2266</td><td>lam0</td><td class="num good">0.0292</td></tr>
+            <tr><td><code>max_context</code></td><td class="num">6</td><td class="num">0.3451</td><td class="num">0.4622</td><td class="num">0.1171</td><td>ctx1024</td><td class="num good">0.0746</td></tr>
+            <tr><td><code>beam_width</code></td><td class="num">4</td><td class="num">0.3786</td><td class="num">0.3944</td><td class="num">0.0158</td><td>bw4</td><td class="num good">0.0067</td></tr>
+            <tr><td><code>n_candidates</code></td><td class="num">4</td><td class="num">0.3819</td><td class="num">0.3934</td><td class="num">0.0115</td><td>nc4</td><td class="num good">0.0057</td></tr>
+            <tr><td><code>candidate_probs</code></td><td class="num">2</td><td class="num">0.3877</td><td class="num">0.3881</td><td class="num">0.0005</td><td>probs-tail</td><td class="num good">0.0005</td></tr>
+          </tbody>
+        </table>
+      </div>
+    <h3>law / frozen — validity is already saturated</h3>
+      <div class="scroller">
+        <table>
+          <caption>Validity sensitivity per axis, most sensitive first. Span is
+            max − min across that axis's levels including the baseline.</caption>
+          <thead><tr>
+            <th>Axis</th><th>Levels</th><th>Min</th><th>Max</th><th>Span</th>
+            <th>Best run</th><th>Δ vs base</th>
+          </tr></thead>
+          <tbody>
+            <tr><td><code>lambda_actionable</code></td><td class="num">5</td><td class="num">0.2297</td><td class="num">1.0000</td><td class="num">0.7703</td><td>base</td><td class="num">0.0000</td></tr>
+            <tr><td><code>n_candidates</code></td><td class="num">4</td><td class="num">0.5113</td><td class="num">1.0000</td><td class="num">0.4887</td><td>base</td><td class="num">0.0000</td></tr>
+            <tr><td><code>beam_width</code></td><td class="num">4</td><td class="num">1.0000</td><td class="num">1.0000</td><td class="num">0.0000</td><td>base</td><td class="num">0.0000</td></tr>
+            <tr><td><code>max_context</code></td><td class="num">3</td><td class="num">1.0000</td><td class="num">1.0000</td><td class="num">0.0000</td><td>base</td><td class="num">0.0000</td></tr>
+            <tr><td><code>candidate_probs</code></td><td class="num">2</td><td class="num">1.0000</td><td class="num">1.0000</td><td class="num">0.0000</td><td>base</td><td class="num">0.0000</td></tr>
+          </tbody>
+        </table>
+      </div>
+    <p class="prose">
+      Law has no immutable features, so freezing masks nothing and validity is 1.000
+      throughout. Its sweep is informative on the <em>other</em> columns — LOF
+      median-log, continuous-L1 proximity and ε-sparsity — which are where a
+      hyperparameter change shows up when validity cannot move.
+    </p>
+  </section>
+
+  <section>
+    <h2>Per-axis results</h2>
+    <p class="prose">
+      Reference (dicoflex) convention throughout: metrics computed on valid
+      counterfactuals only, LOF as the median of logs. This is the convention the
+      paper table uses and the one to read first.
+    </p>
+    <h3>heloc / frozen — n = 2092</h3>
+      <div class="scroller">
+        <table>
+          <caption>Axis <code>beam_width</code>. More parallel hypotheses kept per query row. Reference (dicoflex) convention: valid-CFs-only, median-log LOF.</caption>
+          <thead><tr><th>Run</th><th>Level</th><th>Validity</th><th>Prox L1 cont.</th><th>ε-sparsity</th><th>LOF median-log</th><th>n valid</th></tr></thead>
+          <tbody>
+            <tr><td>base <em>(base)</em></td><td>—</td><td class="num">0.3877</td><td class="num">0.0630</td><td class="num">0.4642</td><td class="num">0.0349</td><td class="num">811</td></tr>
+            <tr><td>bw4</td><td>4</td><td class="num good">0.3944</td><td class="num">0.0615</td><td class="num">0.4629</td><td class="num">0.0346</td><td class="num">825</td></tr>
+            <tr><td>bw16</td><td>16</td><td class="num flag">0.3834</td><td class="num">0.0642</td><td class="num">0.4676</td><td class="num">0.0330</td><td class="num">802</td></tr>
+            <tr><td>bw32</td><td>32</td><td class="num flag">0.3786</td><td class="num">0.0648</td><td class="num">0.4695</td><td class="num">0.0327</td><td class="num">792</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="scroller">
+        <table>
+          <caption>Axis <code>n_candidates</code>. More branching per generation step. Reference (dicoflex) convention: valid-CFs-only, median-log LOF.</caption>
+          <thead><tr><th>Run</th><th>Level</th><th>Validity</th><th>Prox L1 cont.</th><th>ε-sparsity</th><th>LOF median-log</th><th>n valid</th></tr></thead>
+          <tbody>
+            <tr><td>base <em>(base)</em></td><td>—</td><td class="num">0.3877</td><td class="num">0.0630</td><td class="num">0.4642</td><td class="num">0.0349</td><td class="num">811</td></tr>
+            <tr><td>nc4</td><td>4</td><td class="num good">0.3934</td><td class="num">0.0637</td><td class="num">0.4661</td><td class="num">0.0337</td><td class="num">823</td></tr>
+            <tr><td>nc10</td><td>10</td><td class="num flag">0.3819</td><td class="num">0.0620</td><td class="num">0.4628</td><td class="num">0.0333</td><td class="num">799</td></tr>
+            <tr><td>nc16</td><td>16</td><td class="num flag">0.3843</td><td class="num">0.0614</td><td class="num">0.4603</td><td class="num">0.0354</td><td class="num">804</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="scroller">
+        <table>
+          <caption>Axis <code>lambda_actionable</code>. The proximity penalty weight. λ=0 removes it entirely — the direct test of whether proximity is suppressing validity. Reference (dicoflex) convention: valid-CFs-only, median-log LOF.</caption>
+          <thead><tr><th>Run</th><th>Level</th><th>Validity</th><th>Prox L1 cont.</th><th>ε-sparsity</th><th>LOF median-log</th><th>n valid</th></tr></thead>
+          <tbody>
+            <tr><td>base <em>(base)</em></td><td>—</td><td class="num">0.3877</td><td class="num">0.0630</td><td class="num">0.4642</td><td class="num">0.0349</td><td class="num">811</td></tr>
+            <tr><td>lam0</td><td>0.0</td><td class="num good">0.4168</td><td class="num">0.0656</td><td class="num">0.4744</td><td class="num">0.0357</td><td class="num">872</td></tr>
+            <tr><td>lam0.1</td><td>0.1</td><td class="num good">0.4125</td><td class="num">0.0652</td><td class="num">0.4730</td><td class="num">0.0352</td><td class="num">863</td></tr>
+            <tr><td>lam3</td><td>3.0</td><td class="num flag">0.3164</td><td class="num">0.0567</td><td class="num">0.4540</td><td class="num">0.0337</td><td class="num">662</td></tr>
+            <tr><td>lam10</td><td>10.0</td><td class="num flag">0.1902</td><td class="num">0.0418</td><td class="num">0.4027</td><td class="num">0.0385</td><td class="num">398</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="scroller">
+        <table>
+          <caption>Axis <code>max_context</code>. More conditioning evidence per step. Reference (dicoflex) convention: valid-CFs-only, median-log LOF.</caption>
+          <thead><tr><th>Run</th><th>Level</th><th>Validity</th><th>Prox L1 cont.</th><th>ε-sparsity</th><th>LOF median-log</th><th>n valid</th></tr></thead>
+          <tbody>
+            <tr><td>base <em>(base)</em></td><td>—</td><td class="num">0.3877</td><td class="num">0.0630</td><td class="num">0.4642</td><td class="num">0.0349</td><td class="num">811</td></tr>
+            <tr><td>ctx128</td><td>128</td><td class="num flag">0.3451</td><td class="num">0.0558</td><td class="num">0.4647</td><td class="num">0.0510</td><td class="num">722</td></tr>
+            <tr><td>ctx512</td><td>512</td><td class="num good">0.4087</td><td class="num">0.0616</td><td class="num">0.4827</td><td class="num">0.0243</td><td class="num">855</td></tr>
+            <tr><td>ctx1024</td><td>1024</td><td class="num good">0.4622</td><td class="num">0.0598</td><td class="num">0.4786</td><td class="num">0.0419</td><td class="num">967</td></tr>
+            <tr><td>ctx2048</td><td>2048</td><td class="num good">0.3948</td><td class="num">0.0631</td><td class="num">0.4783</td><td class="num">0.0525</td><td class="num">826</td></tr>
+            <tr><td>ctx4096</td><td>4096</td><td class="num good">0.4187</td><td class="num">0.0616</td><td class="num">0.4796</td><td class="num">0.0475</td><td class="num">876</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="scroller">
+        <table>
+          <caption>Axis <code>candidate_probs</code>. The default interior grid hugs the mode, so each step takes a tiny move. Tail quantiles allow larger ones. Reference (dicoflex) convention: valid-CFs-only, median-log LOF.</caption>
+          <thead><tr><th>Run</th><th>Level</th><th>Validity</th><th>Prox L1 cont.</th><th>ε-sparsity</th><th>LOF median-log</th><th>n valid</th></tr></thead>
+          <tbody>
+            <tr><td>base <em>(base)</em></td><td>—</td><td class="num">0.3877</td><td class="num">0.0630</td><td class="num">0.4642</td><td class="num">0.0349</td><td class="num">811</td></tr>
+            <tr><td>probs-tail</td><td>0.05,0.25,0.5,0.75,0.95</td><td class="num good">0.3881</td><td class="num">0.0641</td><td class="num">0.4663</td><td class="num">0.0348</td><td class="num">812</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="scroller">
+        <table>
+          <caption>Targeted combinations — several axes moved at once. Chosen from the OFAT results, not pre-committed.</caption>
+          <thead><tr><th>Run</th><th>Level</th><th>Validity</th><th>Prox L1 cont.</th><th>ε-sparsity</th><th>LOF median-log</th><th>n valid</th></tr></thead>
+          <tbody>
+            <tr><td>base <em>(base)</em></td><td>—</td><td class="num">0.3877</td><td class="num">0.0630</td><td class="num">0.4642</td><td class="num">0.0349</td><td class="num">811</td></tr>
+            <tr><td>ctx1024-lam0</td><td>—</td><td class="num good">0.4909</td><td class="num">0.0609</td><td class="num">0.4818</td><td class="num">0.0424</td><td class="num">1027</td></tr>
+            <tr><td>ctx2048-lam0</td><td>—</td><td class="num good">0.4273</td><td class="num">0.0646</td><td class="num">0.4851</td><td class="num">0.0544</td><td class="num">894</td></tr>
+            <tr><td>ctx2048-lam0-bw4</td><td>—</td><td class="num good">0.4407</td><td class="num">0.0635</td><td class="num">0.4826</td><td class="num">0.0530</td><td class="num">922</td></tr>
+            <tr><td>ctx2048-tail</td><td>—</td><td class="num good">0.4034</td><td class="num">0.0650</td><td class="num">0.4869</td><td class="num">0.0571</td><td class="num">844</td></tr>
+          </tbody>
+        </table>
+      </div>
+    <h3>law / frozen — n = 444</h3>
+      <div class="scroller">
+        <table>
+          <caption>Axis <code>beam_width</code>. More parallel hypotheses kept per query row. Reference (dicoflex) convention: valid-CFs-only, median-log LOF.</caption>
+          <thead><tr><th>Run</th><th>Level</th><th>Validity</th><th>Prox L1 cont.</th><th>ε-sparsity</th><th>LOF median-log</th><th>n valid</th></tr></thead>
+          <tbody>
+            <tr><td>base <em>(base)</em></td><td>—</td><td class="num">1.0000</td><td class="num">0.1676</td><td class="num">0.9047</td><td class="num">2.5272</td><td class="num">444</td></tr>
+            <tr><td>bw4</td><td>4</td><td class="num">1.0000</td><td class="num">0.1716</td><td class="num">0.9137</td><td class="num">2.5272</td><td class="num">444</td></tr>
+            <tr><td>bw16</td><td>16</td><td class="num">1.0000</td><td class="num">0.1689</td><td class="num">0.9092</td><td class="num">2.5272</td><td class="num">444</td></tr>
+            <tr><td>bw32</td><td>32</td><td class="num">1.0000</td><td class="num">0.1703</td><td class="num">0.9099</td><td class="num">2.5272</td><td class="num">444</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="scroller">
+        <table>
+          <caption>Axis <code>n_candidates</code>. More branching per generation step. Reference (dicoflex) convention: valid-CFs-only, median-log LOF.</caption>
+          <thead><tr><th>Run</th><th>Level</th><th>Validity</th><th>Prox L1 cont.</th><th>ε-sparsity</th><th>LOF median-log</th><th>n valid</th></tr></thead>
+          <tbody>
+            <tr><td>base <em>(base)</em></td><td>—</td><td class="num">1.0000</td><td class="num">0.1676</td><td class="num">0.9047</td><td class="num">2.5272</td><td class="num">444</td></tr>
+            <tr><td>nc4</td><td>4</td><td class="num">1.0000</td><td class="num">0.1763</td><td class="num">0.9204</td><td class="num">−0.0035</td><td class="num">444</td></tr>
+            <tr><td>nc10</td><td>10</td><td class="num flag">0.5113</td><td class="num">0.1876</td><td class="num">0.9280</td><td class="num">1.9221</td><td class="num">227</td></tr>
+            <tr><td>nc16</td><td>16</td><td class="num">1.0000</td><td class="num">0.1782</td><td class="num">0.9249</td><td class="num">−0.0052</td><td class="num">444</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="scroller">
+        <table>
+          <caption>Axis <code>lambda_actionable</code>. The proximity penalty weight. λ=0 removes it entirely — the direct test of whether proximity is suppressing validity. Reference (dicoflex) convention: valid-CFs-only, median-log LOF.</caption>
+          <thead><tr><th>Run</th><th>Level</th><th>Validity</th><th>Prox L1 cont.</th><th>ε-sparsity</th><th>LOF median-log</th><th>n valid</th></tr></thead>
+          <tbody>
+            <tr><td>base <em>(base)</em></td><td>—</td><td class="num">1.0000</td><td class="num">0.1676</td><td class="num">0.9047</td><td class="num">2.5272</td><td class="num">444</td></tr>
+            <tr><td>lam0</td><td>0.0</td><td class="num">1.0000</td><td class="num">0.1703</td><td class="num">0.9174</td><td class="num">2.5471</td><td class="num">444</td></tr>
+            <tr><td>lam0.1</td><td>0.1</td><td class="num">1.0000</td><td class="num">0.1700</td><td class="num">0.9137</td><td class="num">2.5272</td><td class="num">444</td></tr>
+            <tr><td>lam3</td><td>3.0</td><td class="num flag">0.8378</td><td class="num">0.1422</td><td class="num">0.8701</td><td class="num">−0.0181</td><td class="num">372</td></tr>
+            <tr><td>lam10</td><td>10.0</td><td class="num flag">0.2297</td><td class="num">0.0761</td><td class="num">0.6340</td><td class="num">0.0411</td><td class="num">102</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="scroller">
+        <table>
+          <caption>Axis <code>max_context</code>. More conditioning evidence per step. Reference (dicoflex) convention: valid-CFs-only, median-log LOF.</caption>
+          <thead><tr><th>Run</th><th>Level</th><th>Validity</th><th>Prox L1 cont.</th><th>ε-sparsity</th><th>LOF median-log</th><th>n valid</th></tr></thead>
+          <tbody>
+            <tr><td>base <em>(base)</em></td><td>—</td><td class="num">1.0000</td><td class="num">0.1676</td><td class="num">0.9047</td><td class="num">2.5272</td><td class="num">444</td></tr>
+            <tr><td>ctx512</td><td>512</td><td class="num">1.0000</td><td class="num">0.1847</td><td class="num">0.9159</td><td class="num">2.4777</td><td class="num">444</td></tr>
+            <tr><td>ctx1024</td><td>1024</td><td class="num">1.0000</td><td class="num">0.1768</td><td class="num">0.9234</td><td class="num">−0.0095</td><td class="num">444</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="scroller">
+        <table>
+          <caption>Axis <code>candidate_probs</code>. The default interior grid hugs the mode, so each step takes a tiny move. Tail quantiles allow larger ones. Reference (dicoflex) convention: valid-CFs-only, median-log LOF.</caption>
+          <thead><tr><th>Run</th><th>Level</th><th>Validity</th><th>Prox L1 cont.</th><th>ε-sparsity</th><th>LOF median-log</th><th>n valid</th></tr></thead>
+          <tbody>
+            <tr><td>base <em>(base)</em></td><td>—</td><td class="num">1.0000</td><td class="num">0.1676</td><td class="num">0.9047</td><td class="num">2.5272</td><td class="num">444</td></tr>
+            <tr><td>probs-tail</td><td>0.05,0.25,0.5,0.75,0.95</td><td class="num">1.0000</td><td class="num">0.1767</td><td class="num">0.9227</td><td class="num">−0.0035</td><td class="num">444</td></tr>
+          </tbody>
+        </table>
+      </div>
+  </section>
+
+  <section>
+    <h2>Findings</h2>
+    <div class="finding">
+      <div class="finding-num">1</div>
+      <div class="finding-body">
+        <div class="finding-head">Tuning moves the HELOC frozen ceiling, but nowhere near the reachable bound</div>
+        <p>The cluster defaults reach validity <strong>0.3877</strong>. The best of the 21 configurations tried, <code>ctx1024-lam0</code>, reaches <strong>0.4909</strong> — a lift of +0.1033. Exp 4's closed-form analysis showed <em>every</em> one of the 2092 rows is reachable in principle: pin the six immutables, let the seventeen actionable features range over [0,1], and the target class is attainable for all of them. So the search still misses roughly 51% of flips that exist. The 0.38 ceiling is not primarily a hyperparameter artifact.</p>
+      </div>
+    </div>
+    <div class="finding">
+      <div class="finding-num">2</div>
+      <div class="finding-body">
+        <div class="finding-head">More search makes validity <em>worse</em> — the strongest evidence yet that the selector optimises the wrong objective</div>
+        <p>Validity is <strong>strictly decreasing</strong> in beam width (4→0.3944, 8→0.3877, 16→0.3834, 32→0.3786). Widening the beam is the one change that unambiguously buys more search, and it costs validity every time.</p>
+        <p>The mechanism follows from where validity enters. Beams are ranked at every step by cumulative <code>log-density − λ·proximity</code>; whether a partial path will flip the class is not consulted until the terminal rerank among the completed beams. A wider beam therefore fills with paths that score better on density and proximity, crowding out the lower-scoring paths that would have reached the target class. Extra capacity is spent optimising plausibility, and the flip is an afterthought.</p>
+        <p>This sharpens Exp 4's finding 2, which could not separate "TabPFN's conditional has no target-side mass" from "the selector is not pushing toward validity". A monotone <em>penalty</em> for more search points squarely at the second.</p>
+      </div>
+    </div>
+    <div class="finding">
+      <div class="finding-num">3</div>
+      <div class="finding-body">
+        <div class="finding-head">Conditioning evidence helps, but only up to a point — the context axis has an interior optimum at 1024</div>
+        <p>Validity along <code>max_context</code>: 128→0.3451, 256→0.3877, 512→0.4087, 1024→0.4622, 2048→0.3948, 4096→0.4187. It climbs to <strong>0.4622</strong> at 1024 rows and then <em>falls</em>. This is the widest useful movement of any axis, and the peak is genuinely interior — not an artifact of where the grid stopped.</p>
+        <p>The first half is unsurprising: more conditioning rows estimate each step's conditional better, so the proposed candidates land on the target side more often. The fall-off is the interesting half. The context is a <em>random subsample</em> of the training split drawn once per run; as it grows it converges on the full marginal distribution, which is dominated by the majority class behaviour around the factual. A tighter subsample appears to leave the per-step conditional more permissive of the moves a flip needs.</p>
+        <p>Practically: the default of 256 is on the wrong side of the optimum, and the single cheapest change available is to raise it to the peak.</p>
+      </div>
+    </div>
+    <div class="finding">
+      <div class="finding-num">4</div>
+      <div class="finding-body">
+        <div class="finding-head">The proximity penalty is a straight trade against validity</div>
+        <p>Validity falls monotonically as λ rises (λ=0→0.4168, λ=0.1→0.4125, λ=1→0.3877, λ=3→0.3164, λ=10→0.1902); the widest spread of any axis (0.2266). Removing the penalty entirely (λ=0) is worth about as much as one doubling of the context.</p>
+        <p>This is the honest trade-off rather than a free win: the same runs show continuous-L1 proximity moving in the opposite direction, so λ buys closeness with flips. It does mean the 496 backwards-moving rows Exp 4 found are at least partly the penalty's doing — but λ=0 still leaves most misses unfixed, so the penalty is not the whole story.</p>
+      </div>
+    </div>
+    <div class="finding">
+      <div class="finding-num">5</div>
+      <div class="finding-body">
+        <div class="finding-head">Tail candidate quantiles do nothing — a clean negative result</div>
+        <p>The pre-registered hypothesis was that the default interior quantile grid hugs the mode, holding each step to a tiny move, and that tail quantiles (0.05 … 0.95) would allow the larger moves the closed-form analysis says are needed. They do not: validity goes 0.3877 → 0.3881, a change of +0.0005. Step size is not the binding constraint.</p>
+      </div>
+    </div>
+    <div class="finding">
+      <div class="finding-num">6</div>
+      <div class="finding-body">
+        <div class="finding-head">The best axes combine, but sub-additively</div>
+        <p>The strongest single-axis change was <code>ctx1024</code> at 0.4622. Combining the best levels of the two useful axes gives <code>ctx1024-lam0</code> at <strong>0.4909</strong>, the best configuration in the sweep — +0.1033 against the defaults.</p>
+        <p>The gains do not simply add: context and λ both act on which candidate values survive each step, so they compete for the same headroom. And the combination does not rescue the axis shape — pairing λ=0 with a context past the optimum is worse than pairing it with the optimum, exactly as the single-axis sweep predicts.</p>
+        <p>Even so, 0.4909 against a closed-form reachable bound of 1.000 means the search still fails on about half the instances where a valid counterfactual provably exists.</p>
+      </div>
+    </div>
+    <div class="finding">
+      <div class="finding-num">7</div>
+      <div class="finding-body">
+        <div class="finding-head">The 115 all-zeros HELOC rows are one query point, and no configuration ever flips it</div>
+        <p>115 of HELOC's 2092 test rows are byte-identical all-zeros — the MinMax image of the <code>−9</code> "no record" sentinel. Generation is deterministic, so they receive an identical counterfactual (not identical): they are <strong>one</strong> query point counted 115 times, not 115 independent attempts.</p>
+        <p>The best validity achieved among those rows, across every configuration in this sweep, is <strong>0.0000</strong>. Excluding them raises validity by between +0.0111 and +0.0286 — a near-constant offset, exactly what removing a fixed block of guaranteed failures does.</p>
+        <p><strong>They change no conclusion of this sweep.</strong> The ranking of configurations by validity is unchanged (Spearman ρ = 1.0000), so every sensitivity statement here holds with or without them. That settles the question for this report, though not open-work item 3 — whether a missing-data sentinel belongs in an evaluation set at all is a decision about the benchmark, not about the search.</p>
+      </div>
+    </div>
+    <div class="finding">
+      <div class="finding-num">8</div>
+      <div class="finding-body">
+        <div class="finding-head">Law's perfect validity is not robust — the proximity penalty breaks it too</div>
+        <p>Law has no immutable features, so nothing is masked and validity sits at 1.000 for most of the sweep. It is not unconditional: <code>lam10</code> (0.2297), <code>nc10</code> (0.5113), <code>lam3</code> (0.8378) fall below 1.000. One of these is not a dose-response at all: along <code>n_candidates</code> the sequence runs 4→1.0000, 6→1.0000, 10→0.5113, 16→1.0000 — a single interior level collapses while its neighbours on both sides stay at 1.000. Generation is deterministic, so this is reproducible rather than noise, and it is unexplained. It is a warning that the axes are not smooth: a configuration cannot be assumed safe because the levels around it are.</p>
+        <p>The λ effect is the same mechanism seen on HELOC, just starting from a cell that had looked immune. Any claim that this method achieves perfect validity on Law is a claim about the default λ, not about the method.</p>
+      </div>
+    </div>
+    <div class="finding">
+      <div class="finding-num">9</div>
+      <div class="finding-body">
+        <div class="finding-head">Law's two regimes are identical after all — the earlier difference was the hardware</div>
+        <p><code>PROJECT_STATE.md</code> recorded that Law's frozen and from-scratch regimes "were expected to be numerically identical and are not", differing on LOF (9.83 vs 8.72), L1 and ε-sparsity. That comparison was confounded: <code>law/frozen</code> was generated locally on MPS and <code>law/fromscratch</code> on a GH200 under CUDA.</p>
+        <p>Run on one backend at identical settings, the two regimes agree to full float precision on every metric, and their generated arrays are <strong>bitwise equal</strong>. Law has no immutable features, so <code>freeze_immutable</code> masks nothing and the two code paths are genuinely the same computation. The earlier discrepancy was entirely MPS-vs-CUDA. This closes open-work item 2.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Validity versus proximity</h2>
+    <p>Across the HELOC frozen sweep, validity and continuous-L1 proximity correlate at <strong>r = +0.78</strong>: higher validity is bought with larger moves away from the factual. Proximity here is measured on valid counterfactuals only, so it is conditioned on the very set that validity changes — read the correlation as descriptive, not causal.</p>
+  </section>
+
+  <section>
+    <h2>Numbers that must not be reported</h2>
+    <p class="prose">
+      Carried forward from Exp 4. These columns are computed by the scorers and are
+      present in the CSV prefixed <code>UNRELIABLE__</code>, so they cannot be picked
+      up by accident.
+    </p>
+    <ul>
+      <li>
+        <strong><code>validity_vs_true</code></strong> — the registry's
+        <code>mean(y_cf_pred != y_test)</code>. This project relabels, under which that
+        expression reduces algebraically to the discriminator's accuracy and says
+        nothing about the generator.
+      </li>
+      <li>
+        <strong>All-rows mean LOF</strong> (<code>lof_scores_cf</code>) — HELOC's 115
+        all-zeros rows sit on a 473-fold duplicated training point, so their LOF ratio
+        diverges and the mean reaches ~6.5×10⁶. Use <code>lof_score_median_log</code>.
+      </li>
+      <li>
+        <strong><code>sparsity</code></strong> — exact float equality, saturates at 1.0
+        for continuously generated counterfactuals. Use ε-sparsity.
+      </li>
+      <li>
+        <strong><code>sparsity_categorical</code></strong> — assumes discrete one-hots;
+        beam search emits a continuous relaxation, so it saturates at 1.0 on Law.
+      </li>
+      <li>
+        <strong><code>pairwise_diversity_mixed</code></strong> — needs K&gt;1
+        counterfactuals per factual; this method emits one.
+      </li>
+    </ul>
+    <div class="callout is-alert">
+      <div class="callout-label">The all-zeros rows are still undecided</div>
+      <p>
+        115 of HELOC's 2092 test rows are the MinMax image of the <code>−9</code>
+        "no record" code — a missing-data sentinel, not a record. They are 5.5% of the
+        split and affect every HELOC metric here. Every HELOC number in this report
+        includes them. Whether they belong in the evaluation set is open-work item 3
+        and is not settled by this sweep.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Provenance</h2>
+    <div class="scroller">
+      <table>
+        <caption>One row per generated array. Every run is attributable to a pushed
+          commit; cluster code is rsynced from the working tree, so the branch was
+          pushed before submitting.</caption>
+        <thead><tr>
+          <th>Dataset</th><th>Set</th><th>Run</th><th>beam</th><th>cand</th>
+          <th>λ</th><th>ctx</th><th>probs</th><th>Commit</th><th>Job</th><th>Sec</th>
+        </tr></thead>
+        <tbody>
+          <tr><td>heloc</td><td>fromscratch</td><td>base</td><td class="num">8</td><td class="num">6</td><td class="num">1.0</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359811</td><td class="num">85.1</td></tr>
+          <tr><td>heloc</td><td>frozen</td><td>base</td><td class="num">8</td><td class="num">6</td><td class="num">1.0</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359809</td><td class="num">83.8</td></tr>
+          <tr><td>heloc</td><td>frozen</td><td>bw16</td><td class="num">16</td><td class="num">6</td><td class="num">1.0</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359809</td><td class="num">23.6</td></tr>
+          <tr><td>heloc</td><td>frozen</td><td>bw32</td><td class="num">32</td><td class="num">6</td><td class="num">1.0</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359809</td><td class="num">36.8</td></tr>
+          <tr><td>heloc</td><td>frozen</td><td>bw4</td><td class="num">4</td><td class="num">6</td><td class="num">1.0</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359809</td><td class="num">14.2</td></tr>
+          <tr><td>heloc</td><td>frozen</td><td>ctx1024</td><td class="num">8</td><td class="num">6</td><td class="num">1.0</td><td class="num">1024</td><td>interior</td><td>e8bc0eb</td><td class="num">20359809</td><td class="num">18.0</td></tr>
+          <tr><td>heloc</td><td>frozen</td><td>ctx1024-lam0</td><td class="num">8</td><td class="num">6</td><td class="num">0.0</td><td class="num">1024</td><td>interior</td><td>6931e21</td><td class="num">20359858</td><td class="num">18.3</td></tr>
+          <tr><td>heloc</td><td>frozen</td><td>ctx128</td><td class="num">8</td><td class="num">6</td><td class="num">1.0</td><td class="num">128</td><td>interior</td><td>e8bc0eb</td><td class="num">20359809</td><td class="num">15.6</td></tr>
+          <tr><td>heloc</td><td>frozen</td><td>ctx2048</td><td class="num">8</td><td class="num">6</td><td class="num">1.0</td><td class="num">2048</td><td>interior</td><td>6931e21</td><td class="num">20359858</td><td class="num">85.7</td></tr>
+          <tr><td>heloc</td><td>frozen</td><td>ctx2048-lam0</td><td class="num">8</td><td class="num">6</td><td class="num">0.0</td><td class="num">2048</td><td>interior</td><td>6931e21</td><td class="num">20359858</td><td class="num">20.9</td></tr>
+          <tr><td>heloc</td><td>frozen</td><td>ctx2048-lam0-bw4</td><td class="num">4</td><td class="num">6</td><td class="num">0.0</td><td class="num">2048</td><td>interior</td><td>6931e21</td><td class="num">20359858</td><td class="num">16.7</td></tr>
+          <tr><td>heloc</td><td>frozen</td><td>ctx2048-tail</td><td class="num">8</td><td class="num">6</td><td class="num">1.0</td><td class="num">2048</td><td>0.05,0.25,0.5,0.75,0.95</td><td>6931e21</td><td class="num">20359858</td><td class="num">20.1</td></tr>
+          <tr><td>heloc</td><td>frozen</td><td>ctx4096</td><td class="num">8</td><td class="num">6</td><td class="num">1.0</td><td class="num">4096</td><td>interior</td><td>6931e21</td><td class="num">20359858</td><td class="num">27.8</td></tr>
+          <tr><td>heloc</td><td>frozen</td><td>ctx512</td><td class="num">8</td><td class="num">6</td><td class="num">1.0</td><td class="num">512</td><td>interior</td><td>e8bc0eb</td><td class="num">20359809</td><td class="num">16.7</td></tr>
+          <tr><td>heloc</td><td>frozen</td><td>lam0</td><td class="num">8</td><td class="num">6</td><td class="num">0.0</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359809</td><td class="num">15.9</td></tr>
+          <tr><td>heloc</td><td>frozen</td><td>lam0.1</td><td class="num">8</td><td class="num">6</td><td class="num">0.1</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359809</td><td class="num">16.6</td></tr>
+          <tr><td>heloc</td><td>frozen</td><td>lam10</td><td class="num">8</td><td class="num">6</td><td class="num">10.0</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359809</td><td class="num">16.1</td></tr>
+          <tr><td>heloc</td><td>frozen</td><td>lam3</td><td class="num">8</td><td class="num">6</td><td class="num">3.0</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359809</td><td class="num">16.0</td></tr>
+          <tr><td>heloc</td><td>frozen</td><td>nc10</td><td class="num">8</td><td class="num">10</td><td class="num">1.0</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359809</td><td class="num">16.8</td></tr>
+          <tr><td>heloc</td><td>frozen</td><td>nc16</td><td class="num">8</td><td class="num">16</td><td class="num">1.0</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359809</td><td class="num">17.3</td></tr>
+          <tr><td>heloc</td><td>frozen</td><td>nc4</td><td class="num">8</td><td class="num">4</td><td class="num">1.0</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359809</td><td class="num">16.5</td></tr>
+          <tr><td>heloc</td><td>frozen</td><td>probs-tail</td><td class="num">8</td><td class="num">6</td><td class="num">1.0</td><td class="num">256</td><td>0.05,0.25,0.5,0.75,0.95</td><td>e8bc0eb</td><td class="num">20359809</td><td class="num">15.9</td></tr>
+          <tr><td>law</td><td>fromscratch</td><td>base</td><td class="num">8</td><td class="num">6</td><td class="num">1.0</td><td class="num">256</td><td>interior</td><td>6931e21</td><td class="num">20359812</td><td class="num">73.9</td></tr>
+          <tr><td>law</td><td>frozen</td><td>base</td><td class="num">8</td><td class="num">6</td><td class="num">1.0</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359810</td><td class="num">75.2</td></tr>
+          <tr><td>law</td><td>frozen</td><td>bw16</td><td class="num">16</td><td class="num">6</td><td class="num">1.0</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359810</td><td class="num">10.1</td></tr>
+          <tr><td>law</td><td>frozen</td><td>bw32</td><td class="num">32</td><td class="num">6</td><td class="num">1.0</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359810</td><td class="num">10.9</td></tr>
+          <tr><td>law</td><td>frozen</td><td>bw4</td><td class="num">4</td><td class="num">6</td><td class="num">1.0</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359810</td><td class="num">9.7</td></tr>
+          <tr><td>law</td><td>frozen</td><td>ctx1024</td><td class="num">8</td><td class="num">6</td><td class="num">1.0</td><td class="num">1024</td><td>interior</td><td>6931e21</td><td class="num">20359852</td><td class="num">10.6</td></tr>
+          <tr><td>law</td><td>frozen</td><td>ctx512</td><td class="num">8</td><td class="num">6</td><td class="num">1.0</td><td class="num">512</td><td>interior</td><td>6931e21</td><td class="num">20359852</td><td class="num">10.2</td></tr>
+          <tr><td>law</td><td>frozen</td><td>lam0</td><td class="num">8</td><td class="num">6</td><td class="num">0.0</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359810</td><td class="num">8.7</td></tr>
+          <tr><td>law</td><td>frozen</td><td>lam0.1</td><td class="num">8</td><td class="num">6</td><td class="num">0.1</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359810</td><td class="num">9.0</td></tr>
+          <tr><td>law</td><td>frozen</td><td>lam10</td><td class="num">8</td><td class="num">6</td><td class="num">10.0</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359810</td><td class="num">8.9</td></tr>
+          <tr><td>law</td><td>frozen</td><td>lam3</td><td class="num">8</td><td class="num">6</td><td class="num">3.0</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359810</td><td class="num">8.8</td></tr>
+          <tr><td>law</td><td>frozen</td><td>nc10</td><td class="num">8</td><td class="num">10</td><td class="num">1.0</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359810</td><td class="num">9.2</td></tr>
+          <tr><td>law</td><td>frozen</td><td>nc16</td><td class="num">8</td><td class="num">16</td><td class="num">1.0</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359810</td><td class="num">9.6</td></tr>
+          <tr><td>law</td><td>frozen</td><td>nc4</td><td class="num">8</td><td class="num">4</td><td class="num">1.0</td><td class="num">256</td><td>interior</td><td>e8bc0eb</td><td class="num">20359810</td><td class="num">9.3</td></tr>
+          <tr><td>law</td><td>frozen</td><td>probs-tail</td><td class="num">8</td><td class="num">6</td><td class="num">1.0</td><td class="num">256</td><td>0.05,0.25,0.5,0.75,0.95</td><td>6931e21</td><td class="num">20359852</td><td class="num">10.2</td></tr>
+        </tbody>
+      </table>
+    </div>
+    
+    <p class="prose">
+      Backend: cuda on Helios GH200,
+      partition <code>plgrid-gpu-gh200</code>, grant
+      <code>plgcountercontex-gpu-gh200</code>. Slurm jobs
+      20359809, 20359810, 20359811, 20359812, 20359852, 20359858. Held fixed across every run:
+      <code>--max-test -1</code> (full split), <code>--chunk-size 4096</code>,
+      the discriminator pickles in <code>experiments/zeroshot_cf/models/</code>
+      (they define <code>y_target</code> — never retrained), and the generation
+      ordering (immutables first, then |coef|-descending actionables).
+    </p>
+    <div class="callout">
+      <div class="callout-label">Why chunk-size is not an axis</div>
+      <p>
+        TabPFN's predictions depend on the composition of the predict batch, so results
+        are not chunk-invariant (measured: chunk=40 versus chunk=7 differed by ~1.0 on a
+        one-hot column). It is pinned at 4096 — one call per target class — in every run
+        of every table here. Varying it would confound every other axis.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Appendix — registry convention</h2>
+    <p class="prose">
+      The same runs under the vendored <code>cel</code> registry's own metric classes,
+      which take all-rows means. Carried for continuity with the Exp-4 table; read the
+      reference tables above first.
+    </p>
+      <div class="scroller">
+        <table>
+          <caption><code>heloc / fromscratch</code> under the vendored <code>cel</code> registry's own metric classes (all-rows means). Carried for continuity with the Exp-4 table.</caption>
+          <thead><tr><th>Run</th><th>Level</th><th>Validity</th><th>L1</th><th>L2</th><th>ε-spars (all rows)</th><th>IsoForest</th><th>Coverage</th></tr></thead>
+          <tbody>
+            <tr><td>base <em>(base)</em></td><td>—</td><td class="num">1.0000</td><td class="num">2.6234</td><td class="num">0.8291</td><td class="num">0.7668</td><td class="num">0.1125</td><td class="num">1.0000</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="scroller">
+        <table>
+          <caption><code>heloc / frozen</code> under the vendored <code>cel</code> registry's own metric classes (all-rows means). Carried for continuity with the Exp-4 table.</caption>
+          <thead><tr><th>Run</th><th>Level</th><th>Validity</th><th>L1</th><th>L2</th><th>ε-spars (all rows)</th><th>IsoForest</th><th>Coverage</th></tr></thead>
+          <tbody>
+            <tr><td>base <em>(base)</em></td><td>—</td><td class="num">0.3877</td><td class="num">1.4482</td><td class="num">0.5654</td><td class="num">0.4454</td><td class="num">0.0777</td><td class="num">1.0000</td></tr>
+            <tr><td>bw16</td><td>16</td><td class="num flag">0.3834</td><td class="num">1.4756</td><td class="num">0.5713</td><td class="num">0.4422</td><td class="num">0.0786</td><td class="num">1.0000</td></tr>
+            <tr><td>bw32</td><td>32</td><td class="num flag">0.3786</td><td class="num">1.4893</td><td class="num">0.5759</td><td class="num">0.4399</td><td class="num">0.0786</td><td class="num">1.0000</td></tr>
+            <tr><td>bw4</td><td>4</td><td class="num good">0.3944</td><td class="num">1.4150</td><td class="num">0.5557</td><td class="num">0.4462</td><td class="num">0.0779</td><td class="num">1.0000</td></tr>
+            <tr><td>ctx1024</td><td>1024</td><td class="num good">0.4622</td><td class="num">1.3762</td><td class="num">0.5334</td><td class="num">0.4355</td><td class="num">0.0800</td><td class="num">1.0000</td></tr>
+            <tr><td>ctx1024-lam0</td><td>—</td><td class="num good">0.4909</td><td class="num">1.4011</td><td class="num">0.5415</td><td class="num">0.4426</td><td class="num">0.0790</td><td class="num">1.0000</td></tr>
+            <tr><td>ctx128</td><td>128</td><td class="num flag">0.3451</td><td class="num">1.2824</td><td class="num">0.5113</td><td class="num">0.4406</td><td class="num">0.0790</td><td class="num">1.0000</td></tr>
+            <tr><td>ctx2048</td><td>2048</td><td class="num good">0.3948</td><td class="num">1.4520</td><td class="num">0.5767</td><td class="num">0.4433</td><td class="num">0.0684</td><td class="num">1.0000</td></tr>
+            <tr><td>ctx2048-lam0</td><td>—</td><td class="num good">0.4273</td><td class="num">1.4851</td><td class="num">0.5889</td><td class="num">0.4521</td><td class="num">0.0674</td><td class="num">1.0000</td></tr>
+            <tr><td>ctx2048-lam0-bw4</td><td>—</td><td class="num good">0.4407</td><td class="num">1.4603</td><td class="num">0.5790</td><td class="num">0.4547</td><td class="num">0.0669</td><td class="num">1.0000</td></tr>
+            <tr><td>ctx2048-tail</td><td>—</td><td class="num good">0.4034</td><td class="num">1.4947</td><td class="num">0.5894</td><td class="num">0.4428</td><td class="num">0.0688</td><td class="num">1.0000</td></tr>
+            <tr><td>ctx4096</td><td>4096</td><td class="num good">0.4187</td><td class="num">1.4176</td><td class="num">0.5566</td><td class="num">0.4395</td><td class="num">0.0703</td><td class="num">1.0000</td></tr>
+            <tr><td>ctx512</td><td>512</td><td class="num good">0.4087</td><td class="num">1.4178</td><td class="num">0.5609</td><td class="num">0.4377</td><td class="num">0.0796</td><td class="num">1.0000</td></tr>
+            <tr><td>lam0</td><td>0.0</td><td class="num good">0.4168</td><td class="num">1.5086</td><td class="num">0.5893</td><td class="num">0.4546</td><td class="num">0.0765</td><td class="num">1.0000</td></tr>
+            <tr><td>lam0.1</td><td>0.1</td><td class="num good">0.4125</td><td class="num">1.5004</td><td class="num">0.5863</td><td class="num">0.4528</td><td class="num">0.0767</td><td class="num">1.0000</td></tr>
+            <tr><td>lam10</td><td>10.0</td><td class="num flag">0.1902</td><td class="num">0.9619</td><td class="num">0.3936</td><td class="num">0.3690</td><td class="num">0.0813</td><td class="num">1.0000</td></tr>
+            <tr><td>lam3</td><td>3.0</td><td class="num flag">0.3164</td><td class="num">1.3047</td><td class="num">0.5083</td><td class="num">0.4268</td><td class="num">0.0808</td><td class="num">1.0000</td></tr>
+            <tr><td>nc10</td><td>10</td><td class="num flag">0.3819</td><td class="num">1.4250</td><td class="num">0.5592</td><td class="num">0.4437</td><td class="num">0.0780</td><td class="num">1.0000</td></tr>
+            <tr><td>nc16</td><td>16</td><td class="num flag">0.3843</td><td class="num">1.4125</td><td class="num">0.5559</td><td class="num">0.4423</td><td class="num">0.0779</td><td class="num">1.0000</td></tr>
+            <tr><td>nc4</td><td>4</td><td class="num good">0.3934</td><td class="num">1.4641</td><td class="num">0.5687</td><td class="num">0.4459</td><td class="num">0.0778</td><td class="num">1.0000</td></tr>
+            <tr><td>probs-tail</td><td>0.05,0.25,0.5,0.75,0.95</td><td class="num good">0.3881</td><td class="num">1.4733</td><td class="num">0.5727</td><td class="num">0.4458</td><td class="num">0.0774</td><td class="num">1.0000</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="scroller">
+        <table>
+          <caption><code>law / fromscratch</code> under the vendored <code>cel</code> registry's own metric classes (all-rows means). Carried for continuity with the Exp-4 table.</caption>
+          <thead><tr><th>Run</th><th>Level</th><th>Validity</th><th>L1</th><th>L2</th><th>ε-spars (all rows)</th><th>IsoForest</th><th>Coverage</th></tr></thead>
+          <tbody>
+            <tr><td>base <em>(base)</em></td><td>—</td><td class="num">1.0000</td><td class="num">0.7314</td><td class="num">0.6912</td><td class="num">0.9047</td><td class="num">0.1142</td><td class="num">1.0000</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="scroller">
+        <table>
+          <caption><code>law / frozen</code> under the vendored <code>cel</code> registry's own metric classes (all-rows means). Carried for continuity with the Exp-4 table.</caption>
+          <thead><tr><th>Run</th><th>Level</th><th>Validity</th><th>L1</th><th>L2</th><th>ε-spars (all rows)</th><th>IsoForest</th><th>Coverage</th></tr></thead>
+          <tbody>
+            <tr><td>base <em>(base)</em></td><td>—</td><td class="num">1.0000</td><td class="num">0.7314</td><td class="num">0.6912</td><td class="num">0.9047</td><td class="num">0.1142</td><td class="num">1.0000</td></tr>
+            <tr><td>bw16</td><td>16</td><td class="num">1.0000</td><td class="num">0.7323</td><td class="num">0.6917</td><td class="num">0.9092</td><td class="num">0.1141</td><td class="num">1.0000</td></tr>
+            <tr><td>bw32</td><td>32</td><td class="num">1.0000</td><td class="num">0.7333</td><td class="num">0.6924</td><td class="num">0.9099</td><td class="num">0.1136</td><td class="num">1.0000</td></tr>
+            <tr><td>bw4</td><td>4</td><td class="num">1.0000</td><td class="num">0.7342</td><td class="num">0.6927</td><td class="num">0.9137</td><td class="num">0.1137</td><td class="num">1.0000</td></tr>
+            <tr><td>ctx1024</td><td>1024</td><td class="num">1.0000</td><td class="num">0.7378</td><td class="num">0.6947</td><td class="num">0.9234</td><td class="num">0.1148</td><td class="num">1.0000</td></tr>
+            <tr><td>ctx512</td><td>512</td><td class="num">1.0000</td><td class="num">0.7432</td><td class="num">0.6985</td><td class="num">0.9159</td><td class="num">0.1142</td><td class="num">1.0000</td></tr>
+            <tr><td>lam0</td><td>0.0</td><td class="num">1.0000</td><td class="num">0.7333</td><td class="num">0.6921</td><td class="num">0.9174</td><td class="num">0.1178</td><td class="num">1.0000</td></tr>
+            <tr><td>lam0.1</td><td>0.1</td><td class="num">1.0000</td><td class="num">0.7331</td><td class="num">0.6920</td><td class="num">0.9137</td><td class="num">0.1156</td><td class="num">1.0000</td></tr>
+            <tr><td>lam10</td><td>10.0</td><td class="num flag">0.2297</td><td class="num">0.6681</td><td class="num">0.6545</td><td class="num">0.7132</td><td class="num">0.0922</td><td class="num">1.0000</td></tr>
+            <tr><td>lam3</td><td>3.0</td><td class="num flag">0.8378</td><td class="num">0.7138</td><td class="num">0.6814</td><td class="num">0.8791</td><td class="num">0.1067</td><td class="num">1.0000</td></tr>
+            <tr><td>nc10</td><td>10</td><td class="num flag">0.5113</td><td class="num">0.7452</td><td class="num">0.7001</td><td class="num">0.8971</td><td class="num">0.1203</td><td class="num">1.0000</td></tr>
+            <tr><td>nc16</td><td>16</td><td class="num">1.0000</td><td class="num">0.7388</td><td class="num">0.6956</td><td class="num">0.9249</td><td class="num">0.1160</td><td class="num">1.0000</td></tr>
+            <tr><td>nc4</td><td>4</td><td class="num">1.0000</td><td class="num">0.7374</td><td class="num">0.6949</td><td class="num">0.9204</td><td class="num">0.1160</td><td class="num">1.0000</td></tr>
+            <tr><td>probs-tail</td><td>0.05,0.25,0.5,0.75,0.95</td><td class="num">1.0000</td><td class="num">0.7377</td><td class="num">0.6950</td><td class="num">0.9227</td><td class="num">0.1161</td><td class="num">1.0000</td></tr>
+          </tbody>
+        </table>
+      </div>
+  </section>
+
+  <section>
+    <h2>Reproduce</h2>
+    <pre><code># 1. push the branch — cluster code is rsynced from the working tree,
+#    so a run is only attributable to a commit if it exists on the remote
+git push origin lukasz/zeroshot-cf-beam-search
+bash plgrid/sync-to-plgrid.sh
+
+# 2. generate on PLGrid — one job per cell, configs sequential within a job
+ssh helios
+cd projects/countercontex
+CELL=heloc:frozen       bash plgrid/submit.sh plgrid/30_beam_sweep.sbatch
+CELL=law:frozen         bash plgrid/submit.sh plgrid/30_beam_sweep.sbatch
+CELL=heloc:fromscratch CONFIGS="base|" bash plgrid/submit.sh plgrid/30_beam_sweep.sbatch
+CELL=law:fromscratch   CONFIGS="base|" bash plgrid/submit.sh plgrid/30_beam_sweep.sbatch
+# FORCE=1 defeats the resume guard when regenerating
+
+# 3. pull the arrays back and score locally (no GPU needed)
+rsync -a helios:'$PLG_GROUPS_STORAGE/plggcfsgenwro/$USER/countercontex/results/arrays/sweep/' \
+  experiments/zeroshot_cf/results/arrays/sweep/
+uv run python experiments/zeroshot_cf/exp7_sweep_table.py
+
+# 4. render this report
+uv run python experiments/zeroshot_cf/exp7_report.py</code></pre>
+    <p class="prose">
+      A single configuration, run directly:
+    </p>
+    <pre><code>uv run python experiments/zeroshot_cf/exp4_beam_search.py \
+  --dataset heloc --set frozen --max-test -1 --chunk-size 4096 \
+  --run-id lam0 --lambda-actionable 0.0</code></pre>
+  </section>
+
+  <div class="footer">
+    <span>Source table: <code>exp7_sweep_metrics.csv</code> — every number in this
+      report is rendered from it by <code>exp7_report.py</code>; none are typed by hand.</span>
+    <span>Generation on PLGrid, scoring local. Raw arrays are gitignored and mirrored
+      to group storage.</span>
+  </div>
+
+</div>
+</body>
+</html>
