@@ -40,13 +40,28 @@ sys.path.insert(0, str(REPO_ROOT))
 
 RESULTS_DIR = Path(__file__).parent / "results"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+# Raw generated CF arrays (gitignored) — lets metrics be recomputed without
+# re-running the ~0.85 s/CF beam search.
+ARRAYS_DIR = RESULTS_DIR / "arrays"
 
 N_ESTIMATORS = 4
 MAX_CONTEXT = 256
+# Query points per batched beam-search call. Bounds the per-step predict batch
+# (chunk x beam_width rows) and gives progress output on full-split runs.
+#
+# NOTE: results are *not* chunk-invariant. TabPFN's predictions depend on the
+# composition of the predict batch, so changing chunk_size perturbs the generated
+# CFs (verified: chunk=40 vs chunk=7 on law differ by up to ~1.0 on a one-hot
+# column). Larger chunks are also faster per CF. The default is therefore set high
+# enough that a whole target class is normally one chunk, preserving the
+# single-call-per-class semantics of the earlier runs; lower it only if memory
+# forces you to, and hold it fixed across runs you intend to compare.
+DEFAULT_CHUNK = 4096
 
 _DATASET_PARAMS = {
     "moons": {"max_test": 100},
     "heloc": {"max_test": 30},
+    "law": {"max_test": 100},
 }
 
 
@@ -67,12 +82,20 @@ def generate_counterfactuals_beam(
     max_context: int = MAX_CONTEXT,
     max_test: Optional[int] = None,
     freeze_immutable: bool = False,
+    chunk_size: int = DEFAULT_CHUNK,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict]:
     """Generate beam-search CFs for one dataset. Returns (X_test, y_test, X_cf, info).
 
     ``freeze_immutable=False`` (Set 2): every feature generated from scratch.
     ``freeze_immutable=True``  (Set 1): immutables observed (held at factual),
     only actionables generated — comparable to the Exp 2/3 imputation baseline.
+
+    Query points are processed in chunks of ``chunk_size`` within each target class.
+    The beam search is already batched across queries (one regressor fit + one
+    batched predict per step for all query x beam rows), so chunking does not change
+    results — each query's beams are independent and the context subsample is fixed
+    by ``random_state``. It bounds the predict batch (and peak memory) on full-split
+    runs and gives incremental progress output.
     """
     from experiments.zeroshot_cf.beam_search import (
         BeamConfig,
@@ -153,30 +176,44 @@ def generate_counterfactuals_beam(
             max_context=max_context,
             random_state=42 + target_cls,
         )
-        t0 = time.perf_counter()
-        X_cf_batch, aux = generate_cf_beam(
-            reg,
-            X_context=X_train,  # all classes — Y must vary in context
-            y_context=y_train,
-            X_factual=X_batch,
-            target_class=target_cls,
-            ordering=ordering,
-            immutable_idx=immutable_idx,
-            config=cfg,
-            disc_model=disc_model,
-            freeze_immutable=freeze_immutable,
-        )
         n_gen = len(actionable_idx) if freeze_immutable else d
-        print(
-            f"    beam search: {len(X_batch)} pts, {n_gen} generated features "
-            f"→ {time.perf_counter() - t0:.2f}s "
-            f"(oob_fallback={aux['n_oob_fallback']})"
-        )
+        n_chunks = max(1, -(-len(X_batch) // chunk_size))  # ceil div
+        t_class = time.perf_counter()
 
-        X_cf[test_idx] = X_cf_batch
-        immutable_drift[test_idx] = aux["immutable_drift"]
-        chosen_valid[test_idx] = aux["chosen_valid"]
-        n_oob_fallback += aux["n_oob_fallback"]
+        for ci in range(n_chunks):
+            lo, hi = ci * chunk_size, min((ci + 1) * chunk_size, len(X_batch))
+            sub_idx = test_idx[lo:hi]
+            t0 = time.perf_counter()
+            X_cf_batch, aux = generate_cf_beam(
+                reg,
+                X_context=X_train,  # all classes — Y must vary in context
+                y_context=y_train,
+                X_factual=X_batch[lo:hi],
+                target_class=target_cls,
+                ordering=ordering,
+                immutable_idx=immutable_idx,
+                config=cfg,
+                disc_model=disc_model,
+                freeze_immutable=freeze_immutable,
+            )
+            dt = time.perf_counter() - t0
+            print(
+                f"    chunk {ci + 1}/{n_chunks}: {hi - lo} pts, {n_gen} gen. features "
+                f"→ {dt:.2f}s ({dt / max(1, hi - lo):.3f}s/CF, "
+                f"oob_fallback={aux['n_oob_fallback']})",
+                flush=True,
+            )
+
+            X_cf[sub_idx] = X_cf_batch
+            immutable_drift[sub_idx] = aux["immutable_drift"]
+            chosen_valid[sub_idx] = aux["chosen_valid"]
+            n_oob_fallback += aux["n_oob_fallback"]
+
+        print(
+            f"    class {target_cls} total: {len(X_batch)} pts in "
+            f"{time.perf_counter() - t_class:.1f}s",
+            flush=True,
+        )
 
     return (
         X_test,
@@ -247,6 +284,8 @@ def evaluate_and_report_beam(
         y_target=y_target,
         immutable_idx=immutable_idx,
         X_cf_lof=X_cf,
+        categorical_idx=bundle.categorical_features_indices,
+        feature_names=bundle.feature_names,
     )
     metrics["frac_oob"] = frac_oob
     metrics["immutable_drift_mean"] = mean_drift
@@ -277,6 +316,25 @@ def run_dataset(dataset_name: str, tag: str, freeze_immutable: bool, **kwargs) -
     X_test, y_test, X_cf, info = generate_counterfactuals_beam(
         dataset_name, freeze_immutable=freeze_immutable, **kwargs
     )
+
+    # Persist the raw generated arrays. Generation is the expensive step (~0.85 s/CF
+    # on HELOC), so saving them means any new metric can be computed later without
+    # re-running the search.
+    ARRAYS_DIR.mkdir(parents=True, exist_ok=True)
+    npz_path = ARRAYS_DIR / f"exp4_{dataset_name}_{tag}_cfs.npz"
+    np.savez_compressed(
+        npz_path,
+        X_cf=X_cf,
+        X_test=X_test,
+        y_test=y_test,
+        y_target=info["y_target"],
+        y_pred=info["y_pred"],
+        immutable_idx=np.asarray(info["immutable_idx"], dtype=np.int64),
+        chosen_valid=info["chosen_valid"],
+        immutable_drift=info["immutable_drift"],
+    )
+    print(f"  Saved arrays → {npz_path}")
+
     metrics = evaluate_and_report_beam(
         dataset_name, X_test, y_test, X_cf, info, write_csv=False
     )
@@ -313,33 +371,64 @@ def write_summary(all_rows: List[Dict], settings: Dict) -> None:
         f"n_candidates={settings['n_candidates']}, "
         f"lambda_actionable={settings['lambda_actionable']}, "
         f"max_context={settings['max_context']}, context_type=all_classes. "
-        "(For MOONS, which has no immutables, Set 1 ≡ Set 2.)",
+        "(For MOONS and LAW, which have no immutables, Set 1 ≡ Set 2.)",
         "",
         "## Metrics",
         "",
-        "| Dataset | Set | Validity | LOF | Proximity L2 | OOB frac | Immut drift | "
-        "True-action |",
-        "|---------|-----|---------|-----|-------------|---------|------------|"
-        "------------|",
+        "| Dataset | Set | n | Validity | LOF | Prox L2 | Prox L1 | L0 | Sparsity(tol) "
+        "| OOB frac | Immut drift | True-action |",
+        "|---------|-----|---|---------|-----|--------|--------|----|--------------"
+        "|---------|------------|------------|",
     ]
     for m in all_rows:
         lines.append(
             f"| {m['dataset']} "
             f"| {m['set']} "
+            f"| {int(m.get('n_total', 0))} "
             f"| {m.get('validity', float('nan')):.3f} "
             f"| {m.get('lof_scores_cf', float('nan')):.3f} "
             f"| {m.get('proximity_l2_jaccard', float('nan')):.4f} "
+            f"| {m.get('proximity_l1', float('nan')):.4f} "
+            f"| {m.get('l0_count_mean', float('nan')):.2f} "
+            f"| {m.get('sparsity_tol', float('nan')):.3f} "
             f"| {m.get('frac_oob', float('nan')):.3f} "
             f"| {m.get('immutable_drift_mean', float('nan')):.4f} "
             f"| {m.get('true_actionability', float('nan')):.3f} |"
         )
+
+    cat_rows = [m for m in all_rows if "cat_change_rate" in m]
+    if cat_rows:
+        lines += [
+            "",
+            "### Categorical-aware distances (datasets with one-hot columns)",
+            "",
+            "Pure L2 over one-hot columns overstates distance — a single category "
+            "flip contributes ~1.41 to L2 on its own. These split the continuous "
+            "part from the decoded categorical part.",
+            "",
+            "| Dataset | Set | Prox L2 (continuous only) | Categorical change rate | "
+            "# categorical features |",
+            "|---------|-----|--------------------------|-------------------------|"
+            "------------------------|",
+        ]
+        for m in cat_rows:
+            lines.append(
+                f"| {m['dataset']} | {m['set']} "
+                f"| {m.get('proximity_l2_continuous', float('nan')):.4f} "
+                f"| {m.get('cat_change_rate', float('nan')):.3f} "
+                f"| {int(m.get('n_categorical_features', 0))} |"
+            )
     lines += [
         "",
         "## Notes",
         "",
         "- `validity`: fraction whose discriminator class == target (higher = better).",
         "- `lof_scores_cf`: mean negative-LOF plausibility on unclipped CFs (lower = better).",
-        "- `proximity_l2_jaccard`: mean L2 to factual on *valid* CFs (lower = closer).",
+        "- `proximity_l2_jaccard` / `proximity_l1`: mean L2 / L1 to factual on *valid* "
+        "CFs (lower = closer).",
+        "- `L0`: mean number of features changed by more than 1e-3; `Sparsity(tol)` is "
+        "that as a fraction. The exact-equality `sparsity` metric saturates at 1.0 for "
+        "continuously generated CFs and is not reported here.",
         "- `frac_oob`: fraction of CF rows with a feature outside [0,1] before clipping; "
         "the hard [0,1] candidate rejection keeps this at 0.",
         "- **Set 2** generates immutables too, so `true_actionability` < 1.0 and "
@@ -356,7 +445,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Experiment 4: beam-search CFs (frozen-immutable vs from-scratch)"
     )
-    parser.add_argument("--dataset", choices=["moons", "heloc", "all"], default="moons")
+    parser.add_argument(
+        "--dataset",
+        default="moons",
+        help="Comma-separated: any of moons, heloc, law (or 'all' = moons,heloc,law). "
+        "e.g. --dataset heloc,law",
+    )
     parser.add_argument("--beam-width", type=int, default=8)
     parser.add_argument("--n-candidates", type=int, default=6)
     parser.add_argument("--lambda-actionable", type=float, default=1.0)
@@ -374,8 +468,24 @@ def main() -> None:
         default="both",
         help="Which regime(s) to run (default: both).",
     )
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=DEFAULT_CHUNK,
+        help=f"Query points per batched beam call (default {DEFAULT_CHUNK}). "
+        "Bounds the per-step predict batch; results are chunk-invariant.",
+    )
     args = parser.parse_args()
-    datasets = ["moons", "heloc"] if args.dataset == "all" else [args.dataset]
+    _ALL = ["moons", "heloc", "law"]
+    datasets: List[str] = []
+    for tok in (t.strip() for t in args.dataset.split(",")):
+        if tok == "all":
+            datasets.extend(d for d in _ALL if d not in datasets)
+        elif tok in _ALL:
+            if tok not in datasets:
+                datasets.append(tok)
+        else:
+            parser.error(f"unknown dataset {tok!r}; choose from {_ALL} or 'all'")
     sets = _SETS if args.set == "both" else [s for s in _SETS if s[0] == args.set]
 
     settings = dict(
@@ -393,6 +503,7 @@ def main() -> None:
         lambda_immutable=args.lambda_actionable,
         max_context=args.max_context,
         max_test=args.max_test,
+        chunk_size=args.chunk_size,
     )
     all_rows = []
     for tag, freeze, label in sets:

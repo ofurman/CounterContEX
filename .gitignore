@@ -173,6 +173,7 @@ uv.lock
 # Zero-shot CF experiment artifacts
 experiments/zeroshot_cf/models/
 experiments/zeroshot_cf/results/data/
+experiments/zeroshot_cf/results/arrays/
 experiments/zeroshot_cf/vendor/
 experiments/zeroshot_cf/vendor
 

@@ -51,9 +51,11 @@ def load_dataset(name: str) -> DatasetBundle:
         raise FileNotFoundError(f"Dataset config not found: {config_path}")
 
     file_dataset = FileDataset(config_path=config_path)
-    preprocessing = PreprocessingPipeline([
-        ("minmax", MinMaxScalingStep()),
-    ])
+    preprocessing = PreprocessingPipeline(
+        [
+            ("minmax", MinMaxScalingStep()),
+        ]
+    )
     md = MethodDataset(file_dataset, preprocessing_pipeline=preprocessing)
 
     return DatasetBundle(
@@ -76,18 +78,21 @@ def get_actionable_immutable(
 
     For 'heloc': uses configs/heloc_actionability.yaml (Decision #2).
     For 'moons': both features are actionable, no immutables.
+    For 'law': every column is actionable, no immutables — follows the cel law.yaml
+        config, which marks all features (incl. the one-hot sex/race columns) actionable.
 
     Args:
-        name: Dataset name ('heloc' or 'moons').
+        name: Dataset name ('heloc', 'moons', or 'law').
         dataset: Optional pre-loaded DatasetBundle; if None the dataset is loaded
                  just to resolve feature names → column indices.
 
     Returns:
         Tuple of (actionable_column_indices, immutable_column_indices).
     """
-    if name == "moons":
+    # Datasets with no immutable subset: every column is actionable (Set 1 ≡ Set 2).
+    if name in ("moons", "law"):
         if dataset is None:
-            dataset = load_dataset("moons")
+            dataset = load_dataset(name)
         n = len(dataset.feature_names)
         return list(range(n)), []
 
@@ -102,7 +107,9 @@ def get_actionable_immutable(
 
         feature_names = dataset.feature_names
         immutable_idx = [feature_names.index(fn) for fn in immutable_names]
-        actionable_idx = [i for i in range(len(feature_names)) if i not in immutable_idx]
+        actionable_idx = [
+            i for i in range(len(feature_names)) if i not in immutable_idx
+        ]
         return actionable_idx, immutable_idx
 
-    raise ValueError(f"Unknown dataset: {name!r}. Supported: 'heloc', 'moons'.")
+    raise ValueError(f"Unknown dataset: {name!r}. Supported: 'heloc', 'moons', 'law'.")

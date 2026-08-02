@@ -318,14 +318,29 @@ def _prune(
     logdens: np.ndarray,
     beam_width: int,
 ) -> _Beams:
-    """Keep the top-`beam_width` rows per group by score (stable, deterministic)."""
-    keep_idx: List[int] = []
-    for g in np.unique(group):
-        gi = np.where(group == g)[0]
-        # Stable sort by descending score; ties broken by original order.
-        order = gi[np.argsort(-score[gi], kind="stable")]
-        keep_idx.extend(order[:beam_width].tolist())
-    keep_idx = np.asarray(sorted(keep_idx), dtype=np.int64)
+    """Keep the top-`beam_width` rows per group by score (stable, deterministic).
+
+    Vectorized: a single lexsort by (group asc, score desc, original index asc)
+    replaces the per-group ``np.where`` scan, which was O(n_groups x n_rows) and
+    dominated runtime on full-split evaluations. Tie-breaking is unchanged —
+    equal scores keep ascending original order — as is the ascending row order
+    of the returned beams.
+    """
+    n_rows = len(group)
+    if n_rows == 0:
+        return _Beams(rows=rows, group=group, score=score, logdens=logdens)
+
+    row_idx = np.arange(n_rows)
+    # Primary key is the last: group asc, then -score asc (= score desc), then idx asc.
+    order = np.lexsort((row_idx, -score, group))
+    g_sorted = group[order]
+
+    # Rank within each group: 0, 1, 2, ... restarting at every group boundary.
+    starts = np.r_[0, np.flatnonzero(g_sorted[1:] != g_sorted[:-1]) + 1]
+    sizes = np.diff(np.r_[starts, n_rows])
+    within_rank = np.arange(n_rows) - np.repeat(starts, sizes)
+
+    keep_idx = np.sort(order[within_rank < beam_width])
     return _Beams(
         rows=rows[keep_idx],
         group=group[keep_idx],
@@ -358,13 +373,23 @@ def _select_best(
     chosen_valid = np.zeros(m, dtype=bool)
     chosen_score = np.full(m, np.nan)
     chosen_logdens = np.full(m, np.nan)
-    for g in range(m):
-        gi = np.where(beams.group == g)[0]
-        best = gi[np.argmax(rank[gi])]
-        X_cf[g] = cf_rows[best]
-        chosen_valid[g] = valid[best] > 0
-        chosen_score[g] = beams.score[best]
-        chosen_logdens[g] = beams.logdens[best]
+
+    # Vectorized argmax-per-group (see _prune): sort by group asc, rank desc,
+    # index asc, then take the first row of each group. This matches the previous
+    # ``np.argmax`` semantics, which returned the lowest index among ties.
+    n_rows = len(cf_rows)
+    if n_rows:
+        row_idx = np.arange(n_rows)
+        order = np.lexsort((row_idx, -rank, beams.group))
+        g_sorted = beams.group[order]
+        first_pos = np.r_[0, np.flatnonzero(g_sorted[1:] != g_sorted[:-1]) + 1]
+        best_rows = order[first_pos]
+        groups_present = g_sorted[first_pos]
+
+        X_cf[groups_present] = cf_rows[best_rows]
+        chosen_valid[groups_present] = valid[best_rows] > 0
+        chosen_score[groups_present] = beams.score[best_rows]
+        chosen_logdens[groups_present] = beams.logdens[best_rows]
 
     immut = list(immutable_idx)
     if immut:
