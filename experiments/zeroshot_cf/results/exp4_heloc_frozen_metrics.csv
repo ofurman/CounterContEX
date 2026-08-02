@@ -1,2 +1,2 @@
-dataset,set,freeze_immutable,validity,lof_scores_cf,sparsity,actionability,true_actionability,proximity_l2_jaccard,frac_oob,immutable_drift_mean,immutable_drift_max,n_oob_fallback
-heloc,frozen,True,0.13333333333333333,7918099.357249548,0.7391304347826086,0.0,1.0,0.4545595633621251,0.0,0.0,0.0,0
+dataset,set,freeze_immutable,validity,lof_scores_cf,sparsity,actionability,true_actionability,proximity_l2_jaccard,proximity_l1,l0_count_mean,l0_count_valid,sparsity_tol,n_valid,n_total,frac_oob,immutable_drift_mean,immutable_drift_max,n_oob_fallback
+heloc,frozen,True,0.3761950286806883,6528790.513981599,0.7391720009975892,0.0,0.998565965583174,0.5607332487852666,1.4371863097003323,10.759082217973232,11.621346886912326,0.4677861833901405,787.0,2092.0,0.0014340344168260039,0.0,0.0,0
