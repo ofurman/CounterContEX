@@ -47,6 +47,21 @@ results.
 
 ### Why 20043781 timed out
 
+**CORRECTED 2026-08-02 — the diagnosis below is wrong.** The log reads
+`Prepared 136 packages in 58m 29s` / `Failed to hardlink files…` / `Installed 136
+packages in 55.34s`. The hardlink warning belongs to the *install* phase, which took
+55 seconds; only 2 such warnings appear in 239 lines of stderr. The hour went to
+**downloading and preparing 136 packages from PyPI into a cold cache**, not to the
+cross-filesystem copy.
+
+Consequence: moving `UV_CACHE_DIR` to `${HEAVY}/cache/uv` abandoned the warm 5.1 GB
+cache, which still sits at `/net/scratch/hscra/.../countercontex/cache/uv`; the new one
+is 4 K. The correct fix was `UV_LINK_MODE=copy` on the original path. Harmless in
+practice — the venv now holds all 136 locked packages, so `uv sync --frozen` verifies
+and skips. Setup 20141858 subsequently COMPLETED in 14 min.
+
+The original (incorrect) reasoning is retained below for the record.
+
 Not TabPFN, not the workload — it reached step 4 of 5 (vendored `ce-library`
 installed) and was killed entering verification. `_common.sh` had:
 
@@ -94,7 +109,20 @@ Scored metrics:
 `recompute_metrics.py` scores any saved cell without regenerating — generation is
 the expensive step (~0.65 s/CF on MPS).
 
-## The open scientific question
+## The open scientific question — RESOLVED 2026-08-02
+
+**The LOF gap was an artifact. See `PROJECT_STATE.md` finding 3.** Under valid-CFs-only
+with median-log aggregation (the reference convention) HELOC frozen scores 0.0345
+against from-scratch's -0.0136 — no gap. The 6.5e6 came from averaging over all 2092
+CFs including the 1305 invalid ones, and from 115 rows that are HELOC's all-zeros
+missing-data code, duplicated 473 times in `X_train`, where LOF diverges numerically.
+
+The hypothesis below — that freezing leaves a conditional with no target-class mass —
+is also **refuted**: the discriminator is logistic regression, so reachability is
+closed-form, and all 2092 rows are feasible. The 1305 misses are a search failure, not
+an infeasible constraint set.
+
+**Validity 0.376 vs 1.000 stands and is the real finding.** Original text follows.
 
 **HELOC frozen has LOF 6.5×10⁶ against Law's 8.72 — a ~750 000× gap — and
 validity 0.376 against 1.000.** That is not a tuning difference.
