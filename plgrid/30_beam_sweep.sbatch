@@ -89,6 +89,29 @@ probs-tail|--candidate-probs tail
 "
 CONFIGS="${CONFIGS:-${DEFAULT_CONFIGS}}"
 
+###############################################################################
+# Cell-scoped mirroring.
+#
+# _common.sh's mirror_results rsyncs the WHOLE results tree to the shared MIRROR.
+# That is correct for one job at a time, but the sweep runs one job per cell
+# concurrently, and they share MIRROR. The hazard: a job that starts late pulls a
+# sibling's half-written npz in the _common.sh startup rsync, then pushes that
+# stale copy back over the sibling's finished file — rsync makes the destination
+# match the source, and does not care which side is newer.
+#
+# Overriding the function to mirror only this cell's own artifacts removes the
+# shared-write path entirely, so the cells cannot interfere no matter how their
+# start times interleave.
+###############################################################################
+mirror_results() {
+    echo "--- mirroring ${DATASET}/${TAG} -> ${MIRROR}"
+    mkdir -p "${MIRROR}/arrays/sweep" "${MIRROR}/sweep"
+    rsync -a --include="exp4_${DATASET}_${TAG}__*_cfs.npz" --exclude='*' \
+        "${RESULTS}/arrays/sweep/" "${MIRROR}/arrays/sweep/" || true
+    rsync -a --include="exp4_${DATASET}_${TAG}__*" --exclude='*' \
+        "${RESULTS}/sweep/" "${MIRROR}/sweep/" || true
+}
+
 trap mirror_results EXIT
 
 nvidia-smi || echo "WARNING: nvidia-smi not on PATH"
