@@ -127,7 +127,12 @@ n_run=0
 n_skip=0
 n_total=$(echo "${CONFIGS}" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')
 
-while IFS= read -r line; do
+# Read the config list on FD 3, not stdin. srun CONSUMES STDIN — with the loop fed
+# by a here-string on stdin, the first srun drained the remaining configs and the
+# loop exited after one iteration, reporting "sweep complete" and exit 0. Nothing
+# in the log said anything was wrong. FD 3 puts the list out of srun's reach, and
+# the </dev/null on the srun below is the second line of defence.
+while IFS= read -r line <&3; do
     # Skip blank lines (the heredoc-style list has leading/trailing newlines).
     [ -z "${line//[[:space:]]/}" ] && continue
 
@@ -157,7 +162,7 @@ while IFS= read -r line; do
         --max-test "${MAX_TEST}" \
         --chunk-size "${CHUNK}" \
         --run-id "${RUN_ID}" \
-        ${EXTRA}
+        ${EXTRA} < /dev/null
     echo "--- ${DATASET}/${TAG} ${RUN_ID} done in ${SECONDS}s"
 
     test -s "${npz}" || { echo "ERROR: ${npz} not written" >&2; exit 1; }
@@ -165,7 +170,15 @@ while IFS= read -r line; do
     # Mirror after every config, not just at the end: a job that dies on config 9
     # keeps configs 1-8 in durable storage.
     mirror_results
-done <<< "${CONFIGS}"
+done 3<<< "${CONFIGS}"
+
+# A silent early exit is the failure mode this job is most exposed to, so assert
+# the loop actually visited every config rather than trusting exit 0.
+if [ "$((n_run + n_skip))" -ne "${n_total}" ]; then
+    echo "ERROR: visited $((n_run + n_skip)) of ${n_total} configs — the config" >&2
+    echo "       loop exited early. Check whether something consumed stdin." >&2
+    exit 1
+fi
 
 echo ""
 echo "=== sweep complete: ${n_run} generated, ${n_skip} skipped, ${n_total} total ==="
