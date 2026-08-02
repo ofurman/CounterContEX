@@ -125,6 +125,8 @@ echo "${CONFIGS}" | sed '/^[[:space:]]*$/d' | sed 's/^/    /'
 
 n_run=0
 n_skip=0
+n_fail=0
+failed=""
 n_total=$(echo "${CONFIGS}" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')
 
 # Read the config list on FD 3, not stdin. srun CONSUMES STDIN — with the loop fed
@@ -154,7 +156,15 @@ while IFS= read -r line <&3; do
         continue
     fi
 
+    # A config that crashes must not take the rest of the sweep with it. Some
+    # configurations are legitimately infeasible rather than buggy — e.g. Law at
+    # --max-context 128, where a small context subsample can leave a rare one-hot
+    # category constant and TabPFN's bar distribution degenerates to a single bar
+    # (assert self.num_bars > 1). That is a *result* about the axis, and the
+    # remaining configs are still worth having. Record it and carry on; the exit
+    # status at the end still reports that something failed.
     SECONDS=0
+    set +e
     # shellcheck disable=SC2086  # EXTRA is a deliberate word-split flag list
     srun python -m experiments.zeroshot_cf.exp4_beam_search \
         --dataset "${DATASET}" \
@@ -163,9 +173,16 @@ while IFS= read -r line <&3; do
         --chunk-size "${CHUNK}" \
         --run-id "${RUN_ID}" \
         ${EXTRA} < /dev/null
-    echo "--- ${DATASET}/${TAG} ${RUN_ID} done in ${SECONDS}s"
+    rc=$?
+    set -e
 
-    test -s "${npz}" || { echo "ERROR: ${npz} not written" >&2; exit 1; }
+    if [ "${rc}" -ne 0 ] || [ ! -s "${npz}" ]; then
+        echo "FAILED: ${DATASET}/${TAG} ${RUN_ID} (rc=${rc}) after ${SECONDS}s" >&2
+        failed="${failed} ${RUN_ID}"
+        n_fail=$((n_fail + 1))
+        continue
+    fi
+    echo "--- ${DATASET}/${TAG} ${RUN_ID} done in ${SECONDS}s"
     n_run=$((n_run + 1))
     # Mirror after every config, not just at the end: a job that dies on config 9
     # keeps configs 1-8 in durable storage.
@@ -174,14 +191,15 @@ done 3<<< "${CONFIGS}"
 
 # A silent early exit is the failure mode this job is most exposed to, so assert
 # the loop actually visited every config rather than trusting exit 0.
-if [ "$((n_run + n_skip))" -ne "${n_total}" ]; then
-    echo "ERROR: visited $((n_run + n_skip)) of ${n_total} configs — the config" >&2
-    echo "       loop exited early. Check whether something consumed stdin." >&2
+if [ "$((n_run + n_skip + n_fail))" -ne "${n_total}" ]; then
+    echo "ERROR: visited $((n_run + n_skip + n_fail)) of ${n_total} configs — the" >&2
+    echo "       config loop exited early. Did something consume stdin?" >&2
     exit 1
 fi
 
 echo ""
-echo "=== sweep complete: ${n_run} generated, ${n_skip} skipped, ${n_total} total ==="
+echo "=== sweep complete: ${n_run} generated, ${n_skip} skipped, ${n_fail} failed," \
+     "${n_total} total ==="
 ls -la "${RESULTS}/arrays/sweep" 2>/dev/null || echo "no sweep arrays!"
 
 # Deliberately NOT scoring here. exp7_sweep_table.py needs only the arrays and no
@@ -191,3 +209,10 @@ ls -la "${RESULTS}/arrays/sweep" 2>/dev/null || echo "no sweep arrays!"
 
 echo ""
 echo "Job ${SLURM_JOB_ID} finished at $(date)"
+
+# Non-zero exit so a partially-failed sweep does not read as COMPLETED in sacct.
+# The arrays that DID generate are already mirrored, so this loses nothing.
+if [ "${n_fail}" -ne 0 ]; then
+    echo "FAILED CONFIGS (${n_fail}):${failed}" >&2
+    exit 2
+fi
