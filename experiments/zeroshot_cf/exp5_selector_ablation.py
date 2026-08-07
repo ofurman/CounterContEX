@@ -304,10 +304,17 @@ def write_summary() -> None:
 
 
 def main() -> None:
+    from experiments.zeroshot_cf.local_data import LOCAL_DATASET_NAMES
+
     parser = argparse.ArgumentParser(
         description="Experiment 5: selector ablation (prob_ascent vs class_divergence)"
     )
-    parser.add_argument("--dataset", choices=["moons", "heloc", "all"], default="moons")
+    parser.add_argument(
+        "--dataset",
+        choices=["moons", "heloc", "all", *sorted(LOCAL_DATASET_NAMES)],
+        default="moons",
+        help="'all' runs moons+heloc; local (CETGFN-ported) datasets run individually.",
+    )
     parser.add_argument("--tau", type=float, default=TAU,
                         help=f"Flip probability threshold (default: {TAU}).")
     parser.add_argument("--temperature", type=float, default=TEMPERATURE,

@@ -1,22 +1,23 @@
 """Dataset loading for the zero-shot CF experiment.
 
 Loads HELOC and MOONS via cel, applies MinMax scaling (fit on train),
-and provides the HELOC actionable/immutable feature split.
+and provides the HELOC actionable/immutable feature split. Also dispatches to
+local_data.py for datasets ported from ../CETGFN (adult, german, etc.) — that
+path has no dependency on cel, so cel imports below are deferred into
+load_dataset() rather than done at module level.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple
+from typing import TYPE_CHECKING, List, Tuple
 
 import numpy as np
 import yaml
 
-from cel.datasets.file_dataset import FileDataset
-from cel.datasets.method_dataset import MethodDataset
-from cel.preprocessing.pipeline import PreprocessingPipeline
-from cel.preprocessing.scalers import MinMaxScalingStep
+if TYPE_CHECKING:
+    from cel.datasets.method_dataset import MethodDataset
 
 CEL_REPO = Path(__file__).parent / "vendor" / "counterfactuals"
 CONFIGS_DIR = Path(__file__).parent / "configs"
@@ -41,11 +42,24 @@ class DatasetBundle:
 
 
 def load_dataset(name: str) -> DatasetBundle:
-    """Load a cel dataset by name ('heloc' or 'moons'), MinMax-scaled.
+    """Load a dataset by name, MinMax-scaled.
 
-    Split is 80/20 stratified with random_state=42 (cel default).
-    Scaling is fit on X_train only.
+    'heloc' and 'moons' come from cel (80/20 stratified split, random_state=42,
+    cel default). Everything in local_data.LOCAL_DATASET_NAMES (ported from
+    ../CETGFN — adult, bank, german, etc.) is dispatched to
+    local_data.load_local_dataset instead, using that project's own train/test
+    split. Scaling is fit on X_train only in both cases.
     """
+    from experiments.zeroshot_cf.local_data import LOCAL_DATASET_NAMES, load_local_dataset
+
+    if name in LOCAL_DATASET_NAMES:
+        return load_local_dataset(name)
+
+    from cel.datasets.file_dataset import FileDataset
+    from cel.datasets.method_dataset import MethodDataset
+    from cel.preprocessing.pipeline import PreprocessingPipeline
+    from cel.preprocessing.scalers import MinMaxScalingStep
+
     config_path = CEL_REPO / "config" / "datasets" / f"{name}.yaml"
     if not config_path.exists():
         raise FileNotFoundError(f"Dataset config not found: {config_path}")
@@ -76,15 +90,27 @@ def get_actionable_immutable(
 
     For 'heloc': uses configs/heloc_actionability.yaml (Decision #2).
     For 'moons': both features are actionable, no immutables.
+    For local_data.LOCAL_DATASET_NAMES: uses that dataset's own config.json
+    `immutable` list (ported from ../CETGFN).
 
     Args:
-        name: Dataset name ('heloc' or 'moons').
+        name: Dataset name ('heloc', 'moons', or a local CETGFN dataset name).
         dataset: Optional pre-loaded DatasetBundle; if None the dataset is loaded
                  just to resolve feature names → column indices.
 
     Returns:
         Tuple of (actionable_column_indices, immutable_column_indices).
     """
+    from experiments.zeroshot_cf.local_data import (
+        LOCAL_DATASET_NAMES,
+        get_local_actionable_immutable,
+    )
+
+    if name in LOCAL_DATASET_NAMES:
+        if dataset is None:
+            dataset = load_dataset(name)
+        return get_local_actionable_immutable(name, dataset.feature_names)
+
     if name == "moons":
         if dataset is None:
             dataset = load_dataset("moons")
@@ -105,4 +131,7 @@ def get_actionable_immutable(
         actionable_idx = [i for i in range(len(feature_names)) if i not in immutable_idx]
         return actionable_idx, immutable_idx
 
-    raise ValueError(f"Unknown dataset: {name!r}. Supported: 'heloc', 'moons'.")
+    raise ValueError(
+        f"Unknown dataset: {name!r}. Supported: 'heloc', 'moons', or one of "
+        f"local_data.LOCAL_DATASET_NAMES."
+    )

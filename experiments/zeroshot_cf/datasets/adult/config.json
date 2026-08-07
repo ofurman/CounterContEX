@@ -1,0 +1,36 @@
+{
+  "numerical_columns": [
+    "age",
+    "capital-gain",
+    "capital-loss",
+    "hours-per-week"
+  ],
+  "numerical_bins": {
+    "age": [
+      [ 18 , 30], [ 30 , 45], [45 , 60], [60 , 75]
+    ],
+    "capital-gain": [
+      [-1e9, 0], [0, 1e9]
+    ],
+    "capital-loss": [
+      [-1e9, 0], [0, 1e9]
+    ],
+    "hours-per-week": [
+      [0 , 20], [20 , 40], [40 , 100]
+    ]
+  },
+  "categorical_columns": [
+    "workclass",
+    "education-num",
+    "marital-status",
+    "occupation",
+    "relationship",
+    "race",
+    "sex",
+    "native-country"
+  ],
+  "target_column": "class",
+  "immutable": ["race","sex","native-country","marital-status"],
+  "increasing": ["age","education-num"],
+  "decreasing": []
+}

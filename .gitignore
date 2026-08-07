@@ -176,6 +176,13 @@ experiments/zeroshot_cf/results/data/
 experiments/zeroshot_cf/vendor/
 experiments/zeroshot_cf/vendor
 
+# CETGFN-derived local datasets (ported from ../CETGFN): CSVs and checkpoints are
+# large binary/data files, gitignored like the rest of this experiment's artifacts.
+# config.json (small, hand-authored actionability/discretization metadata) stays tracked.
+
+# SLURM job output
+experiments/zeroshot_cf/slurm/logs/
+
 # Dataset inputs resolved by the cel loader at repo root (regenerated/downloaded)
 data/
 

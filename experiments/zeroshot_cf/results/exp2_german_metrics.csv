@@ -1,0 +1,2 @@
+dataset,validity,lof_scores_cf,sparsity,actionability,true_actionability,proximity_l2_jaccard,frac_oob,n_failed
+german,0.4,1.2380060708382956,0.57,0.0,1.0,2.4664992806106465,0.0,0

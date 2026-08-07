@@ -98,6 +98,8 @@ def generate_counterfactuals(
     actionable_set: str = "full",
     reduced_k: int = 6,
     max_test: Optional[int] = None,
+    base_seed: int = 42,
+    disc_type: str = "lr",
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict]:
     """Generate CFs for one dataset. Returns (X_test, y_test, X_cf, info_dict).
 
@@ -109,6 +111,12 @@ def generate_counterfactuals(
                         'reduced' is treated as 'full' (only 2 actionable features).
         reduced_k: Number of top actionable features to mask when actionable_set='reduced'.
         max_test: Override for the number of test points (default: from _DATASET_PARAMS).
+        base_seed: Base random_state for the per-target-class sampler (default: 42,
+                   matching the previously-hardcoded value). Vary this across repeated
+                   calls to draw independent CFs per test point (e.g. for a diversity
+                   metric) — each call is otherwise fully deterministic.
+        disc_type: Validity-oracle classifier — 'lr' (default) or 'mlp'. Forwarded to
+                   discriminator.train_discriminator; cached separately per disc_type.
     """
     from experiments.zeroshot_cf.checkpoints import get_models
     from experiments.zeroshot_cf.data import get_actionable_immutable, load_dataset
@@ -140,7 +148,7 @@ def generate_counterfactuals(
     print(f"Test set (capped): {n} points")
 
     disc_model = train_discriminator(
-        X_train, y_train, X_test, y_test, dataset_name
+        X_train, y_train, X_test, y_test, dataset_name, disc_type=disc_type
     )
 
     # Determine target class for each test point: flip the predicted class
@@ -152,7 +160,7 @@ def generate_counterfactuals(
     frozen_cols: List[int] = []
     if actionable_set == "reduced":
         if dataset_name == "moons":
-            print("  [INFO] reduced≡full for MOONS (only 2 actionable features). Using full.")
+            print("  [INFO] reduced==full for MOONS (only 2 actionable features). Using full.")
             mask_cols = list(actionable_idx)
         else:
             # Top-reduced_k actionable features by |LR discriminator coef|
@@ -200,7 +208,7 @@ def generate_counterfactuals(
             append_target=True,
             n_permutations=n_permutations,
             temperature=temperature,
-            random_state=42 + target_cls,
+            random_state=base_seed + target_cls,
         )
         ctx_target = target_cls if context_type == "target_only" else None
         sampler.set_context(
@@ -222,7 +230,7 @@ def generate_counterfactuals(
 
     if n_failed:
         print(f"\n  [robust] {n_failed}/{len(X_test)} rows failed imputation "
-              f"(left as factual → counted invalid).")
+              f"(left as factual -> counted invalid).")
 
     return X_test, y_test, X_cf, {
         "n_failed": n_failed,
@@ -449,12 +457,15 @@ def write_summary(all_metrics: List[Dict], temperature: float = TEMPERATURE,
 
 
 def main() -> None:
+    from experiments.zeroshot_cf.local_data import LOCAL_DATASET_NAMES
+
     parser = argparse.ArgumentParser(description="Experiment 2: counterfactual generation")
     parser.add_argument(
         "--dataset",
-        choices=["moons", "heloc", "all"],
+        choices=["moons", "heloc", "all", *sorted(LOCAL_DATASET_NAMES)],
         default="moons",
-        help="Dataset to run (default: moons)",
+        help="Dataset to run (default: moons). 'all' runs moons+heloc; local "
+             "(CETGFN-ported) datasets run individually.",
     )
     parser.add_argument(
         "--temperature",

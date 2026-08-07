@@ -1,0 +1,26 @@
+{
+  "numerical_columns": [
+    "age",
+    "balance",
+    "day",
+    "duration",
+    "campaign",
+    "pdays",
+    "previous"
+  ],
+  "categorical_columns": [
+    "job",
+    "marital",
+    "education",
+    "default",
+    "housing",
+    "loan",
+    "contact",
+    "month",
+    "poutcome"
+  ],
+  "target_column": "y",
+  "immutable": [],
+  "increasing": [],
+  "decreasing": []
+}

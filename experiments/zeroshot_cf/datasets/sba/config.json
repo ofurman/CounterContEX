@@ -1,0 +1,20 @@
+{
+  "numerical_columns": [
+    "Term",
+    "NoEmp",
+    "CreateJob",
+    "RetainedJob",
+    "ChgOffPrinGr",
+    "GrAppv",
+    "SBA_Appv",
+    "Portion"
+  ],
+  "categorical_columns": [
+    "Selected",
+    "UrbanRural",
+    "New",
+    "RealEstate",
+    "Recession"
+  ],
+  "target_column": "label"
+}

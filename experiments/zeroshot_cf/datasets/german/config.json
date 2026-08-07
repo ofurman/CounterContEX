@@ -1,0 +1,42 @@
+{
+  "numerical_columns": [
+    "Months",
+    "Credit-amount",
+    "age"
+  ],
+  "numerical_bins": {
+    "Months": [
+      [4, 12], [12, 18], [18, 24], [24, 72]
+    ],
+    "Credit-amount": [
+      [247 , 1365.5], [1365.5 , 2319.5], [2319.5 , 3972.25], [3972.25 , 18425]
+    ],
+    "age": [
+      [19 , 27], [27 , 33], [33 , 42], [42 , 75]
+    ]
+  },
+  "categorical_columns": [
+    "Checking-account",
+    "Credit-history",
+    "Purpose",
+    "Savings-account",
+    "Present-employment-since",
+    "Insatllment-rate",
+    "Personal-status",
+    "Other-debtors",
+    "Present-residence-since",
+    "Property",
+    "Other-installment-plans",
+    "Housing",
+    "Number-of-existing-credits",
+    "Job",
+    "Number-of-people-being-lible",
+    "Telephone",
+    "Foreign-worker"
+  ],
+  "target_column": "target",  
+  "immutable": ["Foreign-worker","Number-of-people-being-lible","Personal-status","Purpose"], 
+  "increasing": ["age","Present-employment-since","Present-residence-since","Months"],
+  "decreasing": []
+
+}

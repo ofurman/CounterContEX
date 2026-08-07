@@ -1,4 +1,4 @@
-# Experiment 2: Counterfactual Generation â€” Summary
+# Experiment 2: Counterfactual Generation — Summary
 
 Settings: temperature=1.0, n_permutations=5, max_context=256, context_type=target_only, ordering=random, actionable_set=full
 
@@ -6,8 +6,7 @@ Settings: temperature=1.0, n_permutations=5, max_context=256, context_type=targe
 
 | Dataset | Validity | LOF | Sparsity | True-action | Proximity L2 | OOB frac |
 |---------|---------|-----|---------|------------|-------------|---------|
-| moons | 0.995 | 1.060 | 1.000 | 1.000 | 0.6742 | 0.010 |
-| heloc | 0.538 | 5682014774.035 | 0.705 | 0.999 | 1.6905 | 0.653 |
+| german | 0.400 | 1.238 | 0.570 | 1.000 | 2.4665 | 0.000 |
 
 ## Notes
 

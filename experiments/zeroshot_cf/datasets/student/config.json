@@ -1,0 +1,38 @@
+{
+  "numerical_columns": [
+    "age",
+    "absences",
+    "G1",
+    "G2"
+  ],
+  "numerical_bins": {
+    "age": [
+      [15 , 16], [16 , 17], [17 , 22]
+    ],
+    "absences": [
+      [0 , 4], [4 , 32]
+    ],
+    "G1": [
+      [0 , 10], [10 , 13], [13 , 19]
+    ],
+    "G2": [
+      [0 , 10], [10 , 13], [13 , 19]
+    ]
+  },
+  "categorical_columns": [
+    "Medu",
+    "Fedu",
+    "studytime",
+    "famsup",
+    "higher",
+    "internet",
+    "romantic",
+    "freetime",
+    "goout",
+    "health"
+  ],
+  "target_column": "label",
+  "immutable": ["Medu", "Fedu", "famsup", "G1"], 
+  "increasing": ["age"],
+  "decreasing": []
+}

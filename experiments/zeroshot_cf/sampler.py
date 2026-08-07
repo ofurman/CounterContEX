@@ -370,7 +370,7 @@ class ConditionalDensitySampler:
         print(f"[sampler] impute_masked: {len(X_query)} rows, "
               f"{len(mask_cols)} masked cols, "
               f"t={self.temperature}, n_perm={self.n_permutations} "
-              f"→ {elapsed:.2f}s")
+              f"-> {elapsed:.2f}s")
 
         X_filled = X_filled_tensor.cpu().numpy().astype(np.float64)
 

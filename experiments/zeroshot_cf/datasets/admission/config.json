@@ -1,0 +1,28 @@
+{
+  "numerical_columns": [
+    "GRE Score",
+    "TOEFL Score",
+    "CGPA"
+  ],
+  "numerical_bins": {
+    "GRE Score": [
+      [290, 312], [312, 322], [322, 340]
+    ],
+    "TOEFL Score": [
+      [92, 104], [104, 110], [110, 120]
+    ],
+    "CGPA": [
+      [6.79, 8.27], [8.27, 8.857], [8.857, 10]
+    ]
+  },
+  "categorical_columns": [
+    "University Rating",
+    "SOP",
+    "LOR",
+    "Research"
+  ],
+  "target_column": "Chance of Admit",
+  "immutable": ["University Rating"], 
+  "increasing": ["Research"],
+  "decreasing": []
+}

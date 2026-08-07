@@ -1,0 +1,2 @@
+dataset,l2c_validity,l2c_sparsity,l2c_diversity_weight_fast,l2c_hmean_sparsity_diversity,n_queries,n_repeats,search_time_s
+german,57.99999999999999,41.55172413793103,21.200000000000003,28.075612704692826,10,5,331.10320925712585

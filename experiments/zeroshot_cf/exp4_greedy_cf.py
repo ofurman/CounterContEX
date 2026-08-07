@@ -354,8 +354,15 @@ def run_dataset(
 
 
 def main() -> None:
+    from experiments.zeroshot_cf.local_data import LOCAL_DATASET_NAMES
+
     parser = argparse.ArgumentParser(description="Experiment 4: iterative greedy CF")
-    parser.add_argument("--dataset", choices=["moons", "heloc", "all"], default="moons")
+    parser.add_argument(
+        "--dataset",
+        choices=["moons", "heloc", "all", *sorted(LOCAL_DATASET_NAMES)],
+        default="moons",
+        help="'all' runs moons+heloc; local (CETGFN-ported) datasets run individually.",
+    )
     parser.add_argument(
         "--selector",
         choices=["prob_ascent", "class_divergence"],

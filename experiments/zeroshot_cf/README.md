@@ -72,6 +72,124 @@ in-context conditioning set passed to `TabPFNUnsupervisedModel.fit()` at inferen
 - **Query (test) rows evaluated**: capped by `--max-test` (default MOONS 100, HELOC 50; use
   `-1` for the **full** stratified test split — MOONS 200, HELOC 2092).
 
+## Local datasets (ported from CETGFN)
+
+Ten additional datasets are ported from the sibling `CETGFN` (CounterFlowNet)
+project into `experiments/zeroshot_cf/datasets/<name>/`: `adult`,
+`adult_dicoflex`, `bank`, `default`, `german`, `gmc`, `lending-club`, `sba`,
+`student`, `admission`. Each folder holds:
+
+- `config.json` — tracked in git; numerical/categorical columns, target column,
+  actionability (`immutable`/`increasing`/`decreasing`), and (for the
+  discretized set below) fixed bin edges.
+- `train.csv` / `val.csv` / `test.csv`, `model.pt`, `flow.pt` (and `model.pkl`
+  where CETGFN produced one) — gitignored (large data/checkpoint files, same
+  convention as `models/` and `vendor/`). The classifier/flow checkpoints are
+  copied through for reference only; they are **not** loaded by this
+  experiment — `discriminator.py` still trains its own sklearn oracle from the
+  CSVs, same as for `heloc`/`moons`.
+
+Loading is handled by `local_data.py` and dispatched transparently from
+`data.load_dataset()` / `data.get_actionable_immutable()`, so these names work
+anywhere `--dataset` is accepted (`exp4_greedy_cf.py`, `exp5_selector_ablation.py`,
+`exp6_context_ablation.py`):
+
+```bash
+uv run python experiments/zeroshot_cf/exp4_greedy_cf.py --dataset german --selector prob_ascent
+```
+
+**Discretization**: `german`, `adult`, `admission`, and `student` keep
+`numerical_bins` in their `config.json` and are binned into ordinal codes at
+load time — the same fixed, hand-authored bin edges rgfn's `L2CDiscretizer`
+uses for these four datasets upstream — before the usual MinMax scaling. The
+other six datasets had `numerical_bins` stripped when ported and stay
+continuous (MinMax only, no binarisation), matching how `heloc`/`moons` are
+already handled here.
+
+## DiCE baseline (comparison against CETGFN's L2C metrics)
+
+`dice_baseline.py` runs Microsoft's DiCE (`dice-ml`, method="random") against
+this experiment's own sklearn discriminator, then reports the same four
+metrics `L2CCounterfactualMetrics` computes in ../CETGFN
+(`rgfn/trainer/metrics/counterfactual_metrics.py`, wired to
+`configs/l2c_counterfactual.gin`): validity, sparsity, diversity, and their
+harmonic mean — reimplemented in pure numpy so no `cel`/`rgfn`/PyTorch
+dependency is needed for this comparison.
+
+```bash
+uv run python experiments/zeroshot_cf/dice_baseline.py --dataset german --total-cfs 5
+```
+
+For `german` (a `DISCRETIZED_DATASETS` entry — see above), all features are
+treated as categorical for DiCE (matching their finite, L2C-binned value
+sets), and `features_to_vary` is restricted to the actionable (non-immutable)
+columns. On the full 200-row test split (`--max-test 0`, `total_CFs=5`,
+seed=42): validity 100.0, sparsity 89.6, diversity 13.9, harmonic mean 24.0
+— every query found a valid flip; results land in
+`results/dice_baseline_german_metrics.csv`.
+
+## exp2 (TabPFN zero-shot) L2C comparison
+
+`exp2_l2c_report.py` runs `exp2_counterfactuals.py`'s TabPFN zero-shot CF
+generation `--n-repeats` times (each with a different sampler seed, via the
+`base_seed` param added to `generate_counterfactuals`/`run_dataset`) and pools
+the results to report the same `l2c_metrics.py` metrics as the DiCE baseline
+above — exp2 normally emits exactly one CF per test point, so repeats are
+needed for a non-degenerate `l2c_diversity_weight_fast`.
+
+```bash
+HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/exp2_l2c_report.py \
+    --dataset german --n-repeats 5 --max-test 10 --n-permutations 1
+```
+
+TabPFN's per-column autoregressive imputation is comparatively expensive
+(unlike DiCE's baseline, which only needs a `.predict()` call per candidate) —
+budget `--max-test`/`--n-repeats`/`--n-permutations` accordingly; a GPU build
+of `torch` (`TABPFN_DEVICE=cuda`) is close to an order of magnitude faster
+than CPU here.
+
+german, 5 repeats x 10 queries, `n_permutations=1`, seed=42: validity 58.0,
+sparsity 41.6, diversity 21.2, harmonic mean 28.1 (`results/exp2_l2c_german_metrics.csv`)
+— vs. DiCE-random's validity 100.0 / sparsity 89.6 / diversity 13.9 / hmean
+24.0 above. TabPFN's joint-imputation draw changes more of the 16 actionable
+columns per edit and isn't guaranteed to flip the classifier's prediction
+(unlike DiCE, which explicitly searches for a flip), so lower validity and
+sparsity are expected; its per-column posterior draws also explore a bit more
+per-query variation, hence the slightly higher diversity.
+
+## Full benchmark (all 10 local datasets, classifier + metric-suite per dataset)
+
+`run_full_benchmark.py` pairs each ported dataset with a classifier type and
+metric suite (`BENCHMARK_CONFIG`): german/admission use logistic regression,
+adult/student use an MLP, all four report `l2c_metrics.py`; the six
+non-discretized datasets (adult_dicoflex, bank, default, gmc, lending-club,
+sba) use an MLP and `dicoflex_metrics.py` (a numpy port of CETGFN's
+`DiCoFlexCounterfactualMetrics`). Each query point gets `--n-repeats` (default
+5) independent TabPFN generation passes, different sampler seed each time,
+pooled before scoring — so `l2c_diversity_weight_fast` /
+`dicoflex_pairwise_distance` are non-degenerate (confirmed on a german smoke
+test: 18.5% diversity at n_repeats=5, vs. 0 at n_repeats=1). This makes the
+benchmark ~5x more expensive than a single pass; use `--n-repeats 1` to fall
+back to single-pass (diversity always 0, 5x cheaper).
+
+Each dataset is also logged to Weights & Biases as its own run, named
+`<dataset>-<disc_type>-<metric_suite>-mt<max_test>-nr<n_repeats>-seed<seed>`
+(e.g. `german-lr-l2c-mt256-nr5-seed42`) so a run is identifiable at a glance —
+config (dataset/disc_type/metric_suite/max_test/n_repeats/n_permutations/seed)
+and all metrics are logged. Needs `wandb` (`uv sync --extra wandb`) and either
+network access or `WANDB_MODE=offline` (sync later with `wandb sync`); disable
+entirely with `--no-wandb`.
+
+```bash
+# Smoke test (fast) before a real run
+uv run python experiments/zeroshot_cf/run_full_benchmark.py --max-test 1
+
+# Full run — expensive (256 points x 5 repeats x 10 datasets); see
+# slurm/README.md for per-dataset timing estimates and a SLURM array job to
+# run it on a cluster instead of locally.
+HF_HUB_OFFLINE=1 TABPFN_DEVICE=cuda uv run python experiments/zeroshot_cf/run_full_benchmark.py --max-test 256
+```
+
 ## Results
 
 Metric reports are committed to `experiments/zeroshot_cf/results/`.
