@@ -1,3 +1,5 @@
+#  Copyright (c) Prior Labs GmbH 2026.
+
 """TabICL conditional-density adapter for greedy counterfactual generation.
 
 The adapter preserves the existing Y-as-an-appended-column construction while

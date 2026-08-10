@@ -1,3 +1,5 @@
+#  Copyright (c) Prior Labs GmbH 2026.
+
 """Experiment 8: greedy counterfactuals with the TabICLv2 backend.
 
 This runner intentionally does not repeat the context ablation. It fixes the

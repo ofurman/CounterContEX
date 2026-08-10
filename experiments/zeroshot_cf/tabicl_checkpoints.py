@@ -1,3 +1,5 @@
+#  Copyright (c) Prior Labs GmbH 2026.
+
 """Local checkpoint staging for the TabICL counterfactual backend.
 
 TabICL normally downloads its classifier and regressor checkpoints from the

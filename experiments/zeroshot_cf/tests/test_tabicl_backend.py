@@ -1,3 +1,5 @@
+#  Copyright (c) Prior Labs GmbH 2026.
+
 """Fast tests for the TabICL sampler and candidate-expanded greedy path.
 
 The tests inject a deterministic fake unsupervised model, so they verify our

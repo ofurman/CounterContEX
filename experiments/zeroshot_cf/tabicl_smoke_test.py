@@ -1,3 +1,5 @@
+#  Copyright (c) Prior Labs GmbH 2026.
+
 """Minimal real-model smoke test for staged TabICLv2 checkpoints."""
 
 from __future__ import annotations

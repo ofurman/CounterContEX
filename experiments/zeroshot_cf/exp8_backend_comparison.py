@@ -1,3 +1,5 @@
+#  Copyright (c) Prior Labs GmbH 2026.
+
 """TabPFNv3 versus TabICLv2 on three fixed comparison datasets.
 
 The comparison runs MOONS, HELOC, and AUDIT with the same counterfactual
@@ -160,9 +162,9 @@ def run_tabicl_v2(
     }
 
 
-def _write_row(row: dict[str, Any]) -> Path:
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    output = RESULTS_DIR / (
+def _write_row(row: dict[str, Any], results_dir: Path = RESULTS_DIR) -> Path:
+    results_dir.mkdir(parents=True, exist_ok=True)
+    output = results_dir / (
         f"exp8_compare_{row['dataset']}_{row['backend']}_metrics.csv"
     )
     with output.open("w", newline="") as handle:
@@ -193,6 +195,12 @@ def main() -> None:
     parser.add_argument("--n-estimators", type=int, default=DEFAULT_N_ESTIMATORS)
     parser.add_argument("--tabpfn-cache-dir", type=Path, default=None)
     parser.add_argument("--tabicl-cache-dir", type=Path, default=None)
+    parser.add_argument(
+        "--results-dir",
+        type=Path,
+        default=RESULTS_DIR,
+        help="Directory for this backend/dataset CSV (default: experiment results).",
+    )
     args = parser.parse_args()
 
     datasets = DATASETS if args.dataset == "all" else (args.dataset,)
@@ -217,7 +225,7 @@ def main() -> None:
                     tabicl_cache_dir=args.tabicl_cache_dir,
                     **common,
                 )
-            _write_row(row)
+            _write_row(row, args.results_dir)
 
 
 if __name__ == "__main__":

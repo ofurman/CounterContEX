@@ -113,3 +113,28 @@ budget + label alignment; the reported `validity_r1` column isolates the label
 effect) and at `max_rounds=1,labels=disc` (Exp6 budget, label effect alone).
 Outputs land in `experiments/zeroshot_cf/results/athena/<tag>/` as
 `exp7_multipass_<dataset>.csv` + `exp7_summary.md`.
+
+## Exp8: TabPFNv3 versus TabICLv2
+
+Exp8 runs only the final configuration selected by Exp6/Exp7:
+`prob_ascent + knn_both@512 + disc labels + one pass`. It does not rerun the
+context or label grids. The six array tasks are MOONS, HELOC, and AUDIT for
+each backend.
+
+Stage the TabICLv2 checkpoint pair under:
+
+```text
+experiments/zeroshot_cf/models/tabicl/
+```
+
+Install `tabicl==2.1.1` into `.venv` from a compute node, then submit from the
+repository root:
+
+```bash
+bash experiments/zeroshot_cf/athena/submit_exp8_backend_comparison.sh
+```
+
+Edit `exp8_backend_cases.tsv` to change test counts or estimator counts. Each
+task writes its metrics to
+`experiments/zeroshot_cf/results/athena/<tag>/` and uses a private
+discriminator cache to avoid cross-task writes.
