@@ -28,7 +28,6 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-
 from experiments.zeroshot_cf.sampler import class_conditional_shift
 
 
@@ -67,6 +66,47 @@ def _select_prob_ascent(
     return int(best_j), float(best_score), best_val
 
 
+def _select_prob_ascent_batched(
+    sampler,
+    disc,
+    x_cf: np.ndarray,
+    y_target: int,
+    candidates: List[int],
+    temperature: float,
+) -> Tuple[int, float, Optional[float]]:
+    """Strategy 1 with all candidate masks evaluated in one sampler call.
+
+    ``sample_candidates`` returns one imputed value for each candidate feature.
+    The corresponding trial counterfactuals are then scored in one discriminator
+    call. At deterministic temperature this is semantically equivalent to
+    :func:`_select_prob_ascent`, including first-candidate tie breaking.
+    """
+    values = np.asarray(
+        sampler.sample_candidates(
+            x_cf.reshape(1, -1),
+            candidates,
+            sample_temperature=temperature,
+            fixed_target=y_target,
+        ),
+        dtype=np.float64,
+    )
+    if values.shape != (len(candidates),):
+        raise ValueError(
+            "sample_candidates must return one value per candidate; "
+            f"expected {(len(candidates),)}, got {values.shape}"
+        )
+
+    trials = np.repeat(x_cf.reshape(1, -1), len(candidates), axis=0)
+    trials[np.arange(len(candidates)), np.asarray(candidates, dtype=int)] = values
+    probabilities = np.asarray(disc.predict_proba(trials))[:, y_target]
+    best = int(np.argmax(probabilities))
+    return (
+        int(candidates[best]),
+        float(probabilities[best]),
+        float(values[best]),
+    )
+
+
 def _select_class_divergence(
     sampler,
     x_cf: np.ndarray,
@@ -92,8 +132,12 @@ def _select_class_divergence(
     best_j: Optional[int] = None
     best_div = -np.inf
     for j in candidates:
-        dist_tgt = sampler.predictive_distribution(X, target_col=j, fixed_target=y_target)
-        dist_cur = sampler.predictive_distribution(X, target_col=j, fixed_target=y_current)
+        dist_tgt = sampler.predictive_distribution(
+            X, target_col=j, fixed_target=y_target
+        )
+        dist_cur = sampler.predictive_distribution(
+            X, target_col=j, fixed_target=y_current
+        )
         div = float(class_conditional_shift(dist_tgt, dist_cur)[0])
         if div > best_div:
             best_div = div
@@ -113,6 +157,7 @@ def greedy_counterfactual(
     budget: Optional[int] = None,
     temperature: float = 1e-9,
     max_rounds: int = 1,
+    batch_candidates: bool = False,
 ) -> Tuple[np.ndarray, List[int], Dict]:
     """Greedily build a counterfactual for one factual point.
 
@@ -157,6 +202,11 @@ def greedy_counterfactual(
         (b) if a round commits nothing, the loop stops early — no
         single-column near-MAP edit improves ``p_target``, i.e. a fixed
         point, and at near-zero temperature further rounds are no-ops.
+    batch_candidates : bool
+        If True, evaluate all remaining ``prob_ascent`` candidates through one
+        ``sampler.sample_candidates`` call per greedy step. This preserves the
+        search rule while avoiding one model call per candidate. It has no
+        effect on ``class_divergence``.
 
     Returns
     -------
@@ -204,7 +254,12 @@ def greedy_counterfactual(
                 break
 
             if selector == "prob_ascent":
-                j_star, score, val = _select_prob_ascent(
+                select = (
+                    _select_prob_ascent_batched
+                    if batch_candidates
+                    else _select_prob_ascent
+                )
+                j_star, score, val = select(
                     sampler, disc, x_cf, y_target, candidates, temperature
                 )
             elif selector == "class_divergence":
@@ -269,5 +324,6 @@ def greedy_counterfactual(
         "steps": total_edits,
         "rounds": rounds_used,
         "history": history,
+        "batch_candidates": bool(batch_candidates),
     }
     return x_cf, changed, info

@@ -29,12 +29,75 @@ HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/exp1_single_feature.py
 HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/exp2_counterfactuals.py
 ```
 
+### 4. Run the TabICL backend at the Athena-winning context
+
+TabICL uses the fixed `prob_ascent + knn_both@512` configuration selected by
+the Athena v3 runs. It does not repeat the context grid. Candidate feature
+interventions are batched into one TabICL imputation call per greedy step.
+
+Stage the two TabICLv2 checkpoints once with network access:
+
+```bash
+uv run python -m experiments.zeroshot_cf.tabicl_checkpoints
+```
+
+This writes ordinary checkpoint files under
+`experiments/zeroshot_cf/models/tabicl/`. Copy that directory to the same path
+on Athena, or pass its transferred location with `--tabicl-cache-dir`.
+
+Verify the transferred weights and one minimal real-model imputation offline:
+
+```bash
+HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.tabicl_smoke_test
+```
+
+Then run fully offline:
+
+```bash
+HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.exp8_tabicl_cf \
+    --dataset moons
+
+HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.exp8_tabicl_cf \
+    --dataset heloc --max-test 50
+
+HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.exp8_tabicl_cf \
+    --dataset audit --max-test 50
+```
+
+The default context labels are predictions from the discriminator being
+explained, matching the Athena Exp7 follow-up. Use `--context-labels data` only
+to reproduce the earlier Exp6 ground-truth-label setup. For a small timing and
+equivalence baseline, use `--candidate-mode sequential`; production runs use
+the default `batched` mode.
+
+### Three-dataset backend comparison (run on Athena)
+
+The comparison fixes the already-selected `prob_ascent + knn_both@512`
+configuration and runs only TabPFNv3 versus TabICLv2 on MOONS, HELOC, and
+AUDIT. Each backend/dataset writes a separate result file, so they can be
+submitted as independent jobs:
+
+```bash
+HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.exp8_backend_comparison \
+    --dataset moons --backend tabicl \
+    --tabicl-cache-dir experiments/zeroshot_cf/models/tabicl
+
+HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.exp8_backend_comparison \
+    --dataset heloc --backend tabpfn --tabpfn-cache-dir models
+```
+
+Use `--dataset all --backend all` only on an appropriately provisioned compute
+node. For a smoke test, add `--max-test 1 --n-estimators 1`.
+
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TABPFN_DEVICE` | `auto` | Device for TabPFN inference (`auto`/`cpu`/`mps`) |
 | `TABPFN_LOCAL_CACHE` | `experiments/zeroshot_cf/models/` | Path to staged checkpoints |
+| `TABPFN_V3_LOCAL_CACHE` | `models/` | Path to the Athena TabPFNv3 weight pair |
+| `TABICL_DEVICE` | `auto` | Device for TabICL inference (`auto`/`cpu`/`mps`/`cuda`) |
+| `TABICL_LOCAL_CACHE` | `experiments/zeroshot_cf/models/tabicl/` | Path to staged TabICLv2 checkpoints |
 | `HF_HUB_OFFLINE` | unset | Set to `1` to enforce no network access |
 
 ## Dependencies
@@ -50,7 +113,7 @@ incompatibility and installed editable with `--no-deps`.
 
 ## Datasets & in-context rows
 
-Both datasets use the `cel` 80/20 **stratified** split (`random_state=42`) and MinMax
+The datasets use the `cel` 80/20 **stratified** split (`random_state=42`) and MinMax
 scaling to `[0,1]` fit on the train split. TabPFN is never trained — the "context" is the
 in-context conditioning set passed to `TabPFNUnsupervisedModel.fit()` at inference time.
 

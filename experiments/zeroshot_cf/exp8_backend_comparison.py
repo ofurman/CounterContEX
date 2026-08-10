@@ -1,0 +1,224 @@
+"""TabPFNv3 versus TabICLv2 on three fixed comparison datasets.
+
+The comparison runs MOONS, HELOC, and AUDIT with the same counterfactual
+algorithm and the already-selected Athena context: ``prob_ascent`` with a
+512-row both-class kNN context. It intentionally contains no context sweep.
+
+TabPFN uses the existing sequential candidate evaluation. TabICL uses the
+candidate-expanded fast path, whose deterministic equivalence to sequential
+evaluation is covered by unit tests. Both backends use discriminator-predicted
+context labels, matching the final Athena Exp7 winner.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+from pathlib import Path
+from typing import Any
+
+from experiments.zeroshot_cf.exp4_greedy_cf import TAU, evaluate_and_report
+from experiments.zeroshot_cf.exp6_context_ablation import _run_cell
+from experiments.zeroshot_cf.exp8_tabicl_cf import (
+    ATHENA_CONTEXT_SIZE,
+    ATHENA_CONTEXT_STRATEGY,
+    DEFAULT_N_ESTIMATORS,
+    DEFAULT_TEMPERATURE,
+    generate_tabicl_counterfactuals,
+)
+
+DATASETS = ("moons", "heloc", "audit")
+RESULTS_DIR = Path(__file__).parent / "results"
+TABPFN_N_PERMUTATIONS = 3
+
+
+def _load_shared_data(dataset_name: str, max_test: int | None):
+    from experiments.zeroshot_cf.data import (
+        get_actionable_immutable,
+        load_dataset,
+    )
+    from experiments.zeroshot_cf.discriminator import train_discriminator
+
+    bundle = load_dataset(dataset_name)
+    limit = None if max_test is not None and max_test < 0 else max_test
+    if limit is None and max_test is None:
+        limit = 100 if dataset_name == "moons" else 50
+    X_test, y_test = bundle.X_test[:limit], bundle.y_test[:limit]
+    actionable_idx, immutable_idx = get_actionable_immutable(dataset_name, bundle)
+    disc_model = train_discriminator(
+        bundle.X_train,
+        bundle.y_train,
+        X_test,
+        y_test,
+        dataset_name,
+    )
+    y_pred = disc_model.predict(X_test)
+    return {
+        "bundle": bundle,
+        "disc_model": disc_model,
+        "X_test": X_test,
+        "y_test": y_test,
+        "y_pred": y_pred,
+        "y_target": 1 - y_pred,
+        "actionable_idx": actionable_idx,
+        "immutable_idx": immutable_idx,
+    }
+
+
+def run_tabpfn_v3(
+    dataset_name: str,
+    *,
+    max_test: int | None,
+    tau: float,
+    temperature: float,
+    n_estimators: int,
+    tabpfn_cache_dir: Path | None,
+) -> dict[str, Any]:
+    """Run the existing TabPFNv3 method at only ``knn_both@512``."""
+    from experiments.zeroshot_cf.checkpoints import get_v3_models
+
+    shared = _load_shared_data(dataset_name, max_test)
+    clf, reg = get_v3_models(
+        n_estimators=n_estimators,
+        cache_dir=tabpfn_cache_dir,
+    )
+    row = _run_cell(
+        dataset_name,
+        "prob_ascent",
+        ATHENA_CONTEXT_SIZE,
+        ATHENA_CONTEXT_STRATEGY,
+        bundle=shared["bundle"],
+        disc_model=shared["disc_model"],
+        X_test=shared["X_test"],
+        y_test=shared["y_test"],
+        y_pred=shared["y_pred"],
+        y_target=shared["y_target"],
+        actionable_idx=shared["actionable_idx"],
+        immutable_idx=shared["immutable_idx"],
+        clf=clf,
+        reg=reg,
+        tau=tau,
+        temperature=temperature,
+        n_permutations=TABPFN_N_PERMUTATIONS,
+        context_y=shared["disc_model"].predict(shared["bundle"].X_train),
+    )
+    return {
+        "dataset": dataset_name,
+        "backend": "tabpfn_v3",
+        "candidate_mode": "sequential",
+        "context_labels": "disc",
+        "n_estimators": n_estimators,
+        "temperature": temperature,
+        **row,
+    }
+
+
+def run_tabicl_v2(
+    dataset_name: str,
+    *,
+    max_test: int | None,
+    tau: float,
+    temperature: float,
+    n_estimators: int,
+    tabicl_cache_dir: Path | None,
+) -> dict[str, Any]:
+    """Run TabICLv2 with candidate expansion at ``knn_both@512``."""
+    X_test, y_test, X_cf, info = generate_tabicl_counterfactuals(
+        dataset_name,
+        tau=tau,
+        temperature=temperature,
+        n_estimators=n_estimators,
+        max_test=max_test,
+        context_labels="disc",
+        candidate_mode="batched",
+        cache_dir=tabicl_cache_dir,
+    )
+    metrics = evaluate_and_report(
+        dataset_name,
+        X_test,
+        y_test,
+        X_cf,
+        info,
+        write_csv=False,
+    )
+    return {
+        "dataset": dataset_name,
+        "backend": "tabicl_v2",
+        "selector": "prob_ascent",
+        "size": ATHENA_CONTEXT_SIZE,
+        "effective_size": min(ATHENA_CONTEXT_SIZE, len(info["bundle"].X_train)),
+        "strategy": ATHENA_CONTEXT_STRATEGY,
+        "class_scope": "both",
+        "selection": "knn",
+        "candidate_mode": "batched",
+        "context_labels": "disc",
+        "n_estimators": n_estimators,
+        "temperature": temperature,
+        "n_test": len(X_test),
+        "runtime_s": round(float(info["runtime_s"]), 2),
+        **metrics,
+    }
+
+
+def _write_row(row: dict[str, Any]) -> Path:
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    output = RESULTS_DIR / (
+        f"exp8_compare_{row['dataset']}_{row['backend']}_metrics.csv"
+    )
+    with output.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(row))
+        writer.writeheader()
+        writer.writerow(row)
+    print(f"Wrote {output}")
+    return output
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Compare TabPFNv3 and TabICLv2 at knn_both@512"
+    )
+    parser.add_argument(
+        "--dataset",
+        choices=[*DATASETS, "all"],
+        default="moons",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=["tabpfn", "tabicl", "all"],
+        default="all",
+    )
+    parser.add_argument("--max-test", type=int, default=None)
+    parser.add_argument("--tau", type=float, default=TAU)
+    parser.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE)
+    parser.add_argument("--n-estimators", type=int, default=DEFAULT_N_ESTIMATORS)
+    parser.add_argument("--tabpfn-cache-dir", type=Path, default=None)
+    parser.add_argument("--tabicl-cache-dir", type=Path, default=None)
+    args = parser.parse_args()
+
+    datasets = DATASETS if args.dataset == "all" else (args.dataset,)
+    backends = ("tabpfn", "tabicl") if args.backend == "all" else (args.backend,)
+    for dataset_name in datasets:
+        for backend in backends:
+            common = {
+                "max_test": args.max_test,
+                "tau": args.tau,
+                "temperature": args.temperature,
+                "n_estimators": args.n_estimators,
+            }
+            if backend == "tabpfn":
+                row = run_tabpfn_v3(
+                    dataset_name,
+                    tabpfn_cache_dir=args.tabpfn_cache_dir,
+                    **common,
+                )
+            else:
+                row = run_tabicl_v2(
+                    dataset_name,
+                    tabicl_cache_dir=args.tabicl_cache_dir,
+                    **common,
+                )
+            _write_row(row)
+
+
+if __name__ == "__main__":
+    main()

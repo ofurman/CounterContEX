@@ -32,8 +32,9 @@ Outputs (under experiments/zeroshot_cf/results/):
 
 Usage:
   uv run python experiments/zeroshot_cf/exp6_context_ablation.py --dataset moons
-  uv run python experiments/zeroshot_cf/exp6_context_ablation.py --dataset heloc --selector prob_ascent --max-test 50
-  # The full [256,512,1024,2048] sizes are fixed; --max-test is held identical across cells.
+  uv run python experiments/zeroshot_cf/exp6_context_ablation.py \
+      --dataset heloc --selector prob_ascent --max-test 50
+  # The full [256,512,1024,2048] sizes are fixed; --max-test is identical.
 """
 
 from __future__ import annotations
@@ -44,7 +45,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import numpy as np
 
@@ -52,12 +53,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 from experiments.zeroshot_cf.exp4_greedy_cf import (  # noqa: E402
-    MAX_CONTEXT,
+    _DATASET_PARAMS,
     N_ESTIMATORS,
     N_PERMUTATIONS,
     TAU,
     TEMPERATURE,
-    _DATASET_PARAMS,
     evaluate_and_report,
 )
 
@@ -186,6 +186,7 @@ def _run_cell(
     tau: float,
     temperature: float,
     n_permutations: int,
+    context_y: np.ndarray | None = None,
 ) -> Dict[str, float]:
     """Run one (size, strategy) cell on a pre-loaded dataset. Returns a CSV row."""
     from experiments.zeroshot_cf.greedy import greedy_counterfactual
@@ -194,6 +195,9 @@ def _run_cell(
     class_scope, selection = STRATEGY_SPEC[strategy]
     X_train = bundle.X_train
     y_train = bundle.y_train
+    y_context = y_train if context_y is None else np.asarray(context_y)
+    if len(y_context) != len(X_train):
+        raise ValueError("context_y must contain one label per training row")
     n = len(X_test)
     eff_budget = len(actionable_idx)
 
@@ -222,7 +226,7 @@ def _run_cell(
         ctx_target = target_cls if class_scope == "target" else None
         # Pool the selection draws from (for effective_size / pool_size logging).
         if ctx_target is not None:
-            pool_size = int((y_train == ctx_target).sum())
+            pool_size = int((y_context == ctx_target).sum())
         else:
             pool_size = int(len(X_train))
 
@@ -239,7 +243,7 @@ def _run_cell(
             # One fit per class batch (query-independent), reused for all points.
             sampler.set_context(
                 X_train,
-                y_context=y_train,
+                y_context=y_context,
                 target_class=ctx_target,
                 max_context=size,
                 selection="random",
@@ -248,9 +252,15 @@ def _run_cell(
             for i in test_idx:
                 effective_sizes.append(eff)
                 x_cf, changed, gi = greedy_counterfactual(
-                    sampler, disc_model, X_test[i], target_cls,
-                    actionable_idx, selector,
-                    tau=tau, budget=eff_budget, temperature=temperature,
+                    sampler,
+                    disc_model,
+                    X_test[i],
+                    target_cls,
+                    actionable_idx,
+                    selector,
+                    tau=tau,
+                    budget=eff_budget,
+                    temperature=temperature,
                 )
                 X_cf[i] = x_cf
                 changed_per_point[i] = changed
@@ -262,16 +272,22 @@ def _run_cell(
                 effective_sizes.append(eff)
                 sampler.set_context(
                     X_train,
-                    y_context=y_train,
+                    y_context=y_context,
                     target_class=ctx_target,
                     max_context=size,
                     selection="knn",
                     query=X_test[i],
                 )
                 x_cf, changed, gi = greedy_counterfactual(
-                    sampler, disc_model, X_test[i], target_cls,
-                    actionable_idx, selector,
-                    tau=tau, budget=eff_budget, temperature=temperature,
+                    sampler,
+                    disc_model,
+                    X_test[i],
+                    target_cls,
+                    actionable_idx,
+                    selector,
+                    tau=tau,
+                    budget=eff_budget,
+                    temperature=temperature,
                 )
                 X_cf[i] = x_cf
                 changed_per_point[i] = changed
@@ -409,12 +425,23 @@ def run_dataset_ablation(
     for size in SIZES:
         for strategy in strategies:
             row = _run_cell(
-                dataset_name, selector, size, strategy,
-                bundle=bundle, disc_model=disc_model,
-                X_test=X_test, y_test=y_test, y_pred=y_pred, y_target=y_target,
-                actionable_idx=actionable_idx, immutable_idx=immutable_idx,
-                clf=clf, reg=reg,
-                tau=tau, temperature=temperature, n_permutations=n_permutations,
+                dataset_name,
+                selector,
+                size,
+                strategy,
+                bundle=bundle,
+                disc_model=disc_model,
+                X_test=X_test,
+                y_test=y_test,
+                y_pred=y_pred,
+                y_target=y_target,
+                actionable_idx=actionable_idx,
+                immutable_idx=immutable_idx,
+                clf=clf,
+                reg=reg,
+                tau=tau,
+                temperature=temperature,
+                n_permutations=n_permutations,
             )
             rows.append(row)
             csv_path = _write_context_csv(dataset_name, rows)
@@ -428,6 +455,7 @@ def run_dataset_ablation(
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
+
 
 def _fmt(v) -> str:
     try:
@@ -487,7 +515,9 @@ def _best_cells(rows: List[Dict[str, str]]) -> List[str]:
     out: List[str] = []
     valid_rows = [r for r in rows if _num(r, "validity") == _num(r, "validity")]
     if valid_rows:
-        best_val = max(valid_rows, key=lambda r: (_num(r, "validity"), -_num(r, "frac_oob")))
+        best_val = max(
+            valid_rows, key=lambda r: (_num(r, "validity"), -_num(r, "frac_oob"))
+        )
         out.append(
             f"- **Best validity cell**: size={best_val['size']}, "
             f"strategy={best_val['strategy']} "
@@ -497,7 +527,9 @@ def _best_cells(rows: List[Dict[str, str]]) -> List[str]:
         )
     oob_rows = [r for r in rows if _num(r, "frac_oob") == _num(r, "frac_oob")]
     if oob_rows:
-        best_oob = min(oob_rows, key=lambda r: (_num(r, "frac_oob"), -_num(r, "validity")))
+        best_oob = min(
+            oob_rows, key=lambda r: (_num(r, "frac_oob"), -_num(r, "validity"))
+        )
         out.append(
             f"- **Best frac_oob cell**: size={best_oob['size']}, "
             f"strategy={best_oob['strategy']} "
@@ -589,17 +621,33 @@ def main() -> None:
         choices=["prob_ascent", "class_divergence"],
         default="prob_ascent",
         help="Stage-2 winning selector (default: prob_ascent → 16 cells; "
-             "class_divergence → 8 cells, *_target skipped).",
+        "class_divergence → 8 cells, *_target skipped).",
     )
-    parser.add_argument("--tau", type=float, default=TAU,
-                        help=f"Flip probability threshold (default: {TAU}).")
-    parser.add_argument("--temperature", type=float, default=TEMPERATURE,
-                        help=f"Committed-value temperature (default: {TEMPERATURE} ≈ MAP).")
-    parser.add_argument("--n-permutations", type=int, default=N_PERMUTATIONS,
-                        help=f"Imputation permutations (default: {N_PERMUTATIONS}).")
-    parser.add_argument("--max-test", type=int, default=None,
-                        help="Number of test points, identical across all cells "
-                             "(default: moons=100, heloc=50; -1 for full split).")
+    parser.add_argument(
+        "--tau",
+        type=float,
+        default=TAU,
+        help=f"Flip probability threshold (default: {TAU}).",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=TEMPERATURE,
+        help=f"Committed-value temperature (default: {TEMPERATURE} ≈ MAP).",
+    )
+    parser.add_argument(
+        "--n-permutations",
+        type=int,
+        default=N_PERMUTATIONS,
+        help=f"Imputation permutations (default: {N_PERMUTATIONS}).",
+    )
+    parser.add_argument(
+        "--max-test",
+        type=int,
+        default=None,
+        help="Number of test points, identical across all cells "
+        "(default: moons=100, heloc=50; -1 for full split).",
+    )
     parser.add_argument(
         "--sizes",
         default=",".join(map(str, SIZES)),

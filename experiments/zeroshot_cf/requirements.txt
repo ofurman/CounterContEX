@@ -4,6 +4,11 @@
 # TabPFN extensions — unsupervised module (imputation/generation)
 tabpfn-extensions[all] @ git+https://github.com/PriorLabs/tabpfn-extensions.git
 
+# TabICL backend — includes the experimental TabICLUnsupervised estimator.
+# Pin the version because the adapter deliberately reuses loaded model weights
+# across query-specific kNN contexts via fitted attributes of that estimator.
+tabicl==2.1.1
+
 # Counterfactuals evaluation harness
 cel @ git+https://github.com/ofurman/counterfactuals.git
 

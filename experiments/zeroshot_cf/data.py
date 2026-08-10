@@ -1,7 +1,7 @@
 """Dataset loading for the zero-shot CF experiment.
 
-Loads HELOC and MOONS via cel, applies MinMax scaling (fit on train),
-and provides the HELOC actionable/immutable feature split.
+Loads HELOC, MOONS, and AUDIT via cel, applies MinMax scaling (fit on
+train), and provides each dataset's actionable/immutable feature split.
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ from typing import List, Tuple
 
 import numpy as np
 import yaml
-
 from cel.datasets.file_dataset import FileDataset
 from cel.datasets.method_dataset import MethodDataset
 from cel.preprocessing.pipeline import PreprocessingPipeline
@@ -41,7 +40,7 @@ class DatasetBundle:
 
 
 def load_dataset(name: str) -> DatasetBundle:
-    """Load a cel dataset by name ('heloc' or 'moons'), MinMax-scaled.
+    """Load a supported cel classification dataset, MinMax-scaled.
 
     Split is 80/20 stratified with random_state=42 (cel default).
     Scaling is fit on X_train only.
@@ -51,9 +50,11 @@ def load_dataset(name: str) -> DatasetBundle:
         raise FileNotFoundError(f"Dataset config not found: {config_path}")
 
     file_dataset = FileDataset(config_path=config_path)
-    preprocessing = PreprocessingPipeline([
-        ("minmax", MinMaxScalingStep()),
-    ])
+    preprocessing = PreprocessingPipeline(
+        [
+            ("minmax", MinMaxScalingStep()),
+        ]
+    )
     md = MethodDataset(file_dataset, preprocessing_pipeline=preprocessing)
 
     return DatasetBundle(
@@ -75,19 +76,19 @@ def get_actionable_immutable(
     """Return (actionable_idx, immutable_idx) in the scaled feature matrix column order.
 
     For 'heloc': uses configs/heloc_actionability.yaml (Decision #2).
-    For 'moons': both features are actionable, no immutables.
+    For 'moons' and 'audit': all features are actionable, no immutables.
 
     Args:
-        name: Dataset name ('heloc' or 'moons').
+        name: Dataset name ('heloc', 'moons', or 'audit').
         dataset: Optional pre-loaded DatasetBundle; if None the dataset is loaded
                  just to resolve feature names → column indices.
 
     Returns:
         Tuple of (actionable_column_indices, immutable_column_indices).
     """
-    if name == "moons":
+    if name in {"moons", "audit"}:
         if dataset is None:
-            dataset = load_dataset("moons")
+            dataset = load_dataset(name)
         n = len(dataset.feature_names)
         return list(range(n)), []
 
@@ -102,7 +103,11 @@ def get_actionable_immutable(
 
         feature_names = dataset.feature_names
         immutable_idx = [feature_names.index(fn) for fn in immutable_names]
-        actionable_idx = [i for i in range(len(feature_names)) if i not in immutable_idx]
+        actionable_idx = [
+            i for i in range(len(feature_names)) if i not in immutable_idx
+        ]
         return actionable_idx, immutable_idx
 
-    raise ValueError(f"Unknown dataset: {name!r}. Supported: 'heloc', 'moons'.")
+    raise ValueError(
+        f"Unknown dataset: {name!r}. Supported: 'heloc', 'moons', 'audit'."
+    )

@@ -150,3 +150,32 @@ def get_models(
         model_path=reg_path,
     )
     return clf, reg
+
+
+def get_v3_models(
+    device: str = "auto",
+    n_estimators: int = 4,
+    cache_dir: Path | None = None,
+) -> tuple:
+    """Load the local TabPFNv3 pair used by the Athena comparison runs.
+
+    This preserves the branch's flexible filename resolution while making the
+    comparison explicitly v3 even if the surrounding shell has no version set.
+    """
+    cache_dir = Path(
+        cache_dir
+        or os.environ.get("TABPFN_V3_LOCAL_CACHE")
+        or os.environ.get("TABPFN_LOCAL_CACHE", str(_REPO_MODELS_CACHE))
+    )
+    clf_path = _checkpoint_path(cache_dir, "v3", "classifier")
+    reg_path = _checkpoint_path(cache_dir, "v3", "regressor")
+    missing = [path for path in (clf_path, reg_path) if not path.is_file()]
+    if missing:
+        missing_text = "\n".join(f"  - {path}" for path in missing)
+        raise FileNotFoundError(
+            "TabPFNv3 checkpoint(s) required for the Athena-matched comparison "
+            f"are missing:\n{missing_text}"
+        )
+
+    os.environ["TABPFN_MODEL_VERSION"] = "v3"
+    return get_models(device=device, n_estimators=n_estimators, cache_dir=cache_dir)
