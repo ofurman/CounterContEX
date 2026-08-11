@@ -16,7 +16,7 @@ set -euo pipefail
 
 PROJECT_DIR="${PROJECT_DIR:-$SLURM_SUBMIT_DIR}"
 CASE_FILE="${CASE_FILE:-$PROJECT_DIR/experiments/zeroshot_cf/athena/exp10_lof_cases.tsv}"
-RESULTS_DIR="${RESULTS_DIR:-$PROJECT_DIR/experiments/zeroshot_cf/results/athena/exp10_lof_ablation}"
+RESULTS_DIR="${RESULTS_DIR:-$PROJECT_DIR/experiments/zeroshot_cf/results/athena/exp10_lof_ablation_r3}"
 TABICL_CACHE_DIR="${TABICL_CACHE_DIR:-$PROJECT_DIR/experiments/zeroshot_cf/models/tabicl}"
 
 cd "$PROJECT_DIR"
@@ -45,6 +45,7 @@ nvidia-smi
     --variant "$VARIANT" \
     --max-test "$MAX_TEST" \
     --n-estimators "$N_ESTIMATORS" \
+    --max-rounds 3 \
     --tabicl-cache-dir "$TABICL_CACHE_DIR" \
     --results-dir "$RESULTS_DIR"
 echo "[$(date --iso-8601=seconds)] Finished variant=$VARIANT"

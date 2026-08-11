@@ -81,6 +81,7 @@ def run_dataset(  # noqa: PLR0913
     candidate_quantiles: tuple[float, ...] = DEFAULT_CANDIDATE_QUANTILES,
     confidence_quantiles: tuple[float, ...] = DEFAULT_CONFIDENCE_QUANTILES,
     lof_first: bool = True,
+    max_rounds: int = 1,
     validation_fraction: float = DEFAULT_VALIDATION_FRACTION,
     drop_heloc_all_minus9: bool = True,
     tabicl_cache_dir: Path | None = None,
@@ -107,7 +108,7 @@ def run_dataset(  # noqa: PLR0913
         confidence_quantiles=confidence_quantiles,
         lof_first=lof_first,
         probability_slack=0.0,
-        max_rounds=1,
+        max_rounds=max_rounds,
         categorical_fallback=True,
         validation_fraction=validation_fraction,
         test_selection="stratified",
@@ -178,6 +179,7 @@ def run_dataset(  # noqa: PLR0913
         "candidate_quantiles": _levels_text(candidate_quantiles),
         "confidence_quantiles": _levels_text(confidence_quantiles),
         "lof_first": lof_first,
+        "max_rounds": max_rounds,
         "categorical_fallback": True,
         "n_estimators": n_estimators,
         "temperature": temperature,
@@ -214,6 +216,7 @@ def run_dataset(  # noqa: PLR0913
             "lof_score": float(lof_per_point[i]),
             "changed_columns": len(info["changed_per_point"][i]),
             "steps": int(info["steps_per_point"][i]),
+            "attempt_steps": len(info["attempt_history_per_point"][i]),
         }
         for i in range(len(X_test))
     ]
@@ -288,6 +291,12 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--max-rounds",
+        type=int,
+        default=1,
+        help="Maximum greedy coordinate passes (default: 1).",
+    )
+    parser.add_argument(
         "--drop-heloc-all-minus9",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -308,6 +317,7 @@ def main() -> None:
         candidate_quantiles=tuple(args.candidate_quantiles),
         confidence_quantiles=tuple(args.confidence_quantiles),
         lof_first=args.lof_first,
+        max_rounds=args.max_rounds,
         validation_fraction=args.validation_fraction,
         drop_heloc_all_minus9=args.drop_heloc_all_minus9,
         tabicl_cache_dir=args.tabicl_cache_dir,
