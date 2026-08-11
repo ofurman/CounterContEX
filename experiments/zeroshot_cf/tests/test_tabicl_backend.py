@@ -12,6 +12,7 @@ import numpy as np
 import torch
 from experiments.zeroshot_cf.data import get_actionable_immutable
 from experiments.zeroshot_cf.greedy import greedy_counterfactual
+from experiments.zeroshot_cf.exp8_tabicl_cf import empirical_confidence_grid
 from experiments.zeroshot_cf.tabicl_sampler import (
     TabICLConditionalDensitySampler,
     _knn_indices,
@@ -36,14 +37,24 @@ class _FakeTabICLUnsupervised:
     def impute(self, X, temperature=1e-8, n_iterations=1):
         self.impute_calls += 1
         out = np.asarray(X, dtype=np.float32).copy()
-        target = out[:, -1].copy()
+        target_idx = self.kwargs["categorical_features"][0]
+        target = out[:, target_idx].copy()
+        confidence = (
+            out[:, target_idx + 1].copy()
+            if out.shape[1] > target_idx + 1
+            else np.zeros(len(out), dtype=np.float32)
+        )
         missing_rows, missing_cols = np.where(np.isnan(out))
         quantile_grid = getattr(self, "_numerical_quantile_grid", None)
         for col in np.unique(missing_cols):
             rows = missing_rows[missing_cols == col]
             # Deterministic and class-conditional. Candidate j gets
             # 0.1*(j+1) under class 0 and an additional 0.5 under class 1.
-            values = 0.1 * (col + 1) + 0.5 * target[rows]
+            values = (
+                0.1 * (col + 1)
+                + 0.5 * target[rows]
+                + 0.2 * confidence[rows]
+            )
             if quantile_grid is not None:
                 values = values + np.asarray(quantile_grid)
             out[rows, col] = values
@@ -188,6 +199,50 @@ def test_quantile_grid_expands_rows_but_uses_one_imputation_call():
     assert not hasattr(sampler.model, "_numerical_quantile_grid")
 
 
+def test_confidence_conditioning_uses_empirical_grid_in_one_call():
+    X, y = _context()
+    confidence = np.linspace(0.1, 0.9, len(X))
+    sampler = _sampler().set_context(
+        X,
+        y_context=y,
+        confidence_context=confidence,
+        max_context=8,
+        selection="knn",
+        query=X[10],
+    )
+    before = sampler.model.impute_calls
+
+    values = sampler.sample_candidate_grid(
+        X[[0]],
+        [0],
+        quantiles=[0.1, 0.5],
+        confidences=[0.55, 0.85],
+        fixed_target=1,
+    )
+
+    assert values.shape == (1, 2, 2)
+    np.testing.assert_allclose(
+        values[0],
+        [[0.81, 1.21], [0.87, 1.27]],
+        atol=1e-6,
+    )
+    assert sampler.model.impute_calls == before + 1
+    np.testing.assert_allclose(
+        sampler.model.X_[:, -1],
+        sampler.selected_confidences_,
+    )
+    assert sampler.model.kwargs["categorical_features"] == [X.shape[1]]
+
+
+def test_empirical_confidence_grid_uses_target_class_context_distribution():
+    scores = np.array([0.1, 0.2, 0.6, 0.8, 0.9])
+    labels = np.array([0, 0, 1, 1, 1])
+
+    grid = empirical_confidence_grid(scores, labels, 1, (0.25, 0.5, 0.75))
+
+    np.testing.assert_allclose(grid, [0.7, 0.8, 0.85])
+
+
 def test_quantile_grid_rejects_invalid_probability_levels():
     X, y = _context()
     sampler = _sampler().set_context(X, y_context=y)
@@ -216,6 +271,12 @@ class _GridDisc:
         return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
 
 
+class _PreferMiddleLOF:
+    def score_samples(self, X):
+        # Negative outlier score; the lowest resulting LOF is at x2=1.3.
+        return -np.abs(X[:, 2] - 1.3)
+
+
 def test_quantile_grid_greedy_selects_best_feature_value_pair():
     X, y = _context()
     query = np.array([0.0, 1.0, 0.0])
@@ -236,6 +297,33 @@ def test_quantile_grid_greedy_selects_best_feature_value_pair():
     np.testing.assert_allclose(x_cf[2], 1.7, atol=1e-6)
     assert info["flipped"]
     assert info["candidate_quantiles"] == (0.1, 0.5, 0.9)
+
+
+def test_validity_first_selects_lowest_lof_not_highest_probability():
+    X, y = _context()
+    query = np.array([0.0, 1.0, 0.0])
+    sampler = _sampler().set_context(X, y_context=y)
+
+    x_cf, changed, info = greedy_counterfactual(
+        sampler,
+        _GridDisc(),
+        query,
+        y_target=1,
+        actionable_idx=[2],
+        selector="prob_ascent",
+        batch_candidates=True,
+        candidate_quantiles=(0.1, 0.5, 0.9),
+        plausibility_model=_PreferMiddleLOF(),
+        validity_first=True,
+    )
+
+    # q=.5 gives x2=1.3 and p=.52; q=.9 gives x2=1.7 and p=.68.
+    # Both flip, so LOF alone must select q=.5 despite its lower confidence.
+    assert changed == [2]
+    np.testing.assert_allclose(x_cf[2], 1.3, atol=1e-6)
+    assert info["flipped"]
+    assert info["selection_history"][0]["quantile"] == 0.5
+    assert abs(info["selection_history"][0]["lof"]) < 1e-6
 
 
 def test_batched_and_sequential_greedy_are_equivalent_and_preserve_immutable():

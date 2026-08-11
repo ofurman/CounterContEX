@@ -85,7 +85,10 @@ def _select_context(
     selection: str,
     query: np.ndarray | None,
     random_state: int,
-) -> tuple[np.ndarray, np.ndarray | None]:
+    return_indices: bool = False,
+) -> tuple[np.ndarray, np.ndarray | None] | tuple[
+    np.ndarray, np.ndarray | None, np.ndarray
+]:
     """Apply the same class filtering and random/kNN selection as TabPFN."""
     if selection not in {"random", "knn"}:
         raise ValueError(f"selection must be 'random' or 'knn', got {selection!r}")
@@ -95,6 +98,7 @@ def _select_context(
         raise ValueError("max_context must be positive when provided")
 
     X = np.asarray(X_context, dtype=np.float32)
+    selected_indices = np.arange(len(X))
     if X.ndim != 2:
         raise ValueError(f"X_context must be 2D, got shape {X.shape}")
     y = None if y_context is None else np.asarray(y_context)
@@ -107,6 +111,7 @@ def _select_context(
         keep = y == target_class
         X = X[keep]
         y = y[keep]
+        selected_indices = selected_indices[keep]
 
     if len(X) == 0:
         raise ValueError("context selection produced an empty context")
@@ -119,9 +124,12 @@ def _select_context(
             idx = rng.choice(len(X), size=max_context, replace=False)
             idx.sort()
         X = X[idx]
+        selected_indices = selected_indices[idx]
         if y is not None:
             y = y[idx]
 
+    if return_indices:
+        return X, y, selected_indices
     return X, y
 
 
@@ -232,6 +240,8 @@ class TabICLConditionalDensitySampler:
         self._fitted = False
         self.selected_context_: np.ndarray | None = None
         self.selected_labels_: np.ndarray | None = None
+        self.selected_confidences_: np.ndarray | None = None
+        self._uses_confidence = False
 
     def _build_model(self, y_idx: int):
         kwargs = {
@@ -274,13 +284,14 @@ class TabICLConditionalDensitySampler:
         self,
         X_context: np.ndarray,
         y_context: np.ndarray | None = None,
+        confidence_context: np.ndarray | None = None,
         target_class: int | None = None,
         max_context: int | None = None,
         selection: str = "random",
         query: np.ndarray | None = None,
     ) -> "TabICLConditionalDensitySampler":
         """Select context rows, append Y, and prepare TabICL for imputation."""
-        X, y = _select_context(
+        X, y, selected_indices = _select_context(
             X_context,
             y_context,
             target_class=target_class,
@@ -288,6 +299,7 @@ class TabICLConditionalDensitySampler:
             selection=selection,
             query=query,
             random_state=self.random_state,
+            return_indices=True,
         )
         if y is None:
             raise ValueError("y_context is required for class-conditional sampling")
@@ -302,9 +314,29 @@ class TabICLConditionalDensitySampler:
             )
         self._n_original_features = n_features
         y_idx = n_features
-        X_aug = np.column_stack([X, np.asarray(y, dtype=np.float32)]).astype(
-            np.float32, copy=False
-        )
+        confidence = None
+        if confidence_context is not None:
+            confidence_all = np.asarray(confidence_context, dtype=np.float32)
+            if confidence_all.ndim != 1 or len(confidence_all) != len(X_context):
+                raise ValueError(
+                    "confidence_context must be a 1D array aligned with X_context"
+                )
+            if not np.all(np.isfinite(confidence_all)):
+                raise ValueError("confidence_context must contain only finite values")
+            confidence = confidence_all[selected_indices]
+
+        uses_confidence = confidence is not None
+        if self._model_initialized and uses_confidence != self._uses_confidence:
+            raise ValueError(
+                "confidence conditioning cannot be enabled or disabled after "
+                "the TabICL model has been initialized"
+            )
+        self._uses_confidence = uses_confidence
+
+        columns = [X, np.asarray(y, dtype=np.float32)]
+        if confidence is not None:
+            columns.append(confidence)
+        X_aug = np.column_stack(columns).astype(np.float32, copy=False)
 
         if self.model is None:
             self.model = self._build_model(y_idx)
@@ -316,6 +348,9 @@ class TabICLConditionalDensitySampler:
 
         self.selected_context_ = X.copy()
         self.selected_labels_ = np.asarray(y).copy()
+        self.selected_confidences_ = (
+            None if confidence is None else np.asarray(confidence).copy()
+        )
         self._fitted = True
         return self
 
@@ -326,6 +361,7 @@ class TabICLConditionalDensitySampler:
         fixed_target: int,
         *,
         allow_duplicate_cols: bool = False,
+        fixed_confidence: float | Sequence[float] | np.ndarray | None = None,
     ) -> np.ndarray:
         if not self._fitted or self._n_original_features is None:
             raise RuntimeError("Call set_context() before sampling features.")
@@ -347,7 +383,25 @@ class TabICLConditionalDensitySampler:
         rows = np.repeat(X, len(candidates), axis=0)
         rows[np.arange(len(candidates)), candidates] = np.nan
         target = np.full((len(rows), 1), float(fixed_target), dtype=np.float32)
-        return np.concatenate([rows, target], axis=1)
+        augmented = [rows, target]
+        if self._uses_confidence:
+            if fixed_confidence is None:
+                raise ValueError(
+                    "fixed_confidence is required when confidence conditioning is enabled"
+                )
+            confidence = np.asarray(fixed_confidence, dtype=np.float32)
+            if confidence.ndim == 0:
+                confidence = np.full(len(rows), float(confidence), dtype=np.float32)
+            if confidence.shape != (len(rows),):
+                raise ValueError(
+                    "fixed_confidence must be scalar or contain one value per candidate row"
+                )
+            augmented.append(confidence.reshape(-1, 1))
+        elif fixed_confidence is not None:
+            raise ValueError(
+                "fixed_confidence requires confidence_context in set_context()"
+            )
+        return np.concatenate(augmented, axis=1)
 
     def sample_candidates(
         self,
@@ -356,10 +410,16 @@ class TabICLConditionalDensitySampler:
         *,
         sample_temperature: float | None = None,
         fixed_target: int,
+        fixed_confidence: float | None = None,
     ) -> np.ndarray:
         """Impute every candidate intervention for one point in one model call."""
         candidates = np.asarray(candidate_cols, dtype=int)
-        X_aug = self._augmented_candidate_rows(X_query, candidates, fixed_target)
+        X_aug = self._augmented_candidate_rows(
+            X_query,
+            candidates,
+            fixed_target,
+            fixed_confidence=fixed_confidence,
+        )
         temperature = (
             self.temperature if sample_temperature is None else sample_temperature
         )
@@ -379,6 +439,7 @@ class TabICLConditionalDensitySampler:
         *,
         quantiles: Sequence[float],
         fixed_target: int,
+        confidences: Sequence[float] | None = None,
     ) -> np.ndarray:
         """Return deterministic conditional quantiles for every candidate.
 
@@ -400,17 +461,48 @@ class TabICLConditionalDensitySampler:
         if np.any(np.diff(alphas) <= 0):
             raise ValueError("quantiles must be strictly increasing and unique")
 
-        expanded_candidates = np.repeat(candidates, len(alphas))
+        confidence_values = None
+        n_confidences = 1
+        if confidences is not None:
+            confidence_values = np.asarray(confidences, dtype=np.float64)
+            if not self._uses_confidence:
+                raise ValueError(
+                    "confidences require confidence_context in set_context()"
+                )
+            if confidence_values.ndim != 1 or len(confidence_values) == 0:
+                raise ValueError("confidences must be a non-empty 1D sequence")
+            if not np.all(np.isfinite(confidence_values)):
+                raise ValueError("confidences must contain only finite values")
+            n_confidences = len(confidence_values)
+        elif self._uses_confidence:
+            raise ValueError(
+                "confidences are required when confidence conditioning is enabled"
+            )
+
+        expanded_candidates = np.repeat(
+            candidates,
+            n_confidences * len(alphas),
+        )
+        expanded_confidences = None
+        if confidence_values is not None:
+            expanded_confidences = np.tile(
+                np.repeat(confidence_values, len(alphas)),
+                len(candidates),
+            )
         X_aug = self._augmented_candidate_rows(
             X_query,
             expanded_candidates,
             fixed_target,
             allow_duplicate_cols=True,
+            fixed_confidence=expanded_confidences,
         )
 
         sentinel = object()
         previous = getattr(self.model, "_numerical_quantile_grid", sentinel)
-        self.model._numerical_quantile_grid = alphas.astype(np.float32)
+        self.model._numerical_quantile_grid = np.tile(
+            alphas,
+            n_confidences,
+        ).astype(np.float32)
         try:
             filled = np.asarray(
                 self.model.impute(
@@ -429,7 +521,14 @@ class TabICLConditionalDensitySampler:
             np.arange(len(expanded_candidates)),
             expanded_candidates,
         ]
-        return values.astype(np.float64).reshape(len(candidates), len(alphas))
+        reshaped = values.astype(np.float64).reshape(
+            len(candidates),
+            n_confidences,
+            len(alphas),
+        )
+        if confidences is None:
+            return reshaped[:, 0, :]
+        return reshaped
 
     def sample_feature(
         self,
@@ -438,6 +537,7 @@ class TabICLConditionalDensitySampler:
         n_samples: int = 1,
         sample_temperature: float | None = None,
         fixed_target: int | None = None,
+        fixed_confidence: float | None = None,
     ) -> np.ndarray:
         """Compatibility method matching the existing greedy sampler contract."""
         if fixed_target is None:
@@ -451,6 +551,7 @@ class TabICLConditionalDensitySampler:
                 [target_col],
                 sample_temperature=sample_temperature,
                 fixed_target=fixed_target,
+                fixed_confidence=fixed_confidence,
             )
 
         original_state = self.model.random_state
@@ -464,6 +565,7 @@ class TabICLConditionalDensitySampler:
                         [target_col],
                         sample_temperature=sample_temperature,
                         fixed_target=fixed_target,
+                        fixed_confidence=fixed_confidence,
                     )
                 )
         finally:
@@ -475,6 +577,7 @@ class TabICLConditionalDensitySampler:
         X_query: np.ndarray,
         mask_cols: Sequence[int],
         fixed_target: int | None = None,
+        fixed_confidence: float | None = None,
         dag: dict[int, list[int]] | None = None,
     ) -> np.ndarray:
         """Compatibility path for masking the same columns in every query row."""
@@ -491,7 +594,23 @@ class TabICLConditionalDensitySampler:
         X = np.asarray(X_query, dtype=np.float32).copy()
         X[:, list(mask_cols)] = np.nan
         target = np.full((len(X), 1), float(fixed_target), dtype=np.float32)
-        X_aug = np.concatenate([X, target], axis=1)
+        augmented = [X, target]
+        if self._uses_confidence:
+            if fixed_confidence is None:
+                raise ValueError(
+                    "fixed_confidence is required when confidence conditioning is enabled"
+                )
+            confidence = np.full(
+                (len(X), 1),
+                float(fixed_confidence),
+                dtype=np.float32,
+            )
+            augmented.append(confidence)
+        elif fixed_confidence is not None:
+            raise ValueError(
+                "fixed_confidence requires confidence_context in set_context()"
+            )
+        X_aug = np.concatenate(augmented, axis=1)
         filled = np.asarray(
             self.model.impute(
                 X_aug,

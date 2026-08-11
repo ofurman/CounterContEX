@@ -159,25 +159,57 @@ def _select_prob_ascent_quantile_grid(
     candidates: List[int],
     quantiles: Tuple[float, ...],
     feature_domains=None,
-) -> Tuple[int, float, Optional[float]]:
-    """Score every candidate-feature/conditional-quantile pair in one batch."""
+    *,
+    confidences: Tuple[float, ...] | None = None,
+    tau: float = 0.5,
+    plausibility_model=None,
+    validity_first: bool = False,
+    probability_slack: float = 0.02,
+) -> Tuple[int, float, Optional[float], Dict]:
+    """Score every feature/quantile/(optional) confidence candidate.
+
+    The baseline path preserves maximum target probability. In the
+    plausibility-aware path, classifier validity is a hard gate: if any trial
+    flips, the lowest-LOF valid trial is selected. Before a direct flip exists,
+    LOF selects among trials whose target probability is within
+    ``probability_slack`` of the best available progress.
+    """
     values = np.asarray(
         sampler.sample_candidate_grid(
             x_cf.reshape(1, -1),
             candidates,
             quantiles=quantiles,
             fixed_target=y_target,
+            confidences=confidences,
         ),
         dtype=np.float64,
     )
-    expected = (len(candidates), len(quantiles))
+    n_confidences = 1 if confidences is None else len(confidences)
+    expected = (
+        (len(candidates), len(quantiles))
+        if confidences is None
+        else (len(candidates), n_confidences, len(quantiles))
+    )
     if values.shape != expected:
         raise ValueError(
             "sample_candidate_grid returned an unexpected shape; "
             f"expected {expected}, got {values.shape}"
         )
 
-    expanded_candidates = np.repeat(np.asarray(candidates, dtype=int), len(quantiles))
+    expanded_candidates = np.repeat(
+        np.asarray(candidates, dtype=int),
+        n_confidences * len(quantiles),
+    )
+    expanded_quantiles = np.tile(
+        np.asarray(quantiles, dtype=np.float64),
+        len(candidates) * n_confidences,
+    )
+    expanded_confidences = None
+    if confidences is not None:
+        expanded_confidences = np.tile(
+            np.repeat(np.asarray(confidences, dtype=np.float64), len(quantiles)),
+            len(candidates),
+        )
     flat_values = project_candidate_values(
         expanded_candidates.tolist(),
         values.reshape(-1),
@@ -186,11 +218,45 @@ def _select_prob_ascent_quantile_grid(
     trials = np.repeat(x_cf.reshape(1, -1), len(flat_values), axis=0)
     trials[np.arange(len(flat_values)), expanded_candidates] = flat_values
     probabilities = np.asarray(disc.predict_proba(trials))[:, y_target]
-    best = int(np.argmax(probabilities))
+    predictions = np.asarray(disc.predict(trials))
+    valid = (predictions == y_target) & (probabilities >= tau)
+
+    lof_scores = None
+    if plausibility_model is not None:
+        lof_scores = -np.asarray(plausibility_model.score_samples(trials))
+
+    if validity_first and valid.any():
+        eligible = np.flatnonzero(valid)
+        if lof_scores is None:
+            best = int(eligible[np.argmax(probabilities[eligible])])
+        else:
+            best = int(eligible[np.argmin(lof_scores[eligible])])
+    elif validity_first and lof_scores is not None:
+        best_probability = float(np.max(probabilities))
+        eligible = np.flatnonzero(
+            probabilities >= best_probability - probability_slack
+        )
+        best = int(eligible[np.argmin(lof_scores[eligible])])
+    else:
+        best = int(np.argmax(probabilities))
+
+    metadata = {
+        "quantile": float(expanded_quantiles[best]),
+        "confidence": (
+            None
+            if expanded_confidences is None
+            else float(expanded_confidences[best])
+        ),
+        "lof": None if lof_scores is None else float(lof_scores[best]),
+        "immediate_valid": bool(valid[best]),
+        "n_valid_candidates": int(valid.sum()),
+        "n_candidates": int(len(trials)),
+    }
     return (
         int(expanded_candidates[best]),
         float(probabilities[best]),
         float(flat_values[best]),
+        metadata,
     )
 
 
@@ -248,6 +314,10 @@ def greedy_counterfactual(
     feature_domains=None,
     retain_best: bool = False,
     candidate_quantiles: Tuple[float, ...] | None = None,
+    candidate_confidences: Tuple[float, ...] | None = None,
+    plausibility_model=None,
+    validity_first: bool = False,
+    probability_slack: float = 0.02,
 ) -> Tuple[np.ndarray, List[int], Dict]:
     """Greedily build a counterfactual for one factual point.
 
@@ -327,11 +397,20 @@ def greedy_counterfactual(
             raise ValueError(
                 "candidate_quantiles require batched prob_ascent selection"
             )
+    if candidate_confidences is not None:
+        candidate_confidences = tuple(float(c) for c in candidate_confidences)
+        if candidate_quantiles is None:
+            raise ValueError(
+                "candidate_confidences require candidate_quantiles"
+            )
+    if probability_slack < 0:
+        raise ValueError("probability_slack must be non-negative")
     y_current = 1 - int(y_target)  # binary task
 
     x_cf = x.copy()
     changed: List[int] = []  # distinct columns, first-touch order (= L0)
     history: List[tuple] = []
+    selection_history: List[Dict] = []
     total_edits = 0
     rounds_used = 0
 
@@ -358,16 +437,24 @@ def greedy_counterfactual(
             if not candidates:
                 break
 
+            selection_metadata: Dict = {}
             if selector == "prob_ascent":
                 if candidate_quantiles is not None:
-                    j_star, score, val = _select_prob_ascent_quantile_grid(
-                        sampler,
-                        disc,
-                        x_cf,
-                        y_target,
-                        candidates,
-                        candidate_quantiles,
-                        feature_domains,
+                    j_star, score, val, selection_metadata = (
+                        _select_prob_ascent_quantile_grid(
+                            sampler,
+                            disc,
+                            x_cf,
+                            y_target,
+                            candidates,
+                            candidate_quantiles,
+                            feature_domains,
+                            confidences=candidate_confidences,
+                            tau=tau,
+                            plausibility_model=plausibility_model,
+                            validity_first=validity_first,
+                            probability_slack=probability_slack,
+                        )
                     )
                 else:
                     select = (
@@ -432,6 +519,7 @@ def greedy_counterfactual(
             total_edits += 1
             flipped, p_t = _flip_state(x_cf)
             history.append((j_star, val, p_t, score))
+            selection_history.append(selection_metadata)
             if p_t > best_p_t:
                 best_x_cf = x_cf.copy()
                 best_changed = changed.copy()
@@ -443,12 +531,14 @@ def greedy_counterfactual(
             break  # fixed point: no single-column edit improves p_target
 
     attempt_history = history.copy()
+    attempt_selection_history = selection_history.copy()
     if retain_best and not flipped:
         x_cf = best_x_cf
         changed = best_changed
         p_t = best_p_t
         total_edits = best_steps
         history = history[:best_history_length]
+        selection_history = selection_history[:best_history_length]
 
     # Immutability assert (extends the predecessor Stage-7 check): every
     # non-actionable column must be byte-identical to the factual.
@@ -470,6 +560,11 @@ def greedy_counterfactual(
         "best_target_probability": float(best_p_t),
         "batch_candidates": bool(batch_candidates),
         "candidate_quantiles": candidate_quantiles,
+        "candidate_confidences": candidate_confidences,
+        "selection_history": selection_history,
+        "attempt_selection_history": attempt_selection_history,
+        "validity_first": bool(validity_first),
+        "probability_slack": float(probability_slack),
         "retain_best": bool(retain_best),
     }
     return x_cf, changed, info

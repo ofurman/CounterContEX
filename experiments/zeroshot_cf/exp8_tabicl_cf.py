@@ -38,6 +38,29 @@ DEFAULT_N_ESTIMATORS = 4
 DEFAULT_POINT_ESTIMATE = "mode"
 
 
+def empirical_confidence_grid(
+    confidences: np.ndarray,
+    labels: np.ndarray,
+    target_class: int,
+    quantile_levels: tuple[float, ...],
+) -> tuple[float, ...]:
+    """Derive query-confidence candidates from the selected target-class rows."""
+    levels = np.asarray(quantile_levels, dtype=np.float64)
+    if levels.ndim != 1 or len(levels) == 0:
+        raise ValueError("confidence quantile levels must be a non-empty sequence")
+    if np.any((levels <= 0) | (levels >= 1)) or np.any(np.diff(levels) <= 0):
+        raise ValueError(
+            "confidence quantile levels must be strictly increasing inside (0, 1)"
+        )
+    scores = np.asarray(confidences, dtype=np.float64)
+    context_labels = np.asarray(labels)
+    target_scores = scores[context_labels == target_class]
+    if len(target_scores) == 0:
+        target_scores = scores
+    values = np.quantile(target_scores, levels)
+    return tuple(float(v) for v in np.unique(values))
+
+
 def _resolve_max_test(dataset_name: str, max_test: int | None) -> int | None:
     if max_test is not None and max_test < 0:
         return None
@@ -60,6 +83,9 @@ def generate_tabicl_counterfactuals(
     project_to_domain: bool = True,
     retain_best: bool = True,
     candidate_quantiles: tuple[float, ...] | None = None,
+    confidence_quantiles: tuple[float, ...] | None = None,
+    lof_first: bool = False,
+    probability_slack: float = 0.02,
     cache_dir: Path | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
     """Generate TabICL counterfactuals under the fixed Athena configuration."""
@@ -75,6 +101,14 @@ def generate_tabicl_counterfactuals(
         candidate_quantiles = tuple(float(q) for q in candidate_quantiles)
         if candidate_mode != "batched":
             raise ValueError("candidate_quantiles require candidate_mode='batched'")
+    if confidence_quantiles is not None:
+        confidence_quantiles = tuple(float(q) for q in confidence_quantiles)
+        if candidate_quantiles is None:
+            raise ValueError("confidence_quantiles require candidate_quantiles")
+    if lof_first and candidate_quantiles is None:
+        raise ValueError("lof_first requires candidate_quantiles")
+    if probability_slack < 0:
+        raise ValueError("probability_slack must be non-negative")
 
     from experiments.zeroshot_cf.data import (
         get_actionable_immutable,
@@ -100,6 +134,18 @@ def generate_tabicl_counterfactuals(
     y_pred = disc_model.predict(X_test)
     y_target = 1 - y_pred
     y_context = disc_model.predict(X_train) if context_labels == "disc" else y_train
+    context_probabilities = (
+        np.asarray(disc_model.predict_proba(X_train))
+        if confidence_quantiles is not None
+        else None
+    )
+
+    plausibility_model = None
+    if lof_first:
+        from sklearn.neighbors import LocalOutlierFactor
+
+        plausibility_model = LocalOutlierFactor(n_neighbors=20, novelty=True)
+        plausibility_model.fit(X_train)
 
     print(f"\n=== Experiment 8 (TabICL): {dataset_name.upper()} ===")
     print(
@@ -108,6 +154,8 @@ def generate_tabicl_counterfactuals(
         f"candidate_mode={candidate_mode}, context_update={context_update}, "
         f"point_estimate={point_estimate}, project_to_domain={project_to_domain}, "
         f"retain_best={retain_best}, candidate_quantiles={candidate_quantiles}, "
+        f"confidence_quantiles={confidence_quantiles}, lof_first={lof_first}, "
+        f"probability_slack={probability_slack}, "
         f"temperature={temperature}, "
         f"n_estimators={n_estimators}, n_test={len(X_test)}"
     )
@@ -135,6 +183,12 @@ def generate_tabicl_counterfactuals(
     attempt_history_per_point: list[list[tuple]] = [
         [] for _ in range(len(X_test))
     ]
+    selection_history_per_point: list[list[dict]] = [
+        [] for _ in range(len(X_test))
+    ]
+    confidence_grid_per_point: list[tuple[float, ...] | None] = [
+        None for _ in range(len(X_test))
+    ]
 
     started = time.perf_counter()
     for i, (x, target) in enumerate(zip(X_test, y_target)):
@@ -142,11 +196,24 @@ def generate_tabicl_counterfactuals(
         sampler.set_context(
             X_train,
             y_context=y_context,
+            confidence_context=(
+                None
+                if context_probabilities is None
+                else context_probabilities[:, int(target)]
+            ),
             target_class=None,
             max_context=ATHENA_CONTEXT_SIZE,
             selection="knn",
             query=x,
         )
+        confidence_grid = None
+        if confidence_quantiles is not None:
+            confidence_grid = empirical_confidence_grid(
+                sampler.selected_confidences_,
+                sampler.selected_labels_,
+                int(target),
+                confidence_quantiles,
+            )
         x_cf, changed, greedy_info = greedy_counterfactual(
             sampler,
             disc_model,
@@ -161,6 +228,10 @@ def generate_tabicl_counterfactuals(
             feature_domains=feature_domains,
             retain_best=retain_best,
             candidate_quantiles=candidate_quantiles,
+            candidate_confidences=confidence_grid,
+            plausibility_model=plausibility_model,
+            validity_first=lof_first,
+            probability_slack=probability_slack,
         )
         X_cf[i] = x_cf
         changed_per_point[i] = changed
@@ -168,6 +239,8 @@ def generate_tabicl_counterfactuals(
         steps_per_point[i] = greedy_info["steps"]
         history_per_point[i] = greedy_info["history"]
         attempt_history_per_point[i] = greedy_info["attempt_history"]
+        selection_history_per_point[i] = greedy_info["selection_history"]
+        confidence_grid_per_point[i] = confidence_grid
 
         if i == 0:
             first_s = time.perf_counter() - started
@@ -198,6 +271,9 @@ def generate_tabicl_counterfactuals(
         "project_to_domain": project_to_domain,
         "retain_best": retain_best,
         "candidate_quantiles": candidate_quantiles,
+        "confidence_quantiles": confidence_quantiles,
+        "lof_first": lof_first,
+        "probability_slack": probability_slack,
         "n_estimators": n_estimators,
         "runtime_s": runtime_s,
         "changed_per_point": changed_per_point,
@@ -205,6 +281,8 @@ def generate_tabicl_counterfactuals(
         "steps_per_point": steps_per_point,
         "history_per_point": history_per_point,
         "attempt_history_per_point": attempt_history_per_point,
+        "selection_history_per_point": selection_history_per_point,
+        "confidence_grid_per_point": confidence_grid_per_point,
     }
     return X_test, y_test, X_cf, info
 
@@ -237,6 +315,9 @@ def run_and_report(
         "project_to_domain": info["project_to_domain"],
         "retain_best": info["retain_best"],
         "candidate_quantiles": info["candidate_quantiles"],
+        "confidence_quantiles": info["confidence_quantiles"],
+        "lof_first": info["lof_first"],
+        "probability_slack": info["probability_slack"],
         "n_estimators": info["n_estimators"],
         "temperature": info["temperature"],
         "n_test": len(X_test),
@@ -311,6 +392,33 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--confidence-quantiles",
+        type=float,
+        nargs="+",
+        default=None,
+        metavar="Q",
+        help=(
+            "Quantile levels of the selected context's target-class confidence "
+            "distribution. The resulting empirical confidence values are appended "
+            "to TabICL queries; requires --candidate-quantiles."
+        ),
+    )
+    parser.add_argument(
+        "--lof-first",
+        action="store_true",
+        help=(
+            "Among immediately valid candidates choose minimum LOF; before a "
+            "flip, use LOF among candidates within --probability-slack of the "
+            "best target probability."
+        ),
+    )
+    parser.add_argument(
+        "--probability-slack",
+        type=float,
+        default=0.02,
+        help="Pre-flip probability window in which LOF decides (default: 0.02).",
+    )
+    parser.add_argument(
         "--no-domain-projection",
         action="store_true",
         help="Disable training-range/support projection (diagnostic only).",
@@ -342,6 +450,13 @@ def main() -> None:
                 if args.candidate_quantiles is None
                 else tuple(args.candidate_quantiles)
             ),
+            confidence_quantiles=(
+                None
+                if args.confidence_quantiles is None
+                else tuple(args.confidence_quantiles)
+            ),
+            lof_first=args.lof_first,
+            probability_slack=args.probability_slack,
             cache_dir=args.cache_dir,
         )
 

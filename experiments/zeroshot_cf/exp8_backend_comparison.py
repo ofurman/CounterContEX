@@ -130,6 +130,9 @@ def run_tabicl_v2(
     n_estimators: int,
     tabicl_cache_dir: Path | None,
     candidate_quantiles: tuple[float, ...] | None = None,
+    confidence_quantiles: tuple[float, ...] | None = None,
+    lof_first: bool = False,
+    probability_slack: float = 0.02,
 ) -> dict[str, Any]:
     """Run TabICLv2 with candidate expansion at ``knn_both@512``."""
     X_test, y_test, X_cf, info = generate_tabicl_counterfactuals(
@@ -141,6 +144,9 @@ def run_tabicl_v2(
         context_labels="disc",
         candidate_mode="batched",
         candidate_quantiles=candidate_quantiles,
+        confidence_quantiles=confidence_quantiles,
+        lof_first=lof_first,
+        probability_slack=probability_slack,
         cache_dir=tabicl_cache_dir,
     )
     metrics = evaluate_and_report(
@@ -166,6 +172,9 @@ def run_tabicl_v2(
         "project_to_domain": info["project_to_domain"],
         "retain_best": info["retain_best"],
         "candidate_quantiles": info["candidate_quantiles"],
+        "confidence_quantiles": info["confidence_quantiles"],
+        "lof_first": info["lof_first"],
+        "probability_slack": info["probability_slack"],
         "context_labels": "disc",
         "n_estimators": n_estimators,
         "temperature": temperature,
@@ -217,6 +226,27 @@ def main() -> None:
         help="Deterministic TabICL candidate quantiles; applies only to TabICL.",
     )
     parser.add_argument(
+        "--tabicl-confidence-quantiles",
+        type=float,
+        nargs="+",
+        default=None,
+        metavar="Q",
+        help=(
+            "Empirical target-confidence quantile levels used as TabICL "
+            "conditioning candidates; applies only to TabICL."
+        ),
+    )
+    parser.add_argument(
+        "--tabicl-lof-first",
+        action="store_true",
+        help="Use classifier validity as a gate and minimum LOF among valid candidates.",
+    )
+    parser.add_argument(
+        "--tabicl-probability-slack",
+        type=float,
+        default=0.02,
+    )
+    parser.add_argument(
         "--results-dir",
         type=Path,
         default=RESULTS_DIR,
@@ -249,6 +279,13 @@ def main() -> None:
                         if args.tabicl_quantiles is None
                         else tuple(args.tabicl_quantiles)
                     ),
+                    confidence_quantiles=(
+                        None
+                        if args.tabicl_confidence_quantiles is None
+                        else tuple(args.tabicl_confidence_quantiles)
+                    ),
+                    lof_first=args.tabicl_lof_first,
+                    probability_slack=args.tabicl_probability_slack,
                     **common,
                 )
             _write_row(row, args.results_dir)
