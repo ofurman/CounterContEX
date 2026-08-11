@@ -34,6 +34,7 @@ from experiments.zeroshot_cf.metrics_harness import (
     compute_dicoflex_common_metrics,
     print_metrics,
 )
+from sklearn.neighbors import LocalOutlierFactor
 
 DATASETS = (
     "heloc",
@@ -79,6 +80,7 @@ def run_dataset(  # noqa: PLR0913
     tau: float = TAU,
     candidate_quantiles: tuple[float, ...] = DEFAULT_CANDIDATE_QUANTILES,
     confidence_quantiles: tuple[float, ...] = DEFAULT_CONFIDENCE_QUANTILES,
+    lof_first: bool = True,
     validation_fraction: float = DEFAULT_VALIDATION_FRACTION,
     drop_heloc_all_minus9: bool = True,
     tabicl_cache_dir: Path | None = None,
@@ -103,7 +105,7 @@ def run_dataset(  # noqa: PLR0913
         retain_best=True,
         candidate_quantiles=candidate_quantiles,
         confidence_quantiles=confidence_quantiles,
-        lof_first=True,
+        lof_first=lof_first,
         probability_slack=0.0,
         max_rounds=1,
         categorical_fallback=True,
@@ -127,6 +129,13 @@ def run_dataset(  # noqa: PLR0913
         sparsity_eps=0.05,
     )
     print_metrics(common_metrics, prefix=f"{dataset_name}/DiCoFlex-common")
+
+    lof_per_point = info["lof_per_point"]
+    if lof_per_point is None:
+        posthoc_lof = LocalOutlierFactor(n_neighbors=20, novelty=True).fit(
+            bundle.X_train
+        )
+        lof_per_point = -np.asarray(posthoc_lof.score_samples(X_cf), dtype=float)
 
     y_cf_pred = np.asarray(info["disc_model"].predict(X_cf), dtype=int)
     valid = y_cf_pred == info["y_target"]
@@ -168,7 +177,7 @@ def run_dataset(  # noqa: PLR0913
         "candidate_mode": "batched",
         "candidate_quantiles": _levels_text(candidate_quantiles),
         "confidence_quantiles": _levels_text(confidence_quantiles),
-        "lof_first": True,
+        "lof_first": lof_first,
         "categorical_fallback": True,
         "n_estimators": n_estimators,
         "temperature": temperature,
@@ -202,7 +211,7 @@ def run_dataset(  # noqa: PLR0913
             "cf_prediction": int(y_cf_pred[i]),
             "valid": bool(y_cf_pred[i] == info["y_target"][i]),
             "target_probability": float(info["target_probability_per_point"][i]),
-            "lof_score": float(info["lof_per_point"][i]),
+            "lof_score": float(lof_per_point[i]),
             "changed_columns": len(info["changed_per_point"][i]),
             "steps": int(info["steps_per_point"][i]),
         }
@@ -270,6 +279,15 @@ def main() -> None:
         help="Fraction of the provisional 80%% train set used for validation.",
     )
     parser.add_argument(
+        "--lof-first",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Rank valid candidates by LOF; disable to rank every candidate by "
+            "target-class probability only."
+        ),
+    )
+    parser.add_argument(
         "--drop-heloc-all-minus9",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -289,6 +307,7 @@ def main() -> None:
         tau=args.tau,
         candidate_quantiles=tuple(args.candidate_quantiles),
         confidence_quantiles=tuple(args.confidence_quantiles),
+        lof_first=args.lof_first,
         validation_fraction=args.validation_fraction,
         drop_heloc_all_minus9=args.drop_heloc_all_minus9,
         tabicl_cache_dir=args.tabicl_cache_dir,
