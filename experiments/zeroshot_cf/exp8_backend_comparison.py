@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 from pathlib import Path
 from typing import Any
 
@@ -157,6 +158,26 @@ def run_tabicl_v2(
         info,
         write_csv=False,
     )
+    diagnostics = None
+    if info["lof_per_point"] is not None:
+        diagnostics = {
+            "dataset": dataset_name,
+            "lof_per_point": info["lof_per_point"].tolist(),
+            "y_pred": info["y_pred"].tolist(),
+            "y_target": info["y_target"].tolist(),
+            "target_probability_per_point": info[
+                "target_probability_per_point"
+            ].tolist(),
+            "changed_per_point": info["changed_per_point"],
+            "flipped_per_point": info["flipped_per_point"],
+            "steps_per_point": info["steps_per_point"],
+            "history_per_point": info["history_per_point"],
+            "attempt_history_per_point": info["attempt_history_per_point"],
+            "selection_history_per_point": info["selection_history_per_point"],
+            "confidence_grid_per_point": info["confidence_grid_per_point"],
+            "X_test": X_test.tolist(),
+            "X_cf": X_cf.tolist(),
+        }
     return {
         "dataset": dataset_name,
         "backend": "tabicl_v2",
@@ -180,12 +201,15 @@ def run_tabicl_v2(
         "temperature": temperature,
         "n_test": len(X_test),
         "runtime_s": round(float(info["runtime_s"]), 2),
+        "_diagnostics": diagnostics,
         **metrics,
     }
 
 
 def _write_row(row: dict[str, Any], results_dir: Path = RESULTS_DIR) -> Path:
     results_dir.mkdir(parents=True, exist_ok=True)
+    row = dict(row)
+    diagnostics = row.pop("_diagnostics", None)
     output = results_dir / (
         f"exp8_compare_{row['dataset']}_{row['backend']}_metrics.csv"
     )
@@ -194,6 +218,13 @@ def _write_row(row: dict[str, Any], results_dir: Path = RESULTS_DIR) -> Path:
         writer.writeheader()
         writer.writerow(row)
     print(f"Wrote {output}")
+    if diagnostics is not None:
+        diagnostics_output = output.with_name(
+            output.name.replace("_metrics.csv", "_diagnostics.json")
+        )
+        with diagnostics_output.open("w") as handle:
+            json.dump(diagnostics, handle, indent=2)
+        print(f"Wrote {diagnostics_output}")
     return output
 
 

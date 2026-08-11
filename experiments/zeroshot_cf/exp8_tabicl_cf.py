@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import time
 from pathlib import Path
 from typing import Any
@@ -250,6 +251,14 @@ def generate_tabicl_counterfactuals(
             )
 
     runtime_s = time.perf_counter() - started
+    lof_per_point = (
+        None
+        if plausibility_model is None
+        else -np.asarray(plausibility_model.score_samples(X_cf), dtype=np.float64)
+    )
+    target_probability_per_point = np.asarray(disc_model.predict_proba(X_cf))[
+        np.arange(len(X_cf)), y_target.astype(int)
+    ]
     info: dict[str, Any] = {
         "bundle": bundle,
         "y_pred": y_pred,
@@ -283,6 +292,8 @@ def generate_tabicl_counterfactuals(
         "attempt_history_per_point": attempt_history_per_point,
         "selection_history_per_point": selection_history_per_point,
         "confidence_grid_per_point": confidence_grid_per_point,
+        "lof_per_point": lof_per_point,
+        "target_probability_per_point": target_probability_per_point,
     }
     return X_test, y_test, X_cf, info
 
@@ -331,6 +342,29 @@ def run_and_report(
         writer.writeheader()
         writer.writerow(row)
     print(f"\n  Wrote {output}")
+    if info["lof_per_point"] is not None:
+        diagnostics = {
+            "dataset": dataset_name,
+            "lof_per_point": info["lof_per_point"].tolist(),
+            "y_pred": info["y_pred"].tolist(),
+            "y_target": info["y_target"].tolist(),
+            "target_probability_per_point": info[
+                "target_probability_per_point"
+            ].tolist(),
+            "changed_per_point": info["changed_per_point"],
+            "flipped_per_point": info["flipped_per_point"],
+            "steps_per_point": info["steps_per_point"],
+            "history_per_point": info["history_per_point"],
+            "attempt_history_per_point": info["attempt_history_per_point"],
+            "selection_history_per_point": info["selection_history_per_point"],
+            "confidence_grid_per_point": info["confidence_grid_per_point"],
+            "X_test": X_test.tolist(),
+            "X_cf": X_cf.tolist(),
+        }
+        diagnostics_output = RESULTS_DIR / f"exp8_tabicl_{dataset_name}_diagnostics.json"
+        with diagnostics_output.open("w") as handle:
+            json.dump(diagnostics, handle, indent=2)
+        print(f"  Wrote {diagnostics_output}")
     return metrics
 
 
