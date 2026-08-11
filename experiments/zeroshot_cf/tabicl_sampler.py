@@ -23,7 +23,8 @@ from typing import Any
 import numpy as np
 import torch
 from experiments.zeroshot_cf.tabicl_checkpoints import require_checkpoints
-from tabicl import TabICLClassifier, TabICLUnsupervised
+from tabicl import TabICLClassifier
+from tabicl._unsupervised.unsupervised import TabICLUnsupervised
 
 ModelFactory = Callable[..., Any]
 
