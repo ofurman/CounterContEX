@@ -1,6 +1,6 @@
 """Dataset loading for the zero-shot CF experiment.
 
-Loads HELOC, MOONS, and AUDIT via cel, applies MinMax scaling (fit on
+Loads HELOC, MOONS, AUDIT, and German Credit via cel, applies MinMax scaling (fit on
 train), and provides each dataset's actionable/immutable feature split.
 """
 
@@ -102,6 +102,8 @@ def get_actionable_immutable(
     """Return (actionable_idx, immutable_idx) in the scaled feature matrix column order.
 
     For 'heloc': uses configs/heloc_actionability.yaml (Decision #2).
+    For 'german_credit': numerical features are actionable; one-hot categorical
+    groups are fixed until grouped categorical interventions are implemented.
     For 'moons' and 'audit': all features are actionable, no immutables.
 
     Args:
@@ -117,6 +119,15 @@ def get_actionable_immutable(
             dataset = load_dataset(name)
         n = len(dataset.feature_names)
         return list(range(n)), []
+
+    if name == "german_credit":
+        if dataset is None:
+            dataset = load_dataset(name)
+        actionable_idx = list(dataset.numerical_features_indices)
+        immutable_idx = [
+            i for i in range(len(dataset.feature_names)) if i not in actionable_idx
+        ]
+        return actionable_idx, immutable_idx
 
     if name == "heloc":
         cfg_path = CONFIGS_DIR / "heloc_actionability.yaml"
@@ -135,5 +146,6 @@ def get_actionable_immutable(
         return actionable_idx, immutable_idx
 
     raise ValueError(
-        f"Unknown dataset: {name!r}. Supported: 'heloc', 'moons', 'audit'."
+        f"Unknown dataset: {name!r}. Supported: 'heloc', 'moons', 'audit', "
+        "'german_credit'."
     )

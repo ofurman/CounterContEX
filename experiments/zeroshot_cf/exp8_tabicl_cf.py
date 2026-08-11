@@ -402,7 +402,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--dataset",
-        choices=["moons", "heloc", "all"],
+        choices=["moons", "heloc", "german_credit", "all"],
         default="moons",
     )
     parser.add_argument("--tau", type=float, default=TAU)
@@ -510,7 +510,11 @@ def main() -> None:
     parser.add_argument("--cache-dir", type=Path, default=None)
     args = parser.parse_args()
 
-    datasets = ["moons", "heloc"] if args.dataset == "all" else [args.dataset]
+    datasets = (
+        ["moons", "heloc", "german_credit"]
+        if args.dataset == "all"
+        else [args.dataset]
+    )
     for dataset_name in datasets:
         run_and_report(
             dataset_name,

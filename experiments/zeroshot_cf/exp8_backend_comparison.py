@@ -31,7 +31,7 @@ from experiments.zeroshot_cf.exp8_tabicl_cf import (
     generate_tabicl_counterfactuals,
 )
 
-DATASETS = ("moons", "heloc")
+DATASETS = ("moons", "heloc", "german_credit")
 RESULTS_DIR = Path(__file__).parent / "results"
 TABPFN_N_PERMUTATIONS = 3
 

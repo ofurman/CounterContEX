@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import numpy as np
-from experiments.zeroshot_cf.data import load_dataset
+from experiments.zeroshot_cf.data import get_actionable_immutable, load_dataset
 
 
 def test_heloc_all_minus9_rows_are_removed_before_split_and_scaling() -> None:
@@ -30,3 +30,15 @@ def test_heloc_cleaning_is_explicit_and_disabled_by_default() -> None:
     assert original.n_dropped_rows == 0
     assert original.preprocessing_variant == "original"
     assert np.any(np.all(original.method_dataset.X_train_raw == -9, axis=1))
+
+
+def test_german_credit_uses_continuous_only_action_space() -> None:
+    """Keep one-hot groups fixed until grouped categorical edits are supported."""
+    bundle = load_dataset("german_credit")
+    actionable, immutable = get_actionable_immutable("german_credit", bundle)
+
+    assert actionable == bundle.numerical_features_indices
+    assert len(actionable) == 7
+    assert len(immutable) == 50
+    assert set(actionable).isdisjoint(immutable)
+    assert sorted([*actionable, *immutable]) == list(range(len(bundle.feature_names)))
