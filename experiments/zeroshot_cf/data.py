@@ -34,22 +34,46 @@ class DatasetBundle:
     numerical_features_indices: List[int]
     categorical_features_indices: List[int]
     method_dataset: MethodDataset  # for inverse_transform back to original space
+    n_dropped_rows: int = 0
+    preprocessing_variant: str = "original"
 
     def inverse_transform(self, X: np.ndarray) -> np.ndarray:
         return self.method_dataset.inverse_transform(X)
 
 
-def load_dataset(name: str) -> DatasetBundle:
+def load_dataset(
+    name: str,
+    *,
+    drop_heloc_all_minus9: bool = False,
+) -> DatasetBundle:
     """Load a supported cel classification dataset, MinMax-scaled.
 
     Split is 80/20 stratified with random_state=42 (cel default).
     Scaling is fit on X_train only.
+
+    When ``drop_heloc_all_minus9`` is enabled, completely unavailable HELOC
+    bureau records are removed before splitting and scaling. Partial special
+    codes are intentionally preserved for this controlled comparison.
     """
     config_path = CEL_REPO / "config" / "datasets" / f"{name}.yaml"
     if not config_path.exists():
         raise FileNotFoundError(f"Dataset config not found: {config_path}")
 
     file_dataset = FileDataset(config_path=config_path)
+    n_dropped_rows = 0
+    preprocessing_variant = "original"
+    if name == "heloc" and drop_heloc_all_minus9:
+        # FICO uses -9 as a symbolic "No Bureau Record or No Investigation"
+        # code. Rows containing -9 in every predictor have no usable factual
+        # profile and cannot support individualized counterfactual recourse.
+        # Remove them before the train/test split and before MinMax scaling.
+        all_minus9 = np.all(np.asarray(file_dataset.X) == -9, axis=1)
+        n_dropped_rows = int(all_minus9.sum())
+        keep = ~all_minus9
+        file_dataset.X = file_dataset.X[keep]
+        file_dataset.y = file_dataset.y[keep]
+        file_dataset.raw_data = file_dataset.raw_data.loc[keep].reset_index(drop=True)
+        preprocessing_variant = "drop_heloc_all_minus9"
     preprocessing = PreprocessingPipeline(
         [
             ("minmax", MinMaxScalingStep()),
@@ -67,6 +91,8 @@ def load_dataset(name: str) -> DatasetBundle:
         numerical_features_indices=list(md.numerical_features_indices),
         categorical_features_indices=list(md.categorical_features_indices),
         method_dataset=md,
+        n_dropped_rows=n_dropped_rows,
+        preprocessing_variant=preprocessing_variant,
     )
 
 

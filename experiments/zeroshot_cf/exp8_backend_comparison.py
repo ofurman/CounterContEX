@@ -36,25 +36,38 @@ RESULTS_DIR = Path(__file__).parent / "results"
 TABPFN_N_PERMUTATIONS = 3
 
 
-def _load_shared_data(dataset_name: str, max_test: int | None):
+def _load_shared_data(
+    dataset_name: str,
+    max_test: int | None,
+    *,
+    drop_heloc_all_minus9: bool = False,
+):
     from experiments.zeroshot_cf.data import (
         get_actionable_immutable,
         load_dataset,
     )
     from experiments.zeroshot_cf.discriminator import train_discriminator
 
-    bundle = load_dataset(dataset_name)
+    bundle = load_dataset(
+        dataset_name,
+        drop_heloc_all_minus9=drop_heloc_all_minus9,
+    )
     limit = None if max_test is not None and max_test < 0 else max_test
     if limit is None and max_test is None:
         limit = 100 if dataset_name == "moons" else 50
     X_test, y_test = bundle.X_test[:limit], bundle.y_test[:limit]
     actionable_idx, immutable_idx = get_actionable_immutable(dataset_name, bundle)
+    discriminator_cache_tag = (
+        f"{dataset_name}_drop_all_minus9"
+        if bundle.preprocessing_variant == "drop_heloc_all_minus9"
+        else dataset_name
+    )
     disc_model = train_discriminator(
         bundle.X_train,
         bundle.y_train,
         X_test,
         y_test,
-        dataset_name,
+        discriminator_cache_tag,
     )
     y_pred = disc_model.predict(X_test)
     return {
@@ -77,11 +90,16 @@ def run_tabpfn_v3(
     temperature: float,
     n_estimators: int,
     tabpfn_cache_dir: Path | None,
+    drop_heloc_all_minus9: bool = False,
 ) -> dict[str, Any]:
     """Run the existing TabPFNv3 method at only ``knn_both@512``."""
     from experiments.zeroshot_cf.checkpoints import get_v3_models
 
-    shared = _load_shared_data(dataset_name, max_test)
+    shared = _load_shared_data(
+        dataset_name,
+        max_test,
+        drop_heloc_all_minus9=drop_heloc_all_minus9,
+    )
     clf, reg = get_v3_models(
         n_estimators=n_estimators,
         cache_dir=tabpfn_cache_dir,
@@ -118,6 +136,8 @@ def run_tabpfn_v3(
         "point_estimate": "mode",
         "project_to_domain": True,
         "retain_best": True,
+        "preprocessing_variant": shared["bundle"].preprocessing_variant,
+        "n_dropped_rows": shared["bundle"].n_dropped_rows,
         **row,
     }
 
@@ -134,6 +154,7 @@ def run_tabicl_v2(
     confidence_quantiles: tuple[float, ...] | None = None,
     lof_first: bool = False,
     probability_slack: float = 0.02,
+    drop_heloc_all_minus9: bool = False,
 ) -> dict[str, Any]:
     """Run TabICLv2 with candidate expansion at ``knn_both@512``."""
     X_test, y_test, X_cf, info = generate_tabicl_counterfactuals(
@@ -148,6 +169,7 @@ def run_tabicl_v2(
         confidence_quantiles=confidence_quantiles,
         lof_first=lof_first,
         probability_slack=probability_slack,
+        drop_heloc_all_minus9=drop_heloc_all_minus9,
         cache_dir=tabicl_cache_dir,
     )
     metrics = evaluate_and_report(
@@ -162,6 +184,8 @@ def run_tabicl_v2(
     if info["lof_per_point"] is not None:
         diagnostics = {
             "dataset": dataset_name,
+            "preprocessing_variant": info["preprocessing_variant"],
+            "n_dropped_rows": info["n_dropped_rows"],
             "lof_per_point": info["lof_per_point"].tolist(),
             "y_pred": info["y_pred"].tolist(),
             "y_target": info["y_target"].tolist(),
@@ -196,6 +220,8 @@ def run_tabicl_v2(
         "confidence_quantiles": info["confidence_quantiles"],
         "lof_first": info["lof_first"],
         "probability_slack": info["probability_slack"],
+        "preprocessing_variant": info["preprocessing_variant"],
+        "n_dropped_rows": info["n_dropped_rows"],
         "context_labels": "disc",
         "n_estimators": n_estimators,
         "temperature": temperature,
@@ -278,6 +304,14 @@ def main() -> None:
         default=0.02,
     )
     parser.add_argument(
+        "--drop-heloc-all-minus9",
+        action="store_true",
+        help=(
+            "Before splitting HELOC, remove records whose predictors are all "
+            "the -9 no-bureau-record sentinel."
+        ),
+    )
+    parser.add_argument(
         "--results-dir",
         type=Path,
         default=RESULTS_DIR,
@@ -294,6 +328,7 @@ def main() -> None:
                 "tau": args.tau,
                 "temperature": args.temperature,
                 "n_estimators": args.n_estimators,
+                "drop_heloc_all_minus9": args.drop_heloc_all_minus9,
             }
             if backend == "tabpfn":
                 row = run_tabpfn_v3(

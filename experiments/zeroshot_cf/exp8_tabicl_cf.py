@@ -87,6 +87,7 @@ def generate_tabicl_counterfactuals(
     confidence_quantiles: tuple[float, ...] | None = None,
     lof_first: bool = False,
     probability_slack: float = 0.02,
+    drop_heloc_all_minus9: bool = False,
     cache_dir: Path | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
     """Generate TabICL counterfactuals under the fixed Athena configuration."""
@@ -126,12 +127,26 @@ def generate_tabicl_counterfactuals(
     )
 
     limit = _resolve_max_test(dataset_name, max_test)
-    bundle = load_dataset(dataset_name)
+    bundle = load_dataset(
+        dataset_name,
+        drop_heloc_all_minus9=drop_heloc_all_minus9,
+    )
     X_train, y_train = bundle.X_train, bundle.y_train
     X_test, y_test = bundle.X_test[:limit], bundle.y_test[:limit]
     actionable_idx, immutable_idx = get_actionable_immutable(dataset_name, bundle)
 
-    disc_model = train_discriminator(X_train, y_train, X_test, y_test, dataset_name)
+    discriminator_cache_tag = (
+        f"{dataset_name}_drop_all_minus9"
+        if bundle.preprocessing_variant == "drop_heloc_all_minus9"
+        else dataset_name
+    )
+    disc_model = train_discriminator(
+        X_train,
+        y_train,
+        X_test,
+        y_test,
+        discriminator_cache_tag,
+    )
     y_pred = disc_model.predict(X_test)
     y_target = 1 - y_pred
     y_context = disc_model.predict(X_train) if context_labels == "disc" else y_train
@@ -157,6 +172,8 @@ def generate_tabicl_counterfactuals(
         f"retain_best={retain_best}, candidate_quantiles={candidate_quantiles}, "
         f"confidence_quantiles={confidence_quantiles}, lof_first={lof_first}, "
         f"probability_slack={probability_slack}, "
+        f"preprocessing={bundle.preprocessing_variant}, "
+        f"n_dropped_rows={bundle.n_dropped_rows}, "
         f"temperature={temperature}, "
         f"n_estimators={n_estimators}, n_test={len(X_test)}"
     )
@@ -283,6 +300,9 @@ def generate_tabicl_counterfactuals(
         "confidence_quantiles": confidence_quantiles,
         "lof_first": lof_first,
         "probability_slack": probability_slack,
+        "drop_heloc_all_minus9": drop_heloc_all_minus9,
+        "preprocessing_variant": bundle.preprocessing_variant,
+        "n_dropped_rows": bundle.n_dropped_rows,
         "n_estimators": n_estimators,
         "runtime_s": runtime_s,
         "changed_per_point": changed_per_point,
@@ -345,6 +365,8 @@ def run_and_report(
     if info["lof_per_point"] is not None:
         diagnostics = {
             "dataset": dataset_name,
+            "preprocessing_variant": info["preprocessing_variant"],
+            "n_dropped_rows": info["n_dropped_rows"],
             "lof_per_point": info["lof_per_point"].tolist(),
             "y_pred": info["y_pred"].tolist(),
             "y_target": info["y_target"].tolist(),
@@ -453,6 +475,14 @@ def main() -> None:
         help="Pre-flip probability window in which LOF decides (default: 0.02).",
     )
     parser.add_argument(
+        "--drop-heloc-all-minus9",
+        action="store_true",
+        help=(
+            "Before splitting HELOC, remove rows whose 23 predictors are all "
+            "the -9 no-bureau-record sentinel."
+        ),
+    )
+    parser.add_argument(
         "--no-domain-projection",
         action="store_true",
         help="Disable training-range/support projection (diagnostic only).",
@@ -491,6 +521,7 @@ def main() -> None:
             ),
             lof_first=args.lof_first,
             probability_slack=args.probability_slack,
+            drop_heloc_all_minus9=args.drop_heloc_all_minus9,
             cache_dir=args.cache_dir,
         )
 
