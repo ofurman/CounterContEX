@@ -33,8 +33,9 @@ from experiments.zeroshot_cf.exp4_greedy_cf import (
 RESULTS_DIR = Path(__file__).parent / "results"
 ATHENA_CONTEXT_SIZE = 512
 ATHENA_CONTEXT_STRATEGY = "knn_both"
-DEFAULT_TEMPERATURE = 1e-9  # deterministic TabICL median / categorical mode
+DEFAULT_TEMPERATURE = 1e-9  # deterministic point estimate / categorical mode
 DEFAULT_N_ESTIMATORS = 4
+DEFAULT_POINT_ESTIMATE = "mode"
 
 
 def _resolve_max_test(dataset_name: str, max_test: int | None) -> int | None:
@@ -55,6 +56,9 @@ def generate_tabicl_counterfactuals(
     context_labels: str = "disc",
     candidate_mode: str = "batched",
     context_update: str = "replace",
+    point_estimate: str = DEFAULT_POINT_ESTIMATE,
+    project_to_domain: bool = True,
+    retain_best: bool = True,
     cache_dir: Path | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
     """Generate TabICL counterfactuals under the fixed Athena configuration."""
@@ -64,13 +68,18 @@ def generate_tabicl_counterfactuals(
         raise ValueError("candidate_mode must be 'batched' or 'sequential'")
     if context_update not in {"replace", "refit"}:
         raise ValueError("context_update must be 'replace' or 'refit'")
+    if point_estimate not in {"median", "mode"}:
+        raise ValueError("point_estimate must be 'median' or 'mode'")
 
     from experiments.zeroshot_cf.data import (
         get_actionable_immutable,
         load_dataset,
     )
     from experiments.zeroshot_cf.discriminator import train_discriminator
-    from experiments.zeroshot_cf.greedy import greedy_counterfactual
+    from experiments.zeroshot_cf.greedy import (
+        greedy_counterfactual,
+        infer_feature_domains,
+    )
     from experiments.zeroshot_cf.tabicl_checkpoints import TABICL_DEVICE
     from experiments.zeroshot_cf.tabicl_sampler import (
         TabICLConditionalDensitySampler,
@@ -92,7 +101,8 @@ def generate_tabicl_counterfactuals(
         f"  selector=prob_ascent, context={ATHENA_CONTEXT_STRATEGY}"
         f"@{ATHENA_CONTEXT_SIZE}, labels={context_labels}, "
         f"candidate_mode={candidate_mode}, context_update={context_update}, "
-        f"temperature={temperature}, "
+        f"point_estimate={point_estimate}, project_to_domain={project_to_domain}, "
+        f"retain_best={retain_best}, temperature={temperature}, "
         f"n_estimators={n_estimators}, n_test={len(X_test)}"
     )
     print(
@@ -107,13 +117,18 @@ def generate_tabicl_counterfactuals(
         device=TABICL_DEVICE,
         cache_dir=cache_dir,
         context_update=context_update,
+        numerical_point_estimate=point_estimate,
     )
+    feature_domains = infer_feature_domains(X_train) if project_to_domain else None
 
     X_cf = X_test.copy()
     changed_per_point: list[list[int]] = [[] for _ in range(len(X_test))]
     flipped_per_point = [False] * len(X_test)
     steps_per_point = [0] * len(X_test)
     history_per_point: list[list[tuple]] = [[] for _ in range(len(X_test))]
+    attempt_history_per_point: list[list[tuple]] = [
+        [] for _ in range(len(X_test))
+    ]
 
     started = time.perf_counter()
     for i, (x, target) in enumerate(zip(X_test, y_target)):
@@ -137,12 +152,15 @@ def generate_tabicl_counterfactuals(
             budget=len(actionable_idx),
             temperature=temperature,
             batch_candidates=candidate_mode == "batched",
+            feature_domains=feature_domains,
+            retain_best=retain_best,
         )
         X_cf[i] = x_cf
         changed_per_point[i] = changed
         flipped_per_point[i] = greedy_info["flipped"]
         steps_per_point[i] = greedy_info["steps"]
         history_per_point[i] = greedy_info["history"]
+        attempt_history_per_point[i] = greedy_info["attempt_history"]
 
         if i == 0:
             first_s = time.perf_counter() - started
@@ -169,12 +187,16 @@ def generate_tabicl_counterfactuals(
         "max_context": ATHENA_CONTEXT_SIZE,
         "candidate_mode": candidate_mode,
         "context_update": context_update,
+        "point_estimate": point_estimate,
+        "project_to_domain": project_to_domain,
+        "retain_best": retain_best,
         "n_estimators": n_estimators,
         "runtime_s": runtime_s,
         "changed_per_point": changed_per_point,
         "flipped_per_point": flipped_per_point,
         "steps_per_point": steps_per_point,
         "history_per_point": history_per_point,
+        "attempt_history_per_point": attempt_history_per_point,
     }
     return X_test, y_test, X_cf, info
 
@@ -203,6 +225,9 @@ def run_and_report(
         "context_labels": info["context_labels"],
         "candidate_mode": info["candidate_mode"],
         "context_update": info["context_update"],
+        "point_estimate": info["point_estimate"],
+        "project_to_domain": info["project_to_domain"],
+        "retain_best": info["retain_best"],
         "n_estimators": info["n_estimators"],
         "temperature": info["temperature"],
         "n_test": len(X_test),
@@ -259,6 +284,22 @@ def main() -> None:
             "intended only as a small correctness baseline."
         ),
     )
+    parser.add_argument(
+        "--point-estimate",
+        choices=["median", "mode"],
+        default=DEFAULT_POINT_ESTIMATE,
+        help="Numerical TabICL point estimate; mode aligns with TabPFN near-MAP.",
+    )
+    parser.add_argument(
+        "--no-domain-projection",
+        action="store_true",
+        help="Disable training-range/support projection (diagnostic only).",
+    )
+    parser.add_argument(
+        "--no-retain-best",
+        action="store_true",
+        help="Return the final failed state instead of its best probability state.",
+    )
     parser.add_argument("--cache-dir", type=Path, default=None)
     args = parser.parse_args()
 
@@ -273,6 +314,9 @@ def main() -> None:
             context_labels=args.context_labels,
             candidate_mode=args.candidate_mode,
             context_update=args.context_update,
+            point_estimate=args.point_estimate,
+            project_to_domain=not args.no_domain_projection,
+            retain_best=not args.no_retain_best,
             cache_dir=args.cache_dir,
         )
 

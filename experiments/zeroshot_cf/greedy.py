@@ -31,6 +31,46 @@ import numpy as np
 from experiments.zeroshot_cf.sampler import class_conditional_shift
 
 
+def infer_feature_domains(
+    X_train: np.ndarray,
+    *,
+    max_discrete_values: int = 20,
+) -> Tuple[np.ndarray, np.ndarray, Dict[int, np.ndarray]]:
+    """Infer training bounds and small empirical supports for projection."""
+    X = np.asarray(X_train, dtype=np.float64)
+    if X.ndim != 2:
+        raise ValueError(f"X_train must be 2D, got shape {X.shape}")
+    lower = np.nanmin(X, axis=0)
+    upper = np.nanmax(X, axis=0)
+    supports: Dict[int, np.ndarray] = {}
+    for j in range(X.shape[1]):
+        values = np.unique(X[:, j][~np.isnan(X[:, j])])
+        if 0 < len(values) <= max_discrete_values:
+            supports[j] = values
+    return lower, upper, supports
+
+
+def project_candidate_values(
+    candidates: List[int],
+    values: np.ndarray,
+    feature_domains: Tuple[np.ndarray, np.ndarray, Dict[int, np.ndarray]] | None,
+) -> np.ndarray:
+    """Project candidate values to training bounds and empirical supports."""
+    projected = np.asarray(values, dtype=np.float64).copy()
+    if feature_domains is None:
+        return projected
+
+    lower, upper, supports = feature_domains
+    cols = np.asarray(candidates, dtype=int)
+    projected = np.clip(projected, lower[cols], upper[cols])
+    for position, col in enumerate(cols):
+        support = supports.get(int(col))
+        if support is not None:
+            nearest = int(np.abs(support - projected[position]).argmin())
+            projected[position] = support[nearest]
+    return projected
+
+
 def _select_prob_ascent(
     sampler,
     disc,
@@ -38,6 +78,7 @@ def _select_prob_ascent(
     y_target: int,
     candidates: List[int],
     temperature: float,
+    feature_domains=None,
 ) -> Tuple[int, float, Optional[float]]:
     """Strategy 1: pick the candidate whose near-MAP value most increases
     ``disc.predict_proba[y_target]``. Returns ``(j*, score, value)`` where
@@ -56,6 +97,7 @@ def _select_prob_ascent(
                 fixed_target=y_target,
             )[0]
         )
+        v = float(project_candidate_values([j], np.array([v]), feature_domains)[0])
         trial = x_cf.copy()
         trial[j] = v
         p = float(disc.predict_proba(trial.reshape(1, -1))[0, y_target])
@@ -73,6 +115,7 @@ def _select_prob_ascent_batched(
     y_target: int,
     candidates: List[int],
     temperature: float,
+    feature_domains=None,
 ) -> Tuple[int, float, Optional[float]]:
     """Strategy 1 with all candidate masks evaluated in one sampler call.
 
@@ -95,6 +138,7 @@ def _select_prob_ascent_batched(
             "sample_candidates must return one value per candidate; "
             f"expected {(len(candidates),)}, got {values.shape}"
         )
+    values = project_candidate_values(candidates, values, feature_domains)
 
     trials = np.repeat(x_cf.reshape(1, -1), len(candidates), axis=0)
     trials[np.arange(len(candidates)), np.asarray(candidates, dtype=int)] = values
@@ -158,6 +202,8 @@ def greedy_counterfactual(
     temperature: float = 1e-9,
     max_rounds: int = 1,
     batch_candidates: bool = False,
+    feature_domains=None,
+    retain_best: bool = False,
 ) -> Tuple[np.ndarray, List[int], Dict]:
     """Greedily build a counterfactual for one factual point.
 
@@ -242,6 +288,11 @@ def greedy_counterfactual(
         return (pred == y_target and p_t >= tau), p_t
 
     flipped, p_t = _flip_state(x_cf)
+    best_x_cf = x_cf.copy()
+    best_changed = changed.copy()
+    best_p_t = p_t
+    best_steps = total_edits
+    best_history_length = 0
     for rnd in range(max_rounds):
         if flipped:
             break
@@ -260,7 +311,13 @@ def greedy_counterfactual(
                     else _select_prob_ascent
                 )
                 j_star, score, val = select(
-                    sampler, disc, x_cf, y_target, candidates, temperature
+                    sampler,
+                    disc,
+                    x_cf,
+                    y_target,
+                    candidates,
+                    temperature,
+                    feature_domains,
                 )
             elif selector == "class_divergence":
                 j_star, score, val = _select_class_divergence(
@@ -279,6 +336,11 @@ def greedy_counterfactual(
                         target_col=j_star,
                         sample_temperature=temperature,
                         fixed_target=y_target,
+                    )[0]
+                )
+                val = float(
+                    project_candidate_values(
+                        [j_star], np.array([val]), feature_domains
                     )[0]
                 )
 
@@ -305,9 +367,23 @@ def greedy_counterfactual(
             total_edits += 1
             flipped, p_t = _flip_state(x_cf)
             history.append((j_star, val, p_t, score))
+            if p_t > best_p_t:
+                best_x_cf = x_cf.copy()
+                best_changed = changed.copy()
+                best_p_t = p_t
+                best_steps = total_edits
+                best_history_length = len(history)
 
         if rnd > 0 and not edited_this_round:
             break  # fixed point: no single-column edit improves p_target
+
+    attempt_history = history.copy()
+    if retain_best and not flipped:
+        x_cf = best_x_cf
+        changed = best_changed
+        p_t = best_p_t
+        total_edits = best_steps
+        history = history[:best_history_length]
 
     # Immutability assert (extends the predecessor Stage-7 check): every
     # non-actionable column must be byte-identical to the factual.
@@ -322,8 +398,12 @@ def greedy_counterfactual(
     info = {
         "flipped": bool(flipped),
         "steps": total_edits,
+        "attempt_steps": len(attempt_history),
         "rounds": rounds_used,
         "history": history,
+        "attempt_history": attempt_history,
+        "best_target_probability": float(best_p_t),
         "batch_candidates": bool(batch_candidates),
+        "retain_best": bool(retain_best),
     }
     return x_cf, changed, info

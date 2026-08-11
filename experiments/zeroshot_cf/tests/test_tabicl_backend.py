@@ -9,12 +9,15 @@ context/masking/batching logic without downloading TabICL checkpoints.
 from __future__ import annotations
 
 import numpy as np
+import torch
 from experiments.zeroshot_cf.data import get_actionable_immutable
 from experiments.zeroshot_cf.greedy import greedy_counterfactual
 from experiments.zeroshot_cf.tabicl_sampler import (
     TabICLConditionalDensitySampler,
     _knn_indices,
+    quantile_mode,
 )
+from tabicl._model.quantile_dist import QuantileDistribution
 
 
 class _FakeTabICLUnsupervised:
@@ -125,6 +128,21 @@ def test_refit_context_update_calls_upstream_fit_each_time():
 def test_invalid_context_update_is_rejected():
     with np.testing.assert_raises_regex(ValueError, "context_update"):
         _sampler(context_update="shortcut")
+
+
+def test_invalid_numerical_point_estimate_is_rejected():
+    with np.testing.assert_raises_regex(ValueError, "numerical_point_estimate"):
+        _sampler(numerical_point_estimate="mean")
+
+
+def test_quantile_mode_differs_from_median_on_skewed_distribution():
+    dist = QuantileDistribution(torch.tensor([[0.0, 10.0, 20.0, 20.1]]))
+
+    median = float(dist.icdf(torch.tensor(0.5)).item())
+    mode = float(quantile_mode(dist)[0])
+
+    assert 14.0 < median < 16.0
+    assert 19.9 < mode < 20.2
 
 
 def test_candidate_expansion_uses_one_imputation_call():

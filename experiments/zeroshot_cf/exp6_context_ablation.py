@@ -187,9 +187,14 @@ def _run_cell(
     temperature: float,
     n_permutations: int,
     context_y: np.ndarray | None = None,
+    project_to_domain: bool = False,
+    retain_best: bool = False,
 ) -> Dict[str, float]:
     """Run one (size, strategy) cell on a pre-loaded dataset. Returns a CSV row."""
-    from experiments.zeroshot_cf.greedy import greedy_counterfactual
+    from experiments.zeroshot_cf.greedy import (
+        greedy_counterfactual,
+        infer_feature_domains,
+    )
     from experiments.zeroshot_cf.sampler import ConditionalDensitySampler
 
     class_scope, selection = STRATEGY_SPEC[strategy]
@@ -200,6 +205,7 @@ def _run_cell(
         raise ValueError("context_y must contain one label per training row")
     n = len(X_test)
     eff_budget = len(actionable_idx)
+    feature_domains = infer_feature_domains(X_train) if project_to_domain else None
 
     print(
         f"\n  --- cell: size={size} strategy={strategy} "
@@ -261,6 +267,8 @@ def _run_cell(
                     tau=tau,
                     budget=eff_budget,
                     temperature=temperature,
+                    feature_domains=feature_domains,
+                    retain_best=retain_best,
                 )
                 X_cf[i] = x_cf
                 changed_per_point[i] = changed
@@ -288,6 +296,8 @@ def _run_cell(
                     tau=tau,
                     budget=eff_budget,
                     temperature=temperature,
+                    feature_domains=feature_domains,
+                    retain_best=retain_best,
                 )
                 X_cf[i] = x_cf
                 changed_per_point[i] = changed
@@ -316,6 +326,8 @@ def _run_cell(
         "temperature": temperature,
         "n_permutations": n_permutations,
         "max_context": size,
+        "project_to_domain": project_to_domain,
+        "retain_best": retain_best,
         "changed_per_point": changed_per_point,
         "flipped_per_point": flipped_per_point,
         "steps_per_point": steps_per_point,

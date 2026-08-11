@@ -104,6 +104,8 @@ def run_tabpfn_v3(
         temperature=temperature,
         n_permutations=TABPFN_N_PERMUTATIONS,
         context_y=shared["disc_model"].predict(shared["bundle"].X_train),
+        project_to_domain=True,
+        retain_best=True,
     )
     return {
         "dataset": dataset_name,
@@ -112,6 +114,9 @@ def run_tabpfn_v3(
         "context_labels": "disc",
         "n_estimators": n_estimators,
         "temperature": temperature,
+        "point_estimate": "mode",
+        "project_to_domain": True,
+        "retain_best": True,
         **row,
     }
 
@@ -155,6 +160,9 @@ def run_tabicl_v2(
         "selection": "knn",
         "candidate_mode": "batched",
         "context_update": info["context_update"],
+        "point_estimate": info["point_estimate"],
+        "project_to_domain": info["project_to_domain"],
+        "retain_best": info["retain_best"],
         "context_labels": "disc",
         "n_estimators": n_estimators,
         "temperature": temperature,

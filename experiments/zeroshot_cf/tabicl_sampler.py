@@ -20,9 +20,51 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import torch
 from experiments.zeroshot_cf.tabicl_checkpoints import require_checkpoints
 
 ModelFactory = Callable[..., Any]
+
+
+def quantile_mode(dist: Any) -> np.ndarray:
+    """Return the mode of TabICL's interior piecewise-quantile density.
+
+    Density within each interpolated quantile interval is the inverse of that
+    interval's slope. Select the midpoint of the densest interval, breaking
+    ties toward the median. Restricting the estimate to the predicted quantile
+    knots avoids treating extrapolated tail-boundary artefacts as modes. This
+    requires no additional foundation-model forward pass.
+    """
+    with torch.no_grad():
+        slopes = dist.slopes
+        valid = torch.isfinite(slopes) & (slopes >= 0)
+        log_density = torch.where(
+            valid,
+            -torch.log(torch.clamp(slopes, min=dist.tol)),
+            torch.full_like(slopes, -torch.inf),
+        )
+        max_density = log_density.max(dim=-1, keepdim=True).values
+        tied = torch.isclose(log_density, max_density, rtol=1e-5, atol=1e-7)
+        interval_alpha = (dist.alpha_lo + dist.alpha_hi) / 2
+        distance_from_median = (interval_alpha - 0.5).abs()
+        tie_distance = torch.where(
+            tied,
+            distance_from_median,
+            torch.full_like(log_density, torch.inf),
+        )
+        best = tie_distance.argmin(dim=-1)
+        interval_value = (dist.q_lo + dist.q_hi) / 2
+        mode = interval_value.gather(-1, best.unsqueeze(-1)).squeeze(-1)
+
+        finite = torch.isfinite(max_density.squeeze(-1))
+        median_alpha = torch.tensor(
+            0.5,
+            device=dist.quantiles.device,
+            dtype=dist.quantiles.dtype,
+        )
+        median = dist.icdf(median_alpha)
+        mode = torch.where(finite, mode, median)
+    return mode.cpu().numpy()
 
 
 def _knn_indices(X: np.ndarray, query: np.ndarray, k: int) -> np.ndarray:
@@ -87,6 +129,7 @@ def _local_tabicl_model_factory(
     *,
     classifier_path: Path,
     regressor_path: Path,
+    numerical_point_estimate: str,
     **kwargs: Any,
 ):
     """Build TabICLUnsupervised with separate explicit local checkpoints.
@@ -119,6 +162,12 @@ def _local_tabicl_model_factory(
             estimator.model_.to(estimator.device_)
             return estimator.model_
 
+        @staticmethod
+        def _sample_numerical(dist, temperature, rng):
+            if numerical_point_estimate == "mode" and temperature <= 1e-8:
+                return quantile_mode(dist)
+            return TabICLUnsupervised._sample_numerical(dist, temperature, rng)
+
     return _LocalCheckpointTabICLUnsupervised(**kwargs)
 
 
@@ -142,11 +191,17 @@ class TabICLConditionalDensitySampler:
         estimator_params: dict[str, Any] | None = None,
         model_factory: ModelFactory | None = None,
         context_update: str = "replace",
+        numerical_point_estimate: str = "median",
     ) -> None:
         if context_update not in {"replace", "refit"}:
             raise ValueError(
                 "context_update must be 'replace' or 'refit', "
                 f"got {context_update!r}"
+            )
+        if numerical_point_estimate not in {"median", "mode"}:
+            raise ValueError(
+                "numerical_point_estimate must be 'median' or 'mode', "
+                f"got {numerical_point_estimate!r}"
             )
         self.n_estimators = n_estimators
         self.temperature = temperature
@@ -157,6 +212,7 @@ class TabICLConditionalDensitySampler:
         self.estimator_params = dict(estimator_params or {})
         self._model_factory = model_factory
         self.context_update = context_update
+        self.numerical_point_estimate = numerical_point_estimate
 
         self.model: Any | None = None
         self._model_initialized = False
@@ -181,6 +237,7 @@ class TabICLConditionalDensitySampler:
         return _local_tabicl_model_factory(
             classifier_path=classifier_path,
             regressor_path=regressor_path,
+            numerical_point_estimate=self.numerical_point_estimate,
             **kwargs,
         )
 

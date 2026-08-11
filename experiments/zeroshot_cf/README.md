@@ -34,6 +34,11 @@ HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/exp2_counterfactuals.py
 TabICL uses the fixed `prob_ascent + knn_both@512` configuration selected by
 the Athena v3 runs. It does not repeat the context grid. Candidate feature
 interventions are batched into one TabICL imputation call per greedy step.
+Numerical imputations default to the densest interior quantile interval
+(`--point-estimate mode`), candidates are projected to the training range and
+small empirical supports, and a failed search returns its best intermediate
+state. The historical behavior remains available with `--point-estimate
+median --no-domain-projection --no-retain-best` for paired diagnostics.
 
 Stage the two TabICLv2 checkpoints once with network access:
 
@@ -59,9 +64,6 @@ HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.exp8_tabicl_cf \
 
 HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.exp8_tabicl_cf \
     --dataset heloc --max-test 50
-
-HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.exp8_tabicl_cf \
-    --dataset audit --max-test 50
 ```
 
 The default context labels are predictions from the discriminator being

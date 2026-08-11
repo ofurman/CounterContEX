@@ -119,7 +119,10 @@ Outputs land in `experiments/zeroshot_cf/results/athena/<tag>/` as
 Exp8 runs only the final configuration selected by Exp6/Exp7:
 `prob_ascent + knn_both@512 + disc labels + one pass`. It does not rerun the
 context or label grids. The four array tasks are MOONS and HELOC for each
-backend.
+backend. Both backends project proposed values to the observed training domain
+and retain the best intermediate state after a failed search. TabICL numerical
+imputation uses the densest interior interval of its predicted quantile
+distribution instead of its conditional median.
 
 Stage the TabICLv2 checkpoint pair under:
 
