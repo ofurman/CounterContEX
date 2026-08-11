@@ -155,6 +155,7 @@ def run_tabicl_v2(
     lof_first: bool = False,
     probability_slack: float = 0.0,
     max_rounds: int = 1,
+    categorical_fallback: bool = False,
     drop_heloc_all_minus9: bool = False,
 ) -> dict[str, Any]:
     """Run TabICLv2 with candidate expansion at ``knn_both@512``."""
@@ -171,6 +172,7 @@ def run_tabicl_v2(
         lof_first=lof_first,
         probability_slack=probability_slack,
         max_rounds=max_rounds,
+        categorical_fallback=categorical_fallback,
         drop_heloc_all_minus9=drop_heloc_all_minus9,
         cache_dir=tabicl_cache_dir,
     )
@@ -201,6 +203,9 @@ def run_tabicl_v2(
             "attempt_history_per_point": info["attempt_history_per_point"],
             "selection_history_per_point": info["selection_history_per_point"],
             "confidence_grid_per_point": info["confidence_grid_per_point"],
+            "categorical_history_per_point": info[
+                "categorical_history_per_point"
+            ],
             "X_test": X_test.tolist(),
             "X_cf": X_cf.tolist(),
         }
@@ -223,6 +228,7 @@ def run_tabicl_v2(
         "lof_first": info["lof_first"],
         "probability_slack": info["probability_slack"],
         "max_rounds": info["max_rounds"],
+        "categorical_fallback": info["categorical_fallback"],
         "preprocessing_variant": info["preprocessing_variant"],
         "n_dropped_rows": info["n_dropped_rows"],
         "context_labels": "disc",
@@ -313,6 +319,14 @@ def main() -> None:
         help="TabICL greedy coordinate passes (default: 1).",
     )
     parser.add_argument(
+        "--tabicl-categorical-fallback",
+        action="store_true",
+        help=(
+            "Use TabICL conditional category distributions and atomic one-hot "
+            "swaps after numerical TabICL search fails."
+        ),
+    )
+    parser.add_argument(
         "--drop-heloc-all-minus9",
         action="store_true",
         help=(
@@ -362,6 +376,7 @@ def main() -> None:
                     lof_first=args.tabicl_lof_first,
                     probability_slack=args.tabicl_probability_slack,
                     max_rounds=args.tabicl_max_rounds,
+                    categorical_fallback=args.tabicl_categorical_fallback,
                     **common,
                 )
             _write_row(row, args.results_dir)

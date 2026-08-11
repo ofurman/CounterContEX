@@ -5,7 +5,12 @@
 from __future__ import annotations
 
 import numpy as np
-from experiments.zeroshot_cf.data import get_actionable_immutable, load_dataset
+from experiments.zeroshot_cf.data import (
+    get_actionable_immutable,
+    get_grouped_categorical_action_space,
+    get_one_hot_groups,
+    load_dataset,
+)
 
 
 def test_heloc_all_minus9_rows_are_removed_before_split_and_scaling() -> None:
@@ -33,7 +38,7 @@ def test_heloc_cleaning_is_explicit_and_disabled_by_default() -> None:
 
 
 def test_german_credit_uses_continuous_only_action_space() -> None:
-    """Keep one-hot groups fixed until grouped categorical edits are supported."""
+    """Keep the historical numerical-only action space unless opted in."""
     bundle = load_dataset("german_credit")
     actionable, immutable = get_actionable_immutable("german_credit", bundle)
 
@@ -42,3 +47,20 @@ def test_german_credit_uses_continuous_only_action_space() -> None:
     assert len(immutable) == 50
     assert set(actionable).isdisjoint(immutable)
     assert sorted([*actionable, *immutable]) == list(range(len(bundle.feature_names)))
+
+
+def test_german_credit_grouped_action_space_preserves_protected_group() -> None:
+    """Expose allowed categories atomically and retain the protected group."""
+    bundle = load_dataset("german_credit")
+
+    scalar, groups, immutable = get_grouped_categorical_action_space(bundle)
+    all_groups = get_one_hot_groups(bundle)
+
+    assert scalar == bundle.numerical_features_indices
+    assert len(all_groups) == 11
+    assert len(groups) == 10
+    assert "personal_status_sex" not in {group.name for group in groups}
+    protected = next(
+        group for group in all_groups if group.name == "personal_status_sex"
+    )
+    assert immutable == list(protected.columns)

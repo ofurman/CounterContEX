@@ -88,6 +88,7 @@ def generate_tabicl_counterfactuals(
     lof_first: bool = False,
     probability_slack: float = 0.0,
     max_rounds: int = 1,
+    categorical_fallback: bool = False,
     drop_heloc_all_minus9: bool = False,
     cache_dir: Path | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
@@ -117,12 +118,18 @@ def generate_tabicl_counterfactuals(
 
     from experiments.zeroshot_cf.data import (
         get_actionable_immutable,
+        get_grouped_categorical_action_space,
+        get_one_hot_groups,
         load_dataset,
     )
     from experiments.zeroshot_cf.discriminator import train_discriminator
     from experiments.zeroshot_cf.greedy import (
         greedy_counterfactual,
         infer_feature_domains,
+    )
+    from experiments.zeroshot_cf.grouped_categorical import (
+        GroupedCategoricalCodec,
+        grouped_categorical_fallback,
     )
     from experiments.zeroshot_cf.tabicl_checkpoints import TABICL_DEVICE
     from experiments.zeroshot_cf.tabicl_sampler import (
@@ -136,7 +143,27 @@ def generate_tabicl_counterfactuals(
     )
     X_train, y_train = bundle.X_train, bundle.y_train
     X_test, y_test = bundle.X_test[:limit], bundle.y_test[:limit]
-    actionable_idx, immutable_idx = get_actionable_immutable(dataset_name, bundle)
+    numerical_actionable_idx, immutable_idx = get_actionable_immutable(
+        dataset_name, bundle
+    )
+    grouped_actionable = []
+    all_one_hot_groups = []
+    categorical_codec = None
+    if categorical_fallback:
+        (
+            numerical_actionable_idx,
+            grouped_actionable,
+            immutable_idx,
+        ) = get_grouped_categorical_action_space(bundle)
+        all_one_hot_groups = get_one_hot_groups(bundle)
+        if all_one_hot_groups:
+            categorical_codec = GroupedCategoricalCodec.from_matrix(
+                X_train,
+                all_one_hot_groups,
+            )
+    actionable_idx = list(numerical_actionable_idx)
+    for group in grouped_actionable:
+        actionable_idx.extend(group.columns)
 
     discriminator_cache_tag = (
         f"{dataset_name}_drop_all_minus9"
@@ -176,6 +203,7 @@ def generate_tabicl_counterfactuals(
         f"confidence_quantiles={confidence_quantiles}, lof_first={lof_first}, "
         f"probability_slack={probability_slack}, "
         f"max_rounds={max_rounds}, "
+        f"categorical_fallback={categorical_fallback}, "
         f"preprocessing={bundle.preprocessing_variant}, "
         f"n_dropped_rows={bundle.n_dropped_rows}, "
         f"temperature={temperature}, "
@@ -183,7 +211,9 @@ def generate_tabicl_counterfactuals(
     )
     print(
         f"  Features: {X_train.shape[1]} total, "
-        f"{len(actionable_idx)} actionable, {len(immutable_idx)} immutable"
+        f"{len(numerical_actionable_idx)} scalar actionable, "
+        f"{len(grouped_actionable)} grouped categorical actionable, "
+        f"{len(immutable_idx)} immutable"
     )
 
     sampler = TabICLConditionalDensitySampler(
@@ -195,6 +225,20 @@ def generate_tabicl_counterfactuals(
         context_update=context_update,
         numerical_point_estimate=point_estimate,
     )
+    categorical_sampler = None
+    X_train_categorical = None
+    if categorical_codec is not None and grouped_actionable:
+        X_train_categorical = categorical_codec.encode(X_train)
+        categorical_sampler = TabICLConditionalDensitySampler(
+            n_estimators=n_estimators,
+            temperature=temperature,
+            random_state=42,
+            device=TABICL_DEVICE,
+            cache_dir=cache_dir,
+            context_update=context_update,
+            numerical_point_estimate=point_estimate,
+            categorical_features=categorical_codec.categorical_columns,
+        )
     feature_domains = infer_feature_domains(X_train) if project_to_domain else None
 
     X_cf = X_test.copy()
@@ -210,6 +254,9 @@ def generate_tabicl_counterfactuals(
     ]
     confidence_grid_per_point: list[tuple[float, ...] | None] = [
         None for _ in range(len(X_test))
+    ]
+    categorical_history_per_point: list[list[dict]] = [
+        [] for _ in range(len(X_test))
     ]
 
     started = time.perf_counter()
@@ -241,10 +288,10 @@ def generate_tabicl_counterfactuals(
             disc_model,
             x,
             int(target),
-            actionable_idx,
+            numerical_actionable_idx,
             "prob_ascent",
             tau=tau,
-            budget=len(actionable_idx),
+            budget=len(numerical_actionable_idx),
             temperature=temperature,
             batch_candidates=candidate_mode == "batched",
             feature_domains=feature_domains,
@@ -256,6 +303,50 @@ def generate_tabicl_counterfactuals(
             probability_slack=probability_slack,
             max_rounds=max_rounds,
         )
+        if (
+            not greedy_info["flipped"]
+            and categorical_sampler is not None
+            and categorical_codec is not None
+            and X_train_categorical is not None
+        ):
+            categorical_query = categorical_codec.encode_row(x_cf)
+            categorical_sampler.set_context(
+                X_train_categorical,
+                y_context=y_context,
+                target_class=None,
+                max_context=ATHENA_CONTEXT_SIZE,
+                selection="knn",
+                query=categorical_query,
+            )
+
+            def category_distribution(row, group):
+                encoded_row = categorical_codec.encode_row(row)
+                encoded_col = categorical_codec.encoded_column_for_group(group)
+                return categorical_sampler.categorical_distribution(
+                    encoded_row.reshape(1, -1),
+                    encoded_col,
+                    fixed_target=int(target),
+                )
+
+            x_cf, categorical_changed, categorical_info = (
+                grouped_categorical_fallback(
+                    x_cf,
+                    disc=disc_model,
+                    y_target=int(target),
+                    groups=grouped_actionable,
+                    category_distribution=category_distribution,
+                    plausibility_model=plausibility_model,
+                    tau=tau,
+                )
+            )
+            changed.extend(
+                column for column in categorical_changed if column not in changed
+            )
+            greedy_info["flipped"] = categorical_info["flipped"]
+            greedy_info["steps"] += categorical_info["steps"]
+            greedy_info["categorical_history"] = categorical_info["history"]
+        else:
+            greedy_info["categorical_history"] = []
         X_cf[i] = x_cf
         changed_per_point[i] = changed
         flipped_per_point[i] = greedy_info["flipped"]
@@ -264,6 +355,7 @@ def generate_tabicl_counterfactuals(
         attempt_history_per_point[i] = greedy_info["attempt_history"]
         selection_history_per_point[i] = greedy_info["selection_history"]
         confidence_grid_per_point[i] = confidence_grid
+        categorical_history_per_point[i] = greedy_info["categorical_history"]
 
         if i == 0:
             first_s = time.perf_counter() - started
@@ -292,7 +384,7 @@ def generate_tabicl_counterfactuals(
         "context_type": ATHENA_CONTEXT_STRATEGY,
         "context_labels": context_labels,
         "tau": tau,
-        "budget": len(actionable_idx),
+        "budget": len(numerical_actionable_idx),
         "temperature": temperature,
         "n_permutations": 0,
         "max_context": ATHENA_CONTEXT_SIZE,
@@ -306,6 +398,8 @@ def generate_tabicl_counterfactuals(
         "lof_first": lof_first,
         "probability_slack": probability_slack,
         "max_rounds": max_rounds,
+        "categorical_fallback": categorical_fallback,
+        "grouped_actionable": [group.name for group in grouped_actionable],
         "drop_heloc_all_minus9": drop_heloc_all_minus9,
         "preprocessing_variant": bundle.preprocessing_variant,
         "n_dropped_rows": bundle.n_dropped_rows,
@@ -318,6 +412,7 @@ def generate_tabicl_counterfactuals(
         "attempt_history_per_point": attempt_history_per_point,
         "selection_history_per_point": selection_history_per_point,
         "confidence_grid_per_point": confidence_grid_per_point,
+        "categorical_history_per_point": categorical_history_per_point,
         "lof_per_point": lof_per_point,
         "target_probability_per_point": target_probability_per_point,
     }
@@ -355,6 +450,7 @@ def run_and_report(
         "confidence_quantiles": info["confidence_quantiles"],
         "lof_first": info["lof_first"],
         "probability_slack": info["probability_slack"],
+        "categorical_fallback": info["categorical_fallback"],
         "n_estimators": info["n_estimators"],
         "temperature": info["temperature"],
         "n_test": len(X_test),
@@ -386,6 +482,9 @@ def run_and_report(
             "attempt_history_per_point": info["attempt_history_per_point"],
             "selection_history_per_point": info["selection_history_per_point"],
             "confidence_grid_per_point": info["confidence_grid_per_point"],
+            "categorical_history_per_point": info[
+                "categorical_history_per_point"
+            ],
             "X_test": X_test.tolist(),
             "X_cf": X_cf.tolist(),
         }
@@ -490,6 +589,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--categorical-fallback",
+        action="store_true",
+        help=(
+            "After numerical search fails, use TabICL categorical conditionals "
+            "and atomic one-hot group swaps (mixed datasets only)."
+        ),
+    )
+    parser.add_argument(
         "--drop-heloc-all-minus9",
         action="store_true",
         help=(
@@ -541,6 +648,7 @@ def main() -> None:
             lof_first=args.lof_first,
             probability_slack=args.probability_slack,
             max_rounds=args.max_rounds,
+            categorical_fallback=args.categorical_fallback,
             drop_heloc_all_minus9=args.drop_heloc_all_minus9,
             cache_dir=args.cache_dir,
         )

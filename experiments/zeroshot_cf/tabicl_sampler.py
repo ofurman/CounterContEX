@@ -8,9 +8,10 @@ using :class:`tabicl.TabICLUnsupervised` for masked feature imputation.  Its
 factual point and imputes them in one call, which is the principal fast path
 used by the TabICL runner.
 
-Only the appended label column is categorical. The experiment data is already
-MinMax-scaled, so auto-detecting low-cardinality scaled columns and casting them
-to integer class labels would destroy their original support.
+By default only the appended label column is categorical. Callers using a
+compact mixed-data representation may explicitly identify additional
+categorical columns; auto-detection remains disabled because casting arbitrary
+low-cardinality scaled columns to class labels would destroy their support.
 """
 
 from __future__ import annotations
@@ -212,6 +213,7 @@ class TabICLConditionalDensitySampler:
         model_factory: ModelFactory | None = None,
         context_update: str = "replace",
         numerical_point_estimate: str = "median",
+        categorical_features: Sequence[int] | None = None,
     ) -> None:
         if context_update not in {"replace", "refit"}:
             raise ValueError(
@@ -233,6 +235,13 @@ class TabICLConditionalDensitySampler:
         self._model_factory = model_factory
         self.context_update = context_update
         self.numerical_point_estimate = numerical_point_estimate
+        self.categorical_features = tuple(
+            int(j) for j in (categorical_features or ())
+        )
+        if len(set(self.categorical_features)) != len(self.categorical_features):
+            raise ValueError("categorical_features must be unique")
+        if any(j < 0 for j in self.categorical_features):
+            raise ValueError("categorical_features must be non-negative")
 
         self.model: Any | None = None
         self._model_initialized = False
@@ -244,9 +253,11 @@ class TabICLConditionalDensitySampler:
         self._uses_confidence = False
 
     def _build_model(self, y_idx: int):
+        if any(j >= y_idx for j in self.categorical_features):
+            raise IndexError("categorical feature index is out of bounds")
         kwargs = {
             "n_estimators": self.n_estimators,
-            "categorical_features": [y_idx],
+            "categorical_features": [*self.categorical_features, y_idx],
             "batch_size": self.batch_size,
             "random_state": self.random_state,
             "device": self.device,
@@ -264,7 +275,12 @@ class TabICLConditionalDensitySampler:
         )
 
     @staticmethod
-    def _replace_fitted_context(model: Any, X_aug: np.ndarray, y_idx: int) -> None:
+    def _replace_fitted_context(
+        model: Any,
+        X_aug: np.ndarray,
+        categorical_features: Sequence[int],
+        y_idx: int,
+    ) -> None:
         """Replace query-specific context without reloading shared checkpoints.
 
         Upstream ``TabICLUnsupervised.fit`` stores these attributes and loads the
@@ -274,11 +290,16 @@ class TabICLConditionalDensitySampler:
         """
         model.X_ = np.asarray(X_aug, dtype=np.float32).copy()
         model.n_features_in_ = X_aug.shape[1]
-        model.categorical_features_ = [y_idx]
+        model.categorical_features_ = [*categorical_features, y_idx]
         model.categories_ = {
-            y_idx: np.unique(X_aug[:, y_idx][~np.isnan(X_aug[:, y_idx])]).astype(int)
+            j: np.unique(X_aug[:, j][~np.isnan(X_aug[:, j])]).astype(int)
+            for j in model.categorical_features_
         }
-        model.numerical_features_ = [j for j in range(X_aug.shape[1]) if j != y_idx]
+        model.numerical_features_ = [
+            j
+            for j in range(X_aug.shape[1])
+            if j not in model.categorical_features_
+        ]
 
     def set_context(
         self,
@@ -344,7 +365,12 @@ class TabICLConditionalDensitySampler:
             self.model.fit(X_aug)
             self._model_initialized = True
         else:
-            self._replace_fitted_context(self.model, X_aug, y_idx)
+            self._replace_fitted_context(
+                self.model,
+                X_aug,
+                self.categorical_features,
+                y_idx,
+            )
 
         self.selected_context_ = X.copy()
         self.selected_labels_ = np.asarray(y).copy()
@@ -431,6 +457,57 @@ class TabICLConditionalDensitySampler:
             )
         )
         return filled[np.arange(len(candidates)), candidates].astype(np.float64)
+
+    def categorical_distribution(
+        self,
+        X_query: np.ndarray,
+        target_col: int,
+        *,
+        fixed_target: int,
+        fixed_confidence: float | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Predict ``p(X[target_col] | X[-target_col], target)`` with TabICL.
+
+        This is the categorical counterpart of the numerical quantile call. It
+        returns the complete learned category support and probabilities rather
+        than drawing one category, allowing the counterfactual search to retain
+        full coverage while recording TabICL's conditional preference.
+        """
+        if not self._fitted or self.model is None:
+            raise RuntimeError("Call set_context() before predicting categories.")
+        if target_col not in self.categorical_features:
+            raise ValueError(f"column {target_col} is not categorical")
+
+        X_aug = self._augmented_candidate_rows(
+            X_query,
+            [target_col],
+            fixed_target,
+            fixed_confidence=fixed_confidence,
+        )
+        train_mask = ~np.isnan(self.model.X_[:, target_col])
+        conditioning = [
+            j for j in range(self.model.n_features_in_) if j != target_col
+        ]
+        rng = np.random.default_rng(self.random_state)
+        X_train_cond, y_train_cond, X_test_cond = (
+            self.model._prepare_conditional_data(
+                tgt_idx=target_col,
+                cond_features=conditioning,
+                train_mask=train_mask,
+                X_test=X_aug,
+                rng=rng,
+            )
+        )
+        estimator, is_categorical = self.model._fit_conditional_estimator(
+            target_col,
+            X_train_cond,
+            y_train_cond,
+        )
+        if not is_categorical:
+            raise RuntimeError(f"column {target_col} was not routed as categorical")
+        probabilities = np.asarray(estimator.predict_proba(X_test_cond))[0]
+        categories = np.asarray(estimator.classes_, dtype=int)
+        return categories, probabilities.astype(np.float64, copy=False)
 
     def sample_candidate_grid(
         self,

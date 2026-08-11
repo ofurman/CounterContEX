@@ -41,6 +41,75 @@ class DatasetBundle:
         return self.method_dataset.inverse_transform(X)
 
 
+@dataclass(frozen=True)
+class OneHotActionGroup:
+    """One categorical action represented by an atomic one-hot column group."""
+
+    name: str
+    columns: Tuple[int, ...]
+
+
+def get_one_hot_groups(dataset: DatasetBundle) -> List[OneHotActionGroup]:
+    """Resolve every metadata-defined one-hot group to transformed columns."""
+    raw_groups = getattr(
+        dataset.method_dataset.file_dataset,
+        "one_hot_feature_groups",
+        {},
+    )
+    feature_to_idx = {name: i for i, name in enumerate(dataset.feature_names)}
+    return [
+        OneHotActionGroup(
+            group_name,
+            tuple(feature_to_idx[name] for name in feature_names),
+        )
+        for group_name, feature_names in raw_groups.items()
+    ]
+
+
+def get_grouped_categorical_action_space(
+    dataset: DatasetBundle,
+) -> Tuple[List[int], List[OneHotActionGroup], List[int]]:
+    """Return scalar actions, atomic one-hot actions, and true immutables.
+
+    A one-hot group is actionable only when *every* member column is declared
+    actionable by the dataset metadata.  This prevents a partial dummy edit
+    and, in German Credit, keeps ``personal_status_sex`` immutable while
+    exposing the other categorical variables as whole-group interventions.
+
+    The first return value intentionally contains scalar columns only.  It can
+    therefore be passed to the existing numerical greedy search without ever
+    producing malformed one-hot vectors.
+    """
+    method_dataset = dataset.method_dataset
+    all_groups = get_one_hot_groups(dataset)
+    if not all_groups:
+        actionable, immutable = get_actionable_immutable(dataset.name, dataset)
+        return actionable, [], immutable
+
+    declared_actionable = set(method_dataset.actionable_features)
+    grouped_columns: set[int] = set()
+    actionable_groups: List[OneHotActionGroup] = []
+
+    for group in all_groups:
+        grouped_columns.update(group.columns)
+        feature_names = [dataset.feature_names[i] for i in group.columns]
+        if all(name in declared_actionable for name in feature_names):
+            actionable_groups.append(group)
+
+    scalar_actionable = [
+        i
+        for i, name in enumerate(dataset.feature_names)
+        if i not in grouped_columns and name in declared_actionable
+    ]
+    actionable_columns = set(scalar_actionable)
+    for group in actionable_groups:
+        actionable_columns.update(group.columns)
+    immutable = [
+        i for i in range(len(dataset.feature_names)) if i not in actionable_columns
+    ]
+    return scalar_actionable, actionable_groups, immutable
+
+
 def load_dataset(
     name: str,
     *,

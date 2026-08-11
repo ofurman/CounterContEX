@@ -21,6 +21,18 @@ from experiments.zeroshot_cf.tabicl_sampler import (
 from tabicl._model.quantile_dist import QuantileDistribution
 
 
+class _FakeCategoricalEstimator:
+    def __init__(self, y):
+        self.classes_, counts = np.unique(
+            np.asarray(y, dtype=int),
+            return_counts=True,
+        )
+        self.probabilities = counts / counts.sum()
+
+    def predict_proba(self, X):
+        return np.repeat(self.probabilities.reshape(1, -1), len(X), axis=0)
+
+
 class _FakeTabICLUnsupervised:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
@@ -59,6 +71,22 @@ class _FakeTabICLUnsupervised:
                 values = values + np.asarray(quantile_grid)
             out[rows, col] = values
         return out
+
+    def _prepare_conditional_data(
+        self, *, tgt_idx, cond_features, train_mask, X_test, rng
+    ):
+        del rng
+        return (
+            self.X_[train_mask][:, cond_features],
+            self.X_[train_mask, tgt_idx],
+            X_test[:, cond_features],
+        )
+
+    def _fit_conditional_estimator(self, col_idx, X_train, y_train):
+        del X_train
+        return _FakeCategoricalEstimator(y_train), (
+            col_idx in self.kwargs["categorical_features"]
+        )
 
 
 def _factory(**kwargs):
@@ -126,6 +154,22 @@ def test_context_update_reuses_loaded_model_weights():
     assert model.fit_calls == 1
     assert not np.array_equal(model.X_, first_context)
     assert len(model.X_) == 6
+
+
+def test_explicit_categorical_feature_returns_complete_distribution():
+    X, y = _context()
+    X[:, 0] = np.resize([0.0, 1.0, 2.0], len(X))
+    sampler = _sampler(categorical_features=[0]).set_context(X, y_context=y)
+
+    categories, probabilities = sampler.categorical_distribution(
+        X[[0]],
+        0,
+        fixed_target=1,
+    )
+
+    np.testing.assert_array_equal(categories, [0, 1, 2])
+    np.testing.assert_allclose(probabilities, [0.35, 0.35, 0.30])
+    assert sampler.model.kwargs["categorical_features"] == [0, X.shape[1]]
 
 
 def test_refit_context_update_calls_upstream_fit_each_time():
