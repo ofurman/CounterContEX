@@ -102,3 +102,29 @@ def test_grouped_fallback_keeps_categories_absent_from_local_context():
 
     np.testing.assert_array_equal(x_cf[1:4], [0.0, 1.0, 0.0])
     assert info["history"][0]["tabicl_conditional_probability"] == 0.0
+
+
+def test_grouped_fallback_queries_tabicl_only_for_selected_group():
+    job = OneHotActionGroup("job", (1, 2, 3))
+    housing = OneHotActionGroup("housing", (4, 5))
+    factual = np.array([0.2, 1.0, 0.0, 0.0, 1.0, 0.0])
+    queried = []
+
+    def distribution(_row, group):
+        queried.append(group.name)
+        return np.arange(len(group.columns)), np.full(
+            len(group.columns),
+            1.0 / len(group.columns),
+        )
+
+    _, _, info = grouped_categorical_fallback(
+        factual,
+        disc=_CategoricalDisc(),
+        y_target=1,
+        groups=[job, housing],
+        category_distribution=distribution,
+        plausibility_model=_PreferCategoryOneLOF(),
+    )
+
+    assert info["flipped"]
+    assert queried == ["job"]

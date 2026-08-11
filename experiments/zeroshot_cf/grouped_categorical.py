@@ -83,10 +83,12 @@ def grouped_categorical_fallback(
 ) -> tuple[np.ndarray, list[int], dict]:
     """Greedily apply valid whole-group category swaps.
 
-    Every category in TabICL's conditional support is considered.  Before a
-    flip, the candidate with maximum target-class probability is committed.
-    As soon as any candidate is valid, validity becomes a hard gate and the
-    lowest-LOF valid candidate is selected.  A group is edited at most once.
+    Every category in the metadata-defined domain is considered. Before a flip,
+    the candidate with maximum target-class probability is committed. As soon
+    as any candidate is valid, validity becomes a hard gate and the lowest-LOF
+    valid candidate is selected. TabICL is queried only for the selected
+    group's conditional distribution; querying all groups cannot change this
+    selection rule and is needlessly expensive. A group is edited at most once.
     """
     x_cf = np.asarray(x_start, dtype=np.float64).copy()
     groups = list(groups)
@@ -105,8 +107,6 @@ def grouped_categorical_fallback(
         trials: list[np.ndarray] = []
         trial_groups: list[OneHotActionGroup] = []
         trial_categories: list[int] = []
-        conditional_probabilities: list[float] = []
-
         for group in groups:
             if group.name in used_groups:
                 continue
@@ -114,26 +114,8 @@ def grouped_categorical_fallback(
             if not np.isclose(group_values.sum(), 1.0):
                 raise ValueError(f"one-hot group {group.name!r} is invalid")
             current_category = int(np.argmax(group_values))
-            categories, probabilities = category_distribution(x_cf, group)
-            categories = np.asarray(categories, dtype=int)
-            probabilities = np.asarray(probabilities, dtype=np.float64)
-            if categories.ndim != 1 or probabilities.shape != categories.shape:
-                raise ValueError(
-                    "category_distribution must return aligned 1D arrays"
-                )
-            probability_by_category = dict(zip(categories.tolist(), probabilities))
-
-            # Enumerating the entire learned support protects coverage. TabICL's
-            # probability is retained for diagnostics rather than used as a
-            # rejection threshold, because even a low-probability category may
-            # be the only valid recourse for a hard factual.
-            if any(
-                category < 0 or category >= len(group.columns)
-                for category in categories
-            ):
-                raise ValueError(
-                    f"TabICL returned a category outside group {group.name!r}"
-                )
+            # Enumerate the complete metadata domain to protect coverage. A
+            # category missing from the local kNN context remains a valid action.
             for category in range(len(group.columns)):
                 if category == current_category:
                     continue
@@ -143,9 +125,6 @@ def grouped_categorical_fallback(
                 trials.append(trial)
                 trial_groups.append(group)
                 trial_categories.append(category)
-                conditional_probabilities.append(
-                    float(probability_by_category.get(category, 0.0))
-                )
 
         if not trials:
             break
@@ -174,6 +153,32 @@ def grouped_categorical_fallback(
                 break
 
         selected_group = trial_groups[best]
+        categories, conditional_probabilities = category_distribution(
+            x_cf,
+            selected_group,
+        )
+        categories = np.asarray(categories, dtype=int)
+        conditional_probabilities = np.asarray(
+            conditional_probabilities,
+            dtype=np.float64,
+        )
+        if (
+            categories.ndim != 1
+            or conditional_probabilities.shape != categories.shape
+        ):
+            raise ValueError(
+                "category_distribution must return aligned 1D arrays"
+            )
+        if any(
+            category < 0 or category >= len(selected_group.columns)
+            for category in categories
+        ):
+            raise ValueError(
+                f"TabICL returned a category outside group {selected_group.name!r}"
+            )
+        conditional_probability = dict(
+            zip(categories.tolist(), conditional_probabilities.tolist())
+        ).get(trial_categories[best], 0.0)
         previous_category = int(
             np.argmax(x_cf[list(selected_group.columns)])
         )
@@ -192,7 +197,7 @@ def grouped_categorical_fallback(
                 "from_category": previous_category,
                 "to_category": trial_categories[best],
                 "target_probability": current_probability,
-                "tabicl_conditional_probability": conditional_probabilities[best],
+                "tabicl_conditional_probability": float(conditional_probability),
                 "lof": None if lof_scores is None else float(lof_scores[best]),
                 "immediate_valid": bool(valid[best]),
                 "n_candidates": len(trials),
