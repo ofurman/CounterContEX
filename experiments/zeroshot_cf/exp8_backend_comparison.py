@@ -129,6 +129,7 @@ def run_tabicl_v2(
     temperature: float,
     n_estimators: int,
     tabicl_cache_dir: Path | None,
+    candidate_quantiles: tuple[float, ...] | None = None,
 ) -> dict[str, Any]:
     """Run TabICLv2 with candidate expansion at ``knn_both@512``."""
     X_test, y_test, X_cf, info = generate_tabicl_counterfactuals(
@@ -139,6 +140,7 @@ def run_tabicl_v2(
         max_test=max_test,
         context_labels="disc",
         candidate_mode="batched",
+        candidate_quantiles=candidate_quantiles,
         cache_dir=tabicl_cache_dir,
     )
     metrics = evaluate_and_report(
@@ -163,6 +165,7 @@ def run_tabicl_v2(
         "point_estimate": info["point_estimate"],
         "project_to_domain": info["project_to_domain"],
         "retain_best": info["retain_best"],
+        "candidate_quantiles": info["candidate_quantiles"],
         "context_labels": "disc",
         "n_estimators": n_estimators,
         "temperature": temperature,
@@ -206,6 +209,14 @@ def main() -> None:
     parser.add_argument("--tabpfn-cache-dir", type=Path, default=None)
     parser.add_argument("--tabicl-cache-dir", type=Path, default=None)
     parser.add_argument(
+        "--tabicl-quantiles",
+        type=float,
+        nargs="+",
+        default=None,
+        metavar="Q",
+        help="Deterministic TabICL candidate quantiles; applies only to TabICL.",
+    )
+    parser.add_argument(
         "--results-dir",
         type=Path,
         default=RESULTS_DIR,
@@ -233,6 +244,11 @@ def main() -> None:
                 row = run_tabicl_v2(
                     dataset_name,
                     tabicl_cache_dir=args.tabicl_cache_dir,
+                    candidate_quantiles=(
+                        None
+                        if args.tabicl_quantiles is None
+                        else tuple(args.tabicl_quantiles)
+                    ),
                     **common,
                 )
             _write_row(row, args.results_dir)

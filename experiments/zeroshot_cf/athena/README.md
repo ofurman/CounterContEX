@@ -163,3 +163,19 @@ ZEROSHOT_CF_MODELS_DIR="$PWD/experiments/zeroshot_cf/results/athena/tabicl_diagn
 The diagnostic runs exactly three configurations. Its CSV reports `PASS` inputs
 as boolean equivalence columns; the JSON contains per-point histories and the
 NPZ contains the three raw counterfactual arrays.
+
+### TabICL multi-quantile smoke test
+
+The optional multi-quantile search extracts several deterministic values from
+each target-conditioned TabICL distribution and scores all feature/value pairs
+with the discriminator:
+
+```bash
+HF_HUB_OFFLINE=1 TABICL_DEVICE=cuda \
+ZEROSHOT_CF_MODELS_DIR="$PWD/experiments/zeroshot_cf/results/athena/tabicl_quantile_smoke/models" \
+.venv/bin/python -m experiments.zeroshot_cf.exp8_backend_comparison \
+  --dataset heloc --backend tabicl --max-test 10 --n-estimators 4 \
+  --tabicl-quantiles 0.05 0.20 0.50 0.80 0.95 \
+  --tabicl-cache-dir experiments/zeroshot_cf/models/tabicl \
+  --results-dir experiments/zeroshot_cf/results/athena/tabicl_quantile_smoke
+```

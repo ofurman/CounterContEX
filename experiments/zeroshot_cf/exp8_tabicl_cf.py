@@ -59,6 +59,7 @@ def generate_tabicl_counterfactuals(
     point_estimate: str = DEFAULT_POINT_ESTIMATE,
     project_to_domain: bool = True,
     retain_best: bool = True,
+    candidate_quantiles: tuple[float, ...] | None = None,
     cache_dir: Path | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
     """Generate TabICL counterfactuals under the fixed Athena configuration."""
@@ -70,6 +71,10 @@ def generate_tabicl_counterfactuals(
         raise ValueError("context_update must be 'replace' or 'refit'")
     if point_estimate not in {"median", "mode"}:
         raise ValueError("point_estimate must be 'median' or 'mode'")
+    if candidate_quantiles is not None:
+        candidate_quantiles = tuple(float(q) for q in candidate_quantiles)
+        if candidate_mode != "batched":
+            raise ValueError("candidate_quantiles require candidate_mode='batched'")
 
     from experiments.zeroshot_cf.data import (
         get_actionable_immutable,
@@ -102,7 +107,8 @@ def generate_tabicl_counterfactuals(
         f"@{ATHENA_CONTEXT_SIZE}, labels={context_labels}, "
         f"candidate_mode={candidate_mode}, context_update={context_update}, "
         f"point_estimate={point_estimate}, project_to_domain={project_to_domain}, "
-        f"retain_best={retain_best}, temperature={temperature}, "
+        f"retain_best={retain_best}, candidate_quantiles={candidate_quantiles}, "
+        f"temperature={temperature}, "
         f"n_estimators={n_estimators}, n_test={len(X_test)}"
     )
     print(
@@ -154,6 +160,7 @@ def generate_tabicl_counterfactuals(
             batch_candidates=candidate_mode == "batched",
             feature_domains=feature_domains,
             retain_best=retain_best,
+            candidate_quantiles=candidate_quantiles,
         )
         X_cf[i] = x_cf
         changed_per_point[i] = changed
@@ -190,6 +197,7 @@ def generate_tabicl_counterfactuals(
         "point_estimate": point_estimate,
         "project_to_domain": project_to_domain,
         "retain_best": retain_best,
+        "candidate_quantiles": candidate_quantiles,
         "n_estimators": n_estimators,
         "runtime_s": runtime_s,
         "changed_per_point": changed_per_point,
@@ -228,6 +236,7 @@ def run_and_report(
         "point_estimate": info["point_estimate"],
         "project_to_domain": info["project_to_domain"],
         "retain_best": info["retain_best"],
+        "candidate_quantiles": info["candidate_quantiles"],
         "n_estimators": info["n_estimators"],
         "temperature": info["temperature"],
         "n_test": len(X_test),
@@ -291,6 +300,17 @@ def main() -> None:
         help="Numerical TabICL point estimate; mode aligns with TabPFN near-MAP.",
     )
     parser.add_argument(
+        "--candidate-quantiles",
+        type=float,
+        nargs="+",
+        default=None,
+        metavar="Q",
+        help=(
+            "Score deterministic conditional quantiles per feature, e.g. "
+            "--candidate-quantiles 0.05 0.2 0.5 0.8 0.95."
+        ),
+    )
+    parser.add_argument(
         "--no-domain-projection",
         action="store_true",
         help="Disable training-range/support projection (diagnostic only).",
@@ -317,6 +337,11 @@ def main() -> None:
             point_estimate=args.point_estimate,
             project_to_domain=not args.no_domain_projection,
             retain_best=not args.no_retain_best,
+            candidate_quantiles=(
+                None
+                if args.candidate_quantiles is None
+                else tuple(args.candidate_quantiles)
+            ),
             cache_dir=args.cache_dir,
         )
 

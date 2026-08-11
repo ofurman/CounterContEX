@@ -162,8 +162,20 @@ def _local_tabicl_model_factory(
             estimator.model_.to(estimator.device_)
             return estimator.model_
 
-        @staticmethod
-        def _sample_numerical(dist, temperature, rng):
+        def _sample_numerical(self, dist, temperature, rng):
+            quantile_grid = getattr(self, "_numerical_quantile_grid", None)
+            if quantile_grid is not None:
+                if len(quantile_grid) != dist.quantiles.shape[0]:
+                    raise ValueError(
+                        "quantile-grid rows must match the numerical "
+                        "distribution batch size"
+                    )
+                alphas = torch.as_tensor(
+                    quantile_grid,
+                    device=dist.quantiles.device,
+                    dtype=dist.quantiles.dtype,
+                ).unsqueeze(-1)
+                return dist.icdf(alphas).squeeze(-1).cpu().numpy()
             if numerical_point_estimate == "mode" and temperature <= 1e-8:
                 return quantile_mode(dist)
             return TabICLUnsupervised._sample_numerical(dist, temperature, rng)
@@ -312,6 +324,8 @@ class TabICLConditionalDensitySampler:
         X_query: np.ndarray,
         candidate_cols: Sequence[int],
         fixed_target: int,
+        *,
+        allow_duplicate_cols: bool = False,
     ) -> np.ndarray:
         if not self._fitted or self._n_original_features is None:
             raise RuntimeError("Call set_context() before sampling features.")
@@ -325,7 +339,7 @@ class TabICLConditionalDensitySampler:
         candidates = np.asarray(candidate_cols, dtype=int)
         if candidates.ndim != 1 or len(candidates) == 0:
             raise ValueError("candidate_cols must be a non-empty 1D sequence")
-        if len(np.unique(candidates)) != len(candidates):
+        if not allow_duplicate_cols and len(np.unique(candidates)) != len(candidates):
             raise ValueError("candidate_cols must not contain duplicates")
         if np.any(candidates < 0) or np.any(candidates >= self._n_original_features):
             raise IndexError("candidate feature index is out of bounds")
@@ -357,6 +371,65 @@ class TabICLConditionalDensitySampler:
             )
         )
         return filled[np.arange(len(candidates)), candidates].astype(np.float64)
+
+    def sample_candidate_grid(
+        self,
+        X_query: np.ndarray,
+        candidate_cols: Sequence[int],
+        *,
+        quantiles: Sequence[float],
+        fixed_target: int,
+    ) -> np.ndarray:
+        """Return deterministic conditional quantiles for every candidate.
+
+        Each candidate feature is represented by one row per requested
+        quantile. During TabICL's per-column imputation, those rows share one
+        conditional-estimator fit and one batched prediction. The returned
+        matrix is feature-major with shape ``(n_candidates, n_quantiles)``.
+        """
+        candidates = np.asarray(candidate_cols, dtype=int)
+        alphas = np.asarray(quantiles, dtype=np.float64)
+        if candidates.ndim != 1 or len(candidates) == 0:
+            raise ValueError("candidate_cols must be a non-empty 1D sequence")
+        if len(np.unique(candidates)) != len(candidates):
+            raise ValueError("candidate_cols must not contain duplicates")
+        if alphas.ndim != 1 or len(alphas) == 0:
+            raise ValueError("quantiles must be a non-empty 1D sequence")
+        if not np.all(np.isfinite(alphas)) or np.any((alphas <= 0) | (alphas >= 1)):
+            raise ValueError("quantiles must be finite values strictly between 0 and 1")
+        if np.any(np.diff(alphas) <= 0):
+            raise ValueError("quantiles must be strictly increasing and unique")
+
+        expanded_candidates = np.repeat(candidates, len(alphas))
+        X_aug = self._augmented_candidate_rows(
+            X_query,
+            expanded_candidates,
+            fixed_target,
+            allow_duplicate_cols=True,
+        )
+
+        sentinel = object()
+        previous = getattr(self.model, "_numerical_quantile_grid", sentinel)
+        self.model._numerical_quantile_grid = alphas.astype(np.float32)
+        try:
+            filled = np.asarray(
+                self.model.impute(
+                    X_aug,
+                    temperature=float(self.temperature),
+                    n_iterations=1,
+                )
+            )
+        finally:
+            if previous is sentinel:
+                delattr(self.model, "_numerical_quantile_grid")
+            else:
+                self.model._numerical_quantile_grid = previous
+
+        values = filled[
+            np.arange(len(expanded_candidates)),
+            expanded_candidates,
+        ]
+        return values.astype(np.float64).reshape(len(candidates), len(alphas))
 
     def sample_feature(
         self,

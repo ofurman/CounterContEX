@@ -151,6 +151,49 @@ def _select_prob_ascent_batched(
     )
 
 
+def _select_prob_ascent_quantile_grid(
+    sampler,
+    disc,
+    x_cf: np.ndarray,
+    y_target: int,
+    candidates: List[int],
+    quantiles: Tuple[float, ...],
+    feature_domains=None,
+) -> Tuple[int, float, Optional[float]]:
+    """Score every candidate-feature/conditional-quantile pair in one batch."""
+    values = np.asarray(
+        sampler.sample_candidate_grid(
+            x_cf.reshape(1, -1),
+            candidates,
+            quantiles=quantiles,
+            fixed_target=y_target,
+        ),
+        dtype=np.float64,
+    )
+    expected = (len(candidates), len(quantiles))
+    if values.shape != expected:
+        raise ValueError(
+            "sample_candidate_grid returned an unexpected shape; "
+            f"expected {expected}, got {values.shape}"
+        )
+
+    expanded_candidates = np.repeat(np.asarray(candidates, dtype=int), len(quantiles))
+    flat_values = project_candidate_values(
+        expanded_candidates.tolist(),
+        values.reshape(-1),
+        feature_domains,
+    )
+    trials = np.repeat(x_cf.reshape(1, -1), len(flat_values), axis=0)
+    trials[np.arange(len(flat_values)), expanded_candidates] = flat_values
+    probabilities = np.asarray(disc.predict_proba(trials))[:, y_target]
+    best = int(np.argmax(probabilities))
+    return (
+        int(expanded_candidates[best]),
+        float(probabilities[best]),
+        float(flat_values[best]),
+    )
+
+
 def _select_class_divergence(
     sampler,
     x_cf: np.ndarray,
@@ -204,6 +247,7 @@ def greedy_counterfactual(
     batch_candidates: bool = False,
     feature_domains=None,
     retain_best: bool = False,
+    candidate_quantiles: Tuple[float, ...] | None = None,
 ) -> Tuple[np.ndarray, List[int], Dict]:
     """Greedily build a counterfactual for one factual point.
 
@@ -253,6 +297,10 @@ def greedy_counterfactual(
         ``sampler.sample_candidates`` call per greedy step. This preserves the
         search rule while avoiding one model call per candidate. It has no
         effect on ``class_divergence``.
+    candidate_quantiles : tuple of float or None
+        When provided with batched ``prob_ascent``, obtain several deterministic
+        conditional quantiles per feature and score every feature/value pair.
+        ``None`` preserves the single point-estimate path.
 
     Returns
     -------
@@ -273,6 +321,12 @@ def greedy_counterfactual(
         budget = len(actionable)
     if max_rounds < 1:
         raise ValueError(f"max_rounds must be >= 1, got {max_rounds}")
+    if candidate_quantiles is not None:
+        candidate_quantiles = tuple(float(q) for q in candidate_quantiles)
+        if selector != "prob_ascent" or not batch_candidates:
+            raise ValueError(
+                "candidate_quantiles require batched prob_ascent selection"
+            )
     y_current = 1 - int(y_target)  # binary task
 
     x_cf = x.copy()
@@ -305,20 +359,31 @@ def greedy_counterfactual(
                 break
 
             if selector == "prob_ascent":
-                select = (
-                    _select_prob_ascent_batched
-                    if batch_candidates
-                    else _select_prob_ascent
-                )
-                j_star, score, val = select(
-                    sampler,
-                    disc,
-                    x_cf,
-                    y_target,
-                    candidates,
-                    temperature,
-                    feature_domains,
-                )
+                if candidate_quantiles is not None:
+                    j_star, score, val = _select_prob_ascent_quantile_grid(
+                        sampler,
+                        disc,
+                        x_cf,
+                        y_target,
+                        candidates,
+                        candidate_quantiles,
+                        feature_domains,
+                    )
+                else:
+                    select = (
+                        _select_prob_ascent_batched
+                        if batch_candidates
+                        else _select_prob_ascent
+                    )
+                    j_star, score, val = select(
+                        sampler,
+                        disc,
+                        x_cf,
+                        y_target,
+                        candidates,
+                        temperature,
+                        feature_domains,
+                    )
             elif selector == "class_divergence":
                 j_star, score, val = _select_class_divergence(
                     sampler, x_cf, y_target, y_current, candidates
@@ -404,6 +469,7 @@ def greedy_counterfactual(
         "attempt_history": attempt_history,
         "best_target_probability": float(best_p_t),
         "batch_candidates": bool(batch_candidates),
+        "candidate_quantiles": candidate_quantiles,
         "retain_best": bool(retain_best),
     }
     return x_cf, changed, info

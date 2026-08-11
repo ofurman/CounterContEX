@@ -72,6 +72,20 @@ to reproduce the earlier Exp6 ground-truth-label setup. For a small timing and
 equivalence baseline, use `--candidate-mode sequential`; production runs use
 the default `batched` mode.
 
+To replace the single conditional point estimate with classifier-guided
+multi-quantile candidates, pass a fixed probability grid:
+
+```bash
+HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.exp8_tabicl_cf \
+    --dataset heloc --max-test 10 \
+    --candidate-quantiles 0.05 0.20 0.50 0.80 0.95
+```
+
+For each actionable feature, TabICL fits one target-conditioned in-context
+regression task and predicts a quantile distribution. The duplicated query rows
+extract all requested quantiles in the same batched prediction; the external
+discriminator then chooses the best feature/value pair.
+
 ### Two-dataset backend comparison (run on Athena)
 
 The comparison fixes the already-selected `prob_ascent + knn_both@512`
@@ -82,6 +96,11 @@ submitted as independent jobs:
 ```bash
 HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.exp8_backend_comparison \
     --dataset moons --backend tabicl \
+    --tabicl-cache-dir experiments/zeroshot_cf/models/tabicl
+
+HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.exp8_backend_comparison \
+    --dataset heloc --backend tabicl --max-test 10 \
+    --tabicl-quantiles 0.05 0.20 0.50 0.80 0.95 \
     --tabicl-cache-dir experiments/zeroshot_cf/models/tabicl
 
 HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.exp8_backend_comparison \

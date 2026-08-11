@@ -37,10 +37,16 @@ class _FakeTabICLUnsupervised:
         self.impute_calls += 1
         out = np.asarray(X, dtype=np.float32).copy()
         target = out[:, -1].copy()
-        for row, col in zip(*np.where(np.isnan(out))):
+        missing_rows, missing_cols = np.where(np.isnan(out))
+        quantile_grid = getattr(self, "_numerical_quantile_grid", None)
+        for col in np.unique(missing_cols):
+            rows = missing_rows[missing_cols == col]
             # Deterministic and class-conditional. Candidate j gets
             # 0.1*(j+1) under class 0 and an additional 0.5 under class 1.
-            out[row, col] = 0.1 * (col + 1) + 0.5 * target[row]
+            values = 0.1 * (col + 1) + 0.5 * target[rows]
+            if quantile_grid is not None:
+                values = values + np.asarray(quantile_grid)
+            out[rows, col] = values
         return out
 
 
@@ -159,6 +165,39 @@ def test_candidate_expansion_uses_one_imputation_call():
     assert sampler.model.impute_calls == before + 1
 
 
+def test_quantile_grid_expands_rows_but_uses_one_imputation_call():
+    X, y = _context()
+    sampler = _sampler().set_context(
+        X, y_context=y, max_context=8, selection="knn", query=X[10]
+    )
+    before = sampler.model.impute_calls
+
+    values = sampler.sample_candidate_grid(
+        X[[0]],
+        [0, 2],
+        quantiles=[0.1, 0.5, 0.9],
+        fixed_target=1,
+    )
+
+    np.testing.assert_allclose(
+        values,
+        [[0.7, 1.1, 1.5], [0.9, 1.3, 1.7]],
+        atol=1e-6,
+    )
+    assert sampler.model.impute_calls == before + 1
+    assert not hasattr(sampler.model, "_numerical_quantile_grid")
+
+
+def test_quantile_grid_rejects_invalid_probability_levels():
+    X, y = _context()
+    sampler = _sampler().set_context(X, y_context=y)
+
+    with np.testing.assert_raises_regex(ValueError, "strictly between"):
+        sampler.sample_candidate_grid(
+            X[[0]], [0], quantiles=[0.0, 0.5], fixed_target=1
+        )
+
+
 class _LinearDisc:
     def predict_proba(self, X):
         p1 = np.clip(0.15 * X[:, 0] + 0.85 * X[:, 2], 0.0, 1.0)
@@ -166,6 +205,37 @@ class _LinearDisc:
 
     def predict(self, X):
         return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
+
+
+class _GridDisc:
+    def predict_proba(self, X):
+        p1 = np.clip(0.05 * X[:, 0] + 0.4 * X[:, 2], 0.0, 1.0)
+        return np.column_stack([1.0 - p1, p1])
+
+    def predict(self, X):
+        return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
+
+
+def test_quantile_grid_greedy_selects_best_feature_value_pair():
+    X, y = _context()
+    query = np.array([0.0, 1.0, 0.0])
+    sampler = _sampler().set_context(X, y_context=y)
+
+    x_cf, changed, info = greedy_counterfactual(
+        sampler,
+        _GridDisc(),
+        query,
+        y_target=1,
+        actionable_idx=[0, 2],
+        selector="prob_ascent",
+        batch_candidates=True,
+        candidate_quantiles=(0.1, 0.5, 0.9),
+    )
+
+    assert changed == [2]
+    np.testing.assert_allclose(x_cf[2], 1.7, atol=1e-6)
+    assert info["flipped"]
+    assert info["candidate_quantiles"] == (0.1, 0.5, 0.9)
 
 
 def test_batched_and_sequential_greedy_are_equivalent_and_preserve_immutable():
