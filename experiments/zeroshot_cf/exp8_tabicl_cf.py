@@ -86,7 +86,7 @@ def generate_tabicl_counterfactuals(
     candidate_quantiles: tuple[float, ...] | None = None,
     confidence_quantiles: tuple[float, ...] | None = None,
     lof_first: bool = False,
-    probability_slack: float = 0.02,
+    probability_slack: float = 0.0,
     max_rounds: int = 1,
     drop_heloc_all_minus9: bool = False,
     cache_dir: Path | None = None,
@@ -477,8 +477,8 @@ def main() -> None:
     parser.add_argument(
         "--probability-slack",
         type=float,
-        default=0.02,
-        help="Pre-flip probability window in which LOF decides (default: 0.02).",
+        default=0.0,
+        help="Pre-flip probability window in which LOF decides (default: 0).",
     )
     parser.add_argument(
         "--max-rounds",

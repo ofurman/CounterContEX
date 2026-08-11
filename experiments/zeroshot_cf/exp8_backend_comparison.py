@@ -153,7 +153,7 @@ def run_tabicl_v2(
     candidate_quantiles: tuple[float, ...] | None = None,
     confidence_quantiles: tuple[float, ...] | None = None,
     lof_first: bool = False,
-    probability_slack: float = 0.02,
+    probability_slack: float = 0.0,
     max_rounds: int = 1,
     drop_heloc_all_minus9: bool = False,
 ) -> dict[str, Any]:
@@ -304,7 +304,7 @@ def main() -> None:
     parser.add_argument(
         "--tabicl-probability-slack",
         type=float,
-        default=0.02,
+        default=0.0,
     )
     parser.add_argument(
         "--tabicl-max-rounds",
