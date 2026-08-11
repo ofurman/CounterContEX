@@ -1,15 +1,16 @@
 #  Copyright (c) Prior Labs GmbH 2026.
 
-"""TabPFNv3 versus TabICLv2 on three fixed comparison datasets.
+"""TabPFNv3 versus TabICLv2 on two fixed comparison datasets.
 
-The comparison runs MOONS, HELOC, and AUDIT with the same counterfactual
-algorithm and the already-selected Athena context: ``prob_ascent`` with a
-512-row both-class kNN context. It intentionally contains no context sweep.
+The comparison runs MOONS and HELOC with the same counterfactual algorithm and
+the already-selected Athena context: ``prob_ascent`` with a 512-row both-class
+kNN context. It intentionally contains no context sweep.
 
 TabPFN uses the existing sequential candidate evaluation. TabICL uses the
-candidate-expanded fast path, whose deterministic equivalence to sequential
-evaluation is covered by unit tests. Both backends use discriminator-predicted
-context labels, matching the final Athena Exp7 winner.
+candidate-expanded fast path. Fast unit tests cover the adapter contract and
+``exp8_tabicl_diagnostics`` checks real-model equivalence on Athena. Both
+backends use discriminator-predicted context labels, matching the final Athena
+Exp7 winner.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from experiments.zeroshot_cf.exp8_tabicl_cf import (
     generate_tabicl_counterfactuals,
 )
 
-DATASETS = ("moons", "heloc", "audit")
+DATASETS = ("moons", "heloc")
 RESULTS_DIR = Path(__file__).parent / "results"
 TABPFN_N_PERMUTATIONS = 3
 
@@ -153,6 +154,7 @@ def run_tabicl_v2(
         "class_scope": "both",
         "selection": "knn",
         "candidate_mode": "batched",
+        "context_update": info["context_update"],
         "context_labels": "disc",
         "n_estimators": n_estimators,
         "temperature": temperature,

@@ -118,8 +118,8 @@ Outputs land in `experiments/zeroshot_cf/results/athena/<tag>/` as
 
 Exp8 runs only the final configuration selected by Exp6/Exp7:
 `prob_ascent + knn_both@512 + disc labels + one pass`. It does not rerun the
-context or label grids. The six array tasks are MOONS, HELOC, and AUDIT for
-each backend.
+context or label grids. The four array tasks are MOONS and HELOC for each
+backend.
 
 Stage the TabICLv2 checkpoint pair under:
 
@@ -138,3 +138,25 @@ Edit `exp8_backend_cases.tsv` to change test counts or estimator counts. Each
 task writes its metrics to
 `experiments/zeroshot_cf/results/athena/<tag>/` and uses a private
 discriminator cache to avoid cross-task writes.
+
+### TabICL optimization diagnostics
+
+Before rerunning the full comparison, use one small GPU allocation to verify
+that candidate batching and direct context replacement preserve real-model
+outputs:
+
+```bash
+HF_HUB_OFFLINE=1 \
+TABICL_DEVICE=cuda \
+ZEROSHOT_CF_MODELS_DIR="$PWD/experiments/zeroshot_cf/results/athena/tabicl_diagnostics/models" \
+.venv/bin/python -m experiments.zeroshot_cf.exp8_tabicl_diagnostics \
+  --dataset heloc \
+  --max-test 2 \
+  --n-estimators 4 \
+  --tabicl-cache-dir experiments/zeroshot_cf/models/tabicl \
+  --results-dir experiments/zeroshot_cf/results/athena/tabicl_diagnostics
+```
+
+The diagnostic runs exactly three configurations. Its CSV reports `PASS` inputs
+as boolean equivalence columns; the JSON contains per-point histories and the
+NPZ contains the three raw counterfactual arrays.

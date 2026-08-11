@@ -141,7 +141,13 @@ class TabICLConditionalDensitySampler:
         cache_dir: Path | None = None,
         estimator_params: dict[str, Any] | None = None,
         model_factory: ModelFactory | None = None,
+        context_update: str = "replace",
     ) -> None:
+        if context_update not in {"replace", "refit"}:
+            raise ValueError(
+                "context_update must be 'replace' or 'refit', "
+                f"got {context_update!r}"
+            )
         self.n_estimators = n_estimators
         self.temperature = temperature
         self.random_state = random_state
@@ -150,6 +156,7 @@ class TabICLConditionalDensitySampler:
         self.cache_dir = cache_dir
         self.estimator_params = dict(estimator_params or {})
         self._model_factory = model_factory
+        self.context_update = context_update
 
         self.model: Any | None = None
         self._model_initialized = False
@@ -232,7 +239,7 @@ class TabICLConditionalDensitySampler:
 
         if self.model is None:
             self.model = self._build_model(y_idx)
-        if not self._model_initialized:
+        if not self._model_initialized or self.context_update == "refit":
             self.model.fit(X_aug)
             self._model_initialized = True
         else:

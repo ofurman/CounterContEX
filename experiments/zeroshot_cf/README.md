@@ -70,11 +70,11 @@ to reproduce the earlier Exp6 ground-truth-label setup. For a small timing and
 equivalence baseline, use `--candidate-mode sequential`; production runs use
 the default `batched` mode.
 
-### Three-dataset backend comparison (run on Athena)
+### Two-dataset backend comparison (run on Athena)
 
 The comparison fixes the already-selected `prob_ascent + knn_both@512`
-configuration and runs only TabPFNv3 versus TabICLv2 on MOONS, HELOC, and
-AUDIT. Each backend/dataset writes a separate result file, so they can be
+configuration and runs only TabPFNv3 versus TabICLv2 on MOONS and HELOC.
+Each backend/dataset writes a separate result file, so they can be
 submitted as independent jobs:
 
 ```bash
@@ -88,6 +88,20 @@ HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.exp8_backend_compariso
 
 Use `--dataset all --backend all` only on an appropriately provisioned compute
 node. For a smoke test, add `--max-test 1 --n-estimators 1`.
+
+To check the two TabICL speed optimizations with the real checkpoint, run the
+small paired diagnostic on a GPU node:
+
+```bash
+HF_HUB_OFFLINE=1 TABICL_DEVICE=cuda \
+  .venv/bin/python -m experiments.zeroshot_cf.exp8_tabicl_diagnostics \
+  --dataset heloc --max-test 2 --n-estimators 4 \
+  --tabicl-cache-dir experiments/zeroshot_cf/models/tabicl \
+  --results-dir experiments/zeroshot_cf/results/athena/tabicl_diagnostics
+```
+
+It compares batched versus sequential candidates and direct context replacement
+versus upstream `fit()`, writing a verdict CSV plus detailed JSON/NPZ artifacts.
 
 ## Environment Variables
 

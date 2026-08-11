@@ -52,13 +52,14 @@ def _context():
     return X, y
 
 
-def _sampler():
+def _sampler(**kwargs):
     return TabICLConditionalDensitySampler(
         n_estimators=2,
         temperature=1e-9,
         random_state=7,
         device="cpu",
         model_factory=_factory,
+        **kwargs,
     )
 
 
@@ -105,6 +106,25 @@ def test_context_update_reuses_loaded_model_weights():
     assert model.fit_calls == 1
     assert not np.array_equal(model.X_, first_context)
     assert len(model.X_) == 6
+
+
+def test_refit_context_update_calls_upstream_fit_each_time():
+    X, y = _context()
+    sampler = _sampler(context_update="refit")
+    sampler.set_context(X, y_context=y, max_context=6, selection="knn", query=X[2])
+    model = sampler.model
+
+    sampler.set_context(X, y_context=y, max_context=6, selection="knn", query=X[-3])
+
+    assert sampler.model is model
+    assert model.fit_calls == 2
+    expected_idx = _knn_indices(X.astype(np.float32), X[-3], 6)
+    np.testing.assert_allclose(model.X_[:, :-1], X[expected_idx])
+
+
+def test_invalid_context_update_is_rejected():
+    with np.testing.assert_raises_regex(ValueError, "context_update"):
+        _sampler(context_update="shortcut")
 
 
 def test_candidate_expansion_uses_one_imputation_call():
