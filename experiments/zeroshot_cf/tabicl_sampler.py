@@ -23,6 +23,7 @@ from typing import Any
 import numpy as np
 import torch
 from experiments.zeroshot_cf.tabicl_checkpoints import require_checkpoints
+from tabicl import TabICLClassifier, TabICLUnsupervised
 
 ModelFactory = Callable[..., Any]
 
@@ -148,13 +149,6 @@ def _local_tabicl_model_factory(
     narrow subclass only overrides initial shared-weight loading; downstream
     conditional estimators still use the upstream implementation unchanged.
     """
-    try:
-        from tabicl import TabICLClassifier, TabICLUnsupervised
-    except ImportError as exc:
-        raise RuntimeError(
-            "TabICL is not installed. Install experiments/zeroshot_cf/requirements.txt."
-        ) from exc
-
     class _LocalCheckpointTabICLUnsupervised(TabICLUnsupervised):
         def _load_shared_model(self, estimator_cls):
             path = (
