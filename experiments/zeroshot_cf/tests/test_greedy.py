@@ -278,6 +278,48 @@ def test_budget_exhaustion_returns_not_flipped():
     np.testing.assert_array_equal(x_cf, x)
 
 
+class _NonImprovingSampler:
+    def sample_feature(
+        self,
+        X,
+        target_col,
+        sample_temperature=None,
+        fixed_target=None,
+    ):
+        del X, target_col, sample_temperature, fixed_target
+        return np.array([0.0])
+
+
+class _NonImprovingDisc:
+    def predict_proba(self, X):
+        p1 = 0.1 * np.asarray(X)[:, 0]
+        return np.column_stack([1.0 - p1, p1])
+
+    def predict(self, X):
+        return np.zeros(len(X), dtype=int)
+
+
+def test_first_round_strict_guard_rejects_non_improving_revisit():
+    """An outer revisit cannot commit a candidate that lowers target probability."""
+    factual = np.array([1.0])
+
+    counterfactual, changed, info = greedy_counterfactual(
+        _NonImprovingSampler(),
+        _NonImprovingDisc(),
+        factual,
+        y_target=1,
+        actionable_idx=[0],
+        selector="prob_ascent",
+        max_rounds=1,
+        require_improvement=True,
+    )
+
+    np.testing.assert_array_equal(counterfactual, factual)
+    assert changed == []
+    assert info["steps"] == 0
+    assert info["require_improvement"] is True
+
+
 def test_projection_uses_bounds_and_small_empirical_supports():
     X_train = np.array(
         [[0.0, 0.0], [0.5, 0.5], [1.0, 1.0]], dtype=np.float64

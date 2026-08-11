@@ -8,11 +8,12 @@ Athena winner for all comparison datasets:
 * selector: ``prob_ascent``
 * context: 512 nearest neighbours from both classes (``knn_both@512``)
 * labels: predictions of the discriminator being explained (Athena Exp7)
-* one greedy pass, with a feature changed at most once
+* configurable complete greedy rounds, with a feature changed at most once in
+  each numerical pass and categorical fallback attempted after every pass
 
 Candidate interventions for each greedy step are expanded into one matrix and
-imputed in one TabICL call. Context remains per-factual because the winning kNN
-context is query-specific.
+imputed in one TabICL call. The overall counterfactual search remains iterative.
+Context remains per-factual because the winning kNN context is query-specific.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import argparse
 import csv
 import json
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -101,6 +103,97 @@ def _select_test_rows(
     )
     selected.sort()
     return X_test[selected], y_test[selected]
+
+
+NumericalRound = Callable[
+    [np.ndarray, bool],
+    tuple[np.ndarray, list[int], dict[str, Any]],
+]
+CategoricalRound = Callable[
+    [np.ndarray],
+    tuple[np.ndarray, list[int], dict[str, Any]],
+]
+
+
+def _alternating_mixed_rounds(
+    factual: np.ndarray,
+    *,
+    max_rounds: int,
+    numerical_round: NumericalRound,
+    categorical_round: CategoricalRound,
+) -> tuple[np.ndarray, list[int], dict[str, Any]]:
+    """Alternate numerical search and categorical fallback until valid.
+
+    A mixed-data round is one complete numerical pass followed, if still
+    needed, by one categorical pass. Later numerical passes use the strict
+    improvement guard because they revisit a row already processed by both
+    action types. This prevents numerical rounds two and three from running
+    before a potentially decisive first categorical intervention.
+    """
+    if max_rounds < 1:
+        raise ValueError("max_rounds must be at least 1")
+
+    original = np.asarray(factual, dtype=np.float64)
+    current = original.copy()
+    total_steps = 0
+    rounds_used = 0
+    flipped = False
+    history: list[tuple] = []
+    attempt_history: list[tuple] = []
+    selection_history: list[dict[str, Any]] = []
+    attempt_selection_history: list[dict[str, Any]] = []
+    categorical_history: list[dict[str, Any]] = []
+    round_history: list[dict[str, Any]] = []
+
+    for round_index in range(max_rounds):
+        round_start = current.copy()
+        rounds_used = round_index + 1
+        current, _, numerical_info = numerical_round(
+            current,
+            round_index > 0,
+        )
+        total_steps += int(numerical_info["steps"])
+        history.extend(numerical_info["history"])
+        attempt_history.extend(numerical_info["attempt_history"])
+        selection_history.extend(numerical_info["selection_history"])
+        attempt_selection_history.extend(
+            numerical_info["attempt_selection_history"]
+        )
+        flipped = bool(numerical_info["flipped"])
+
+        categorical_steps = 0
+        if not flipped:
+            current, _, categorical_info = categorical_round(current)
+            categorical_steps = int(categorical_info["steps"])
+            total_steps += categorical_steps
+            categorical_history.extend(categorical_info["history"])
+            flipped = bool(categorical_info["flipped"])
+
+        round_history.append(
+            {
+                "round": rounds_used,
+                "numerical_steps": int(numerical_info["steps"]),
+                "categorical_steps": categorical_steps,
+                "flipped": flipped,
+            }
+        )
+        if flipped:
+            break
+        if np.array_equal(current, round_start):
+            break
+
+    changed = np.flatnonzero(current != original).astype(int).tolist()
+    return current, changed, {
+        "flipped": flipped,
+        "steps": total_steps,
+        "rounds": rounds_used,
+        "history": history,
+        "attempt_history": attempt_history,
+        "selection_history": selection_history,
+        "attempt_selection_history": attempt_selection_history,
+        "categorical_history": categorical_history,
+        "round_history": round_history,
+    }
 
 
 def generate_tabicl_counterfactuals(
@@ -308,9 +401,13 @@ def generate_tabicl_counterfactuals(
     categorical_history_per_point: list[list[dict]] = [
         [] for _ in range(len(X_test))
     ]
+    rounds_per_point = [0] * len(X_test)
+    round_history_per_point: list[list[dict]] = [
+        [] for _ in range(len(X_test))
+    ]
 
     started = time.perf_counter()
-    for i, (x, target) in enumerate(zip(X_test, y_target)):
+    for i, (x, target) in enumerate(zip(X_test, y_target, strict=True)):
         # Athena winner: both-class pool, per-factual 512-row kNN context.
         sampler_query = (
             x if categorical_codec is None else categorical_codec.encode_row(x)
@@ -336,65 +433,93 @@ def generate_tabicl_counterfactuals(
                 int(target),
                 confidence_quantiles,
             )
-        x_cf, changed, greedy_info = greedy_counterfactual(
-            sampler,
-            disc_model,
-            x,
-            int(target),
-            numerical_actionable_idx,
-            "prob_ascent",
-            tau=tau,
-            budget=len(numerical_actionable_idx),
-            temperature=temperature,
-            batch_candidates=candidate_mode == "batched",
-            feature_domains=feature_domains,
-            retain_best=retain_best,
-            candidate_quantiles=candidate_quantiles,
-            candidate_confidences=confidence_grid,
-            plausibility_model=plausibility_model,
-            validity_first=lof_first,
-            probability_slack=probability_slack,
-            max_rounds=max_rounds,
-        )
-        if (
-            not greedy_info["flipped"]
-            and categorical_codec is not None
-            and grouped_actionable
-        ):
-            def category_distribution(row, group):
+        target_class = int(target)
+        point_confidence_grid = confidence_grid
+
+        def numerical_pass(
+            row: np.ndarray,
+            rounds: int,
+            *,
+            require_improvement: bool = False,
+        ) -> tuple[np.ndarray, list[int], dict[str, Any]]:
+            return greedy_counterfactual(
+                sampler,
+                disc_model,
+                row,
+                target_class,
+                numerical_actionable_idx,
+                "prob_ascent",
+                tau=tau,
+                budget=len(numerical_actionable_idx),
+                temperature=temperature,
+                batch_candidates=candidate_mode == "batched",
+                feature_domains=feature_domains,
+                retain_best=retain_best,
+                candidate_quantiles=candidate_quantiles,
+                candidate_confidences=point_confidence_grid,
+                plausibility_model=plausibility_model,
+                validity_first=lof_first,
+                probability_slack=probability_slack,
+                max_rounds=rounds,
+                require_improvement=require_improvement,
+            )
+
+        if categorical_codec is not None and grouped_actionable:
+
+            def category_distribution(
+                row: np.ndarray,
+                group: Any,
+            ) -> tuple[np.ndarray, np.ndarray]:
                 encoded_row = categorical_codec.encode_row(row)
                 encoded_col = categorical_codec.encoded_column_for_group(group)
                 fixed_confidence = (
                     None
-                    if confidence_grid is None
-                    else confidence_grid[len(confidence_grid) // 2]
+                    if point_confidence_grid is None
+                    else point_confidence_grid[len(point_confidence_grid) // 2]
                 )
                 return sampler_context.categorical_distribution(
                     encoded_row.reshape(1, -1),
                     encoded_col,
-                    fixed_target=int(target),
+                    fixed_target=target_class,
                     fixed_confidence=fixed_confidence,
                 )
 
-            x_cf, categorical_changed, categorical_info = (
-                grouped_categorical_fallback(
-                    x_cf,
+            def categorical_pass(
+                row: np.ndarray,
+            ) -> tuple[np.ndarray, list[int], dict[str, Any]]:
+                return grouped_categorical_fallback(
+                    row,
                     disc=disc_model,
-                    y_target=int(target),
+                    y_target=target_class,
                     groups=grouped_actionable,
                     category_distribution=category_distribution,
                     plausibility_model=plausibility_model,
                     tau=tau,
                 )
+
+            def numerical_round(
+                row: np.ndarray,
+                require_improvement: bool,
+            ) -> tuple[np.ndarray, list[int], dict[str, Any]]:
+                return numerical_pass(
+                    row,
+                    1,
+                    require_improvement=require_improvement,
+                )
+
+            x_cf, changed, greedy_info = _alternating_mixed_rounds(
+                x,
+                max_rounds=max_rounds,
+                numerical_round=numerical_round,
+                categorical_round=categorical_pass,
             )
-            changed.extend(
-                column for column in categorical_changed if column not in changed
-            )
-            greedy_info["flipped"] = categorical_info["flipped"]
-            greedy_info["steps"] += categorical_info["steps"]
-            greedy_info["categorical_history"] = categorical_info["history"]
         else:
+            x_cf, changed, greedy_info = numerical_pass(
+                x,
+                max_rounds,
+            )
             greedy_info["categorical_history"] = []
+            greedy_info["round_history"] = []
         X_cf[i] = x_cf
         changed_per_point[i] = changed
         flipped_per_point[i] = greedy_info["flipped"]
@@ -404,6 +529,8 @@ def generate_tabicl_counterfactuals(
         selection_history_per_point[i] = greedy_info["selection_history"]
         confidence_grid_per_point[i] = confidence_grid
         categorical_history_per_point[i] = greedy_info["categorical_history"]
+        rounds_per_point[i] = greedy_info["rounds"]
+        round_history_per_point[i] = greedy_info["round_history"]
 
         if i == 0:
             first_s = time.perf_counter() - started
@@ -464,6 +591,8 @@ def generate_tabicl_counterfactuals(
         "selection_history_per_point": selection_history_per_point,
         "confidence_grid_per_point": confidence_grid_per_point,
         "categorical_history_per_point": categorical_history_per_point,
+        "rounds_per_point": rounds_per_point,
+        "round_history_per_point": round_history_per_point,
         "lof_per_point": lof_per_point,
         "target_probability_per_point": target_probability_per_point,
     }

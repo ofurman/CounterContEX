@@ -87,7 +87,7 @@ def run_dataset(  # noqa: PLR0913
     tabicl_cache_dir: Path | None = None,
     results_dir: Path = RESULTS_DIR,
 ) -> dict[str, Any]:
-    """Run the fixed one-shot benchmark configuration for one dataset."""
+    """Run the fixed training-free benchmark configuration for one dataset."""
     if dataset_name not in DATASETS:
         raise ValueError(f"Unsupported Exp9 dataset: {dataset_name!r}")
 
@@ -145,6 +145,7 @@ def run_dataset(  # noqa: PLR0913
         dtype=float,
     )
     steps = np.asarray(info["steps_per_point"], dtype=float)
+    rounds = np.asarray(info["rounds_per_point"], dtype=float)
     project_l2 = (
         float(np.linalg.norm(X_cf[valid] - X_test[valid], axis=1).mean())
         if valid.any()
@@ -152,6 +153,7 @@ def run_dataset(  # noqa: PLR0913
     )
     l0_count_mean = float(changed_counts[valid].mean()) if valid.any() else float("nan")
     steps_mean = float(steps[valid].mean()) if valid.any() else float("nan")
+    rounds_mean = float(rounds.mean())
 
     validation_accuracy = float("nan")
     if bundle.X_val is not None and bundle.y_val is not None:
@@ -161,7 +163,7 @@ def run_dataset(  # noqa: PLR0913
 
     row: dict[str, Any] = {
         "dataset": dataset_name,
-        "method": "tabicl_v2_one_shot",
+        "method": "tabicl_v2_greedy_icl",
         "split_variant": bundle.split_variant,
         "split_seed": 42,
         "test_selection": "stratified",
@@ -180,6 +182,11 @@ def run_dataset(  # noqa: PLR0913
         "confidence_quantiles": _levels_text(confidence_quantiles),
         "lof_first": lof_first,
         "max_rounds": max_rounds,
+        "round_schedule": (
+            "alternating_numerical_categorical"
+            if info["grouped_actionable"]
+            else "numerical_only"
+        ),
         "categorical_fallback": True,
         "n_estimators": n_estimators,
         "temperature": temperature,
@@ -194,6 +201,7 @@ def run_dataset(  # noqa: PLR0913
         "failure_rate": float((~valid).mean()),
         "l0_count_mean": l0_count_mean,
         "steps_mean": steps_mean,
+        "rounds_mean": rounds_mean,
         "factual_oob_fraction": float(
             (((X_test < 0.0) | (X_test > 1.0)).any(axis=1)).mean()
         ),
@@ -216,6 +224,7 @@ def run_dataset(  # noqa: PLR0913
             "lof_score": float(lof_per_point[i]),
             "changed_columns": len(info["changed_per_point"][i]),
             "steps": int(info["steps_per_point"][i]),
+            "rounds": int(info["rounds_per_point"][i]),
             "attempt_steps": len(info["attempt_history_per_point"][i]),
         }
         for i in range(len(X_test))
@@ -294,7 +303,10 @@ def main() -> None:
         "--max-rounds",
         type=int,
         default=1,
-        help="Maximum greedy coordinate passes (default: 1).",
+        help=(
+            "Maximum complete numerical-plus-categorical passes for mixed "
+            "data, or numerical passes for continuous data (default: 1)."
+        ),
     )
     parser.add_argument(
         "--drop-heloc-all-minus9",

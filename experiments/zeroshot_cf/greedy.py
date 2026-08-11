@@ -318,6 +318,7 @@ def greedy_counterfactual(
     plausibility_model=None,
     validity_first: bool = False,
     probability_slack: float = 0.02,
+    require_improvement: bool = False,
 ) -> Tuple[np.ndarray, List[int], Dict]:
     """Greedily build a counterfactual for one factual point.
 
@@ -371,6 +372,10 @@ def greedy_counterfactual(
         When provided with batched ``prob_ascent``, obtain several deterministic
         conditional quantiles per feature and score every feature/value pair.
         ``None`` preserves the single point-estimate path.
+    require_improvement : bool
+        Apply the revisit-round strict target-probability improvement guard
+        from the first pass. An outer mixed-data loop uses this when numerical
+        features are revisited after a categorical pass.
 
     Returns
     -------
@@ -496,7 +501,7 @@ def greedy_counterfactual(
                     )[0]
                 )
 
-            if rnd > 0:
+            if rnd > 0 or require_improvement:
                 # Strict-improvement acceptance in re-visit rounds. For
                 # prob_ascent ``score`` already is p_target after the trial
                 # edit; for class_divergence it is a divergence, so p must be
@@ -527,7 +532,7 @@ def greedy_counterfactual(
                 best_steps = total_edits
                 best_history_length = len(history)
 
-        if rnd > 0 and not edited_this_round:
+        if (rnd > 0 or require_improvement) and not edited_this_round:
             break  # fixed point: no single-column edit improves p_target
 
     attempt_history = history.copy()
@@ -565,6 +570,7 @@ def greedy_counterfactual(
         "attempt_selection_history": attempt_selection_history,
         "validity_first": bool(validity_first),
         "probability_slack": float(probability_slack),
+        "require_improvement": bool(require_improvement),
         "retain_best": bool(retain_best),
     }
     return x_cf, changed, info
