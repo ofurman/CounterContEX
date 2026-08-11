@@ -154,6 +154,7 @@ def run_tabicl_v2(
     confidence_quantiles: tuple[float, ...] | None = None,
     lof_first: bool = False,
     probability_slack: float = 0.02,
+    max_rounds: int = 1,
     drop_heloc_all_minus9: bool = False,
 ) -> dict[str, Any]:
     """Run TabICLv2 with candidate expansion at ``knn_both@512``."""
@@ -169,6 +170,7 @@ def run_tabicl_v2(
         confidence_quantiles=confidence_quantiles,
         lof_first=lof_first,
         probability_slack=probability_slack,
+        max_rounds=max_rounds,
         drop_heloc_all_minus9=drop_heloc_all_minus9,
         cache_dir=tabicl_cache_dir,
     )
@@ -220,6 +222,7 @@ def run_tabicl_v2(
         "confidence_quantiles": info["confidence_quantiles"],
         "lof_first": info["lof_first"],
         "probability_slack": info["probability_slack"],
+        "max_rounds": info["max_rounds"],
         "preprocessing_variant": info["preprocessing_variant"],
         "n_dropped_rows": info["n_dropped_rows"],
         "context_labels": "disc",
@@ -304,6 +307,12 @@ def main() -> None:
         default=0.02,
     )
     parser.add_argument(
+        "--tabicl-max-rounds",
+        type=int,
+        default=1,
+        help="TabICL greedy coordinate passes (default: 1).",
+    )
+    parser.add_argument(
         "--drop-heloc-all-minus9",
         action="store_true",
         help=(
@@ -352,6 +361,7 @@ def main() -> None:
                     ),
                     lof_first=args.tabicl_lof_first,
                     probability_slack=args.tabicl_probability_slack,
+                    max_rounds=args.tabicl_max_rounds,
                     **common,
                 )
             _write_row(row, args.results_dir)

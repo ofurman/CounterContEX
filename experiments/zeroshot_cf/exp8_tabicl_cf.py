@@ -87,6 +87,7 @@ def generate_tabicl_counterfactuals(
     confidence_quantiles: tuple[float, ...] | None = None,
     lof_first: bool = False,
     probability_slack: float = 0.02,
+    max_rounds: int = 1,
     drop_heloc_all_minus9: bool = False,
     cache_dir: Path | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
@@ -111,6 +112,8 @@ def generate_tabicl_counterfactuals(
         raise ValueError("lof_first requires candidate_quantiles")
     if probability_slack < 0:
         raise ValueError("probability_slack must be non-negative")
+    if max_rounds < 1:
+        raise ValueError("max_rounds must be at least 1")
 
     from experiments.zeroshot_cf.data import (
         get_actionable_immutable,
@@ -172,6 +175,7 @@ def generate_tabicl_counterfactuals(
         f"retain_best={retain_best}, candidate_quantiles={candidate_quantiles}, "
         f"confidence_quantiles={confidence_quantiles}, lof_first={lof_first}, "
         f"probability_slack={probability_slack}, "
+        f"max_rounds={max_rounds}, "
         f"preprocessing={bundle.preprocessing_variant}, "
         f"n_dropped_rows={bundle.n_dropped_rows}, "
         f"temperature={temperature}, "
@@ -250,6 +254,7 @@ def generate_tabicl_counterfactuals(
             plausibility_model=plausibility_model,
             validity_first=lof_first,
             probability_slack=probability_slack,
+            max_rounds=max_rounds,
         )
         X_cf[i] = x_cf
         changed_per_point[i] = changed
@@ -300,6 +305,7 @@ def generate_tabicl_counterfactuals(
         "confidence_quantiles": confidence_quantiles,
         "lof_first": lof_first,
         "probability_slack": probability_slack,
+        "max_rounds": max_rounds,
         "drop_heloc_all_minus9": drop_heloc_all_minus9,
         "preprocessing_variant": bundle.preprocessing_variant,
         "n_dropped_rows": bundle.n_dropped_rows,
@@ -475,6 +481,15 @@ def main() -> None:
         help="Pre-flip probability window in which LOF decides (default: 0.02).",
     )
     parser.add_argument(
+        "--max-rounds",
+        type=int,
+        default=1,
+        help=(
+            "Greedy passes over actionable features. Values above 1 allow "
+            "earlier features to be revisited after later edits (default: 1)."
+        ),
+    )
+    parser.add_argument(
         "--drop-heloc-all-minus9",
         action="store_true",
         help=(
@@ -521,6 +536,7 @@ def main() -> None:
             ),
             lof_first=args.lof_first,
             probability_slack=args.probability_slack,
+            max_rounds=args.max_rounds,
             drop_heloc_all_minus9=args.drop_heloc_all_minus9,
             cache_dir=args.cache_dir,
         )
