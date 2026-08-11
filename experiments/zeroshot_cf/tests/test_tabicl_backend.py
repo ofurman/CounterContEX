@@ -12,7 +12,10 @@ import numpy as np
 import torch
 from experiments.zeroshot_cf.data import get_actionable_immutable
 from experiments.zeroshot_cf.greedy import greedy_counterfactual
-from experiments.zeroshot_cf.exp8_tabicl_cf import empirical_confidence_grid
+from experiments.zeroshot_cf.exp8_tabicl_cf import (
+    _select_test_rows,
+    empirical_confidence_grid,
+)
 from experiments.zeroshot_cf.tabicl_sampler import (
     TabICLConditionalDensitySampler,
     _knn_indices,
@@ -31,6 +34,19 @@ class _FakeCategoricalEstimator:
 
     def predict_proba(self, X):
         return np.repeat(self.probabilities.reshape(1, -1), len(X), axis=0)
+
+
+def test_stratified_selector_supports_one_point_smoke_tests():
+    X = np.arange(20, dtype=float).reshape(10, 2)
+    y = np.array([0, 1] * 5)
+
+    X_selected, y_selected = _select_test_rows(X, y, 1, "stratified")
+    X_repeated, y_repeated = _select_test_rows(X, y, 1, "stratified")
+
+    assert X_selected.shape == (1, 2)
+    assert y_selected.shape == (1,)
+    np.testing.assert_array_equal(X_selected, X_repeated)
+    np.testing.assert_array_equal(y_selected, y_repeated)
 
 
 class _FakeTabICLUnsupervised:

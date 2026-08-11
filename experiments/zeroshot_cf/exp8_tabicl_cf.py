@@ -70,6 +70,39 @@ def _resolve_max_test(dataset_name: str, max_test: int | None) -> int | None:
     return _DATASET_PARAMS.get(dataset_name, {"max_test": 50})["max_test"]
 
 
+def _select_test_rows(
+    X_test: np.ndarray,
+    y_test: np.ndarray,
+    limit: int | None,
+    selection: str,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Select a deterministic held-out evaluation subset."""
+    if selection not in {"first", "stratified"}:
+        raise ValueError("test_selection must be 'first' or 'stratified'")
+    if limit is None or limit >= len(X_test):
+        return X_test, y_test
+    if limit <= 0:
+        raise ValueError("max_test must be positive or -1 for the full test set")
+    if selection == "first":
+        return X_test[:limit], y_test[:limit]
+
+    from sklearn.model_selection import train_test_split
+
+    if limit < len(np.unique(y_test)):
+        rng = np.random.default_rng(42)
+        selected = np.sort(rng.choice(len(X_test), size=limit, replace=False))
+        return X_test[selected], y_test[selected]
+
+    selected, _ = train_test_split(
+        np.arange(len(X_test)),
+        train_size=limit,
+        random_state=42,
+        stratify=y_test,
+    )
+    selected.sort()
+    return X_test[selected], y_test[selected]
+
+
 def generate_tabicl_counterfactuals(
     dataset_name: str,
     *,
@@ -89,6 +122,8 @@ def generate_tabicl_counterfactuals(
     probability_slack: float = 0.0,
     max_rounds: int = 1,
     categorical_fallback: bool = False,
+    validation_fraction: float = 0.0,
+    test_selection: str = "first",
     drop_heloc_all_minus9: bool = False,
     cache_dir: Path | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
@@ -115,6 +150,8 @@ def generate_tabicl_counterfactuals(
         raise ValueError("probability_slack must be non-negative")
     if max_rounds < 1:
         raise ValueError("max_rounds must be at least 1")
+    if test_selection not in {"first", "stratified"}:
+        raise ValueError("test_selection must be 'first' or 'stratified'")
 
     from experiments.zeroshot_cf.data import (
         get_actionable_immutable,
@@ -128,6 +165,7 @@ def generate_tabicl_counterfactuals(
         infer_feature_domains,
     )
     from experiments.zeroshot_cf.grouped_categorical import (
+        CompactMixedSampler,
         GroupedCategoricalCodec,
         grouped_categorical_fallback,
     )
@@ -140,11 +178,14 @@ def generate_tabicl_counterfactuals(
     bundle = load_dataset(
         dataset_name,
         drop_heloc_all_minus9=drop_heloc_all_minus9,
+        validation_fraction=validation_fraction,
     )
     X_train, y_train = bundle.X_train, bundle.y_train
-    X_test, y_test = bundle.X_test[:limit], bundle.y_test[:limit]
-    numerical_actionable_idx, immutable_idx = get_actionable_immutable(
-        dataset_name, bundle
+    X_test, y_test = _select_test_rows(
+        bundle.X_test,
+        bundle.y_test,
+        limit,
+        test_selection,
     )
     grouped_actionable = []
     all_one_hot_groups = []
@@ -161,6 +202,11 @@ def generate_tabicl_counterfactuals(
                 X_train,
                 all_one_hot_groups,
             )
+    else:
+        numerical_actionable_idx, immutable_idx = get_actionable_immutable(
+            dataset_name,
+            bundle,
+        )
     actionable_idx = list(numerical_actionable_idx)
     for group in grouped_actionable:
         actionable_idx.extend(group.columns)
@@ -170,11 +216,17 @@ def generate_tabicl_counterfactuals(
         if bundle.preprocessing_variant == "drop_heloc_all_minus9"
         else dataset_name
     )
+    if bundle.X_val is not None:
+        discriminator_cache_tag = (
+            f"{discriminator_cache_tag}_{bundle.split_variant}"
+        )
+    X_disc_eval = bundle.X_val if bundle.X_val is not None else X_test
+    y_disc_eval = bundle.y_val if bundle.y_val is not None else y_test
     disc_model = train_discriminator(
         X_train,
         y_train,
-        X_test,
-        y_test,
+        X_disc_eval,
+        y_disc_eval,
         discriminator_cache_tag,
     )
     y_pred = disc_model.predict(X_test)
@@ -204,6 +256,7 @@ def generate_tabicl_counterfactuals(
         f"probability_slack={probability_slack}, "
         f"max_rounds={max_rounds}, "
         f"categorical_fallback={categorical_fallback}, "
+        f"split={bundle.split_variant}, test_selection={test_selection}, "
         f"preprocessing={bundle.preprocessing_variant}, "
         f"n_dropped_rows={bundle.n_dropped_rows}, "
         f"temperature={temperature}, "
@@ -216,7 +269,7 @@ def generate_tabicl_counterfactuals(
         f"{len(immutable_idx)} immutable"
     )
 
-    sampler = TabICLConditionalDensitySampler(
+    sampler_context = TabICLConditionalDensitySampler(
         n_estimators=n_estimators,
         temperature=temperature,
         random_state=42,
@@ -224,21 +277,18 @@ def generate_tabicl_counterfactuals(
         cache_dir=cache_dir,
         context_update=context_update,
         numerical_point_estimate=point_estimate,
+        categorical_features=(
+            None
+            if categorical_codec is None
+            else categorical_codec.categorical_columns
+        ),
     )
-    categorical_sampler = None
-    X_train_categorical = None
-    if categorical_codec is not None and grouped_actionable:
-        X_train_categorical = categorical_codec.encode(X_train)
-        categorical_sampler = TabICLConditionalDensitySampler(
-            n_estimators=n_estimators,
-            temperature=temperature,
-            random_state=42,
-            device=TABICL_DEVICE,
-            cache_dir=cache_dir,
-            context_update=context_update,
-            numerical_point_estimate=point_estimate,
-            categorical_features=categorical_codec.categorical_columns,
-        )
+    if categorical_codec is None:
+        X_sampler_train = X_train
+        sampler = sampler_context
+    else:
+        X_sampler_train = categorical_codec.encode(X_train)
+        sampler = CompactMixedSampler(sampler_context, categorical_codec)
     feature_domains = infer_feature_domains(X_train) if project_to_domain else None
 
     X_cf = X_test.copy()
@@ -262,8 +312,11 @@ def generate_tabicl_counterfactuals(
     started = time.perf_counter()
     for i, (x, target) in enumerate(zip(X_test, y_target)):
         # Athena winner: both-class pool, per-factual 512-row kNN context.
-        sampler.set_context(
-            X_train,
+        sampler_query = (
+            x if categorical_codec is None else categorical_codec.encode_row(x)
+        )
+        sampler_context.set_context(
+            X_sampler_train,
             y_context=y_context,
             confidence_context=(
                 None
@@ -273,13 +326,13 @@ def generate_tabicl_counterfactuals(
             target_class=None,
             max_context=ATHENA_CONTEXT_SIZE,
             selection="knn",
-            query=x,
+            query=sampler_query,
         )
         confidence_grid = None
         if confidence_quantiles is not None:
             confidence_grid = empirical_confidence_grid(
-                sampler.selected_confidences_,
-                sampler.selected_labels_,
+                sampler_context.selected_confidences_,
+                sampler_context.selected_labels_,
                 int(target),
                 confidence_quantiles,
             )
@@ -305,27 +358,22 @@ def generate_tabicl_counterfactuals(
         )
         if (
             not greedy_info["flipped"]
-            and categorical_sampler is not None
             and categorical_codec is not None
-            and X_train_categorical is not None
+            and grouped_actionable
         ):
-            categorical_query = categorical_codec.encode_row(x_cf)
-            categorical_sampler.set_context(
-                X_train_categorical,
-                y_context=y_context,
-                target_class=None,
-                max_context=ATHENA_CONTEXT_SIZE,
-                selection="knn",
-                query=categorical_query,
-            )
-
             def category_distribution(row, group):
                 encoded_row = categorical_codec.encode_row(row)
                 encoded_col = categorical_codec.encoded_column_for_group(group)
-                return categorical_sampler.categorical_distribution(
+                fixed_confidence = (
+                    None
+                    if confidence_grid is None
+                    else confidence_grid[len(confidence_grid) // 2]
+                )
+                return sampler_context.categorical_distribution(
                     encoded_row.reshape(1, -1),
                     encoded_col,
                     fixed_target=int(target),
+                    fixed_confidence=fixed_confidence,
                 )
 
             x_cf, categorical_changed, categorical_info = (
@@ -400,6 +448,9 @@ def generate_tabicl_counterfactuals(
         "max_rounds": max_rounds,
         "categorical_fallback": categorical_fallback,
         "grouped_actionable": [group.name for group in grouped_actionable],
+        "validation_fraction": validation_fraction,
+        "test_selection": test_selection,
+        "split_variant": bundle.split_variant,
         "drop_heloc_all_minus9": drop_heloc_all_minus9,
         "preprocessing_variant": bundle.preprocessing_variant,
         "n_dropped_rows": bundle.n_dropped_rows,
@@ -451,6 +502,8 @@ def run_and_report(
         "lof_first": info["lof_first"],
         "probability_slack": info["probability_slack"],
         "categorical_fallback": info["categorical_fallback"],
+        "split_variant": info["split_variant"],
+        "test_selection": info["test_selection"],
         "n_estimators": info["n_estimators"],
         "temperature": info["temperature"],
         "n_test": len(X_test),
@@ -468,6 +521,7 @@ def run_and_report(
         diagnostics = {
             "dataset": dataset_name,
             "preprocessing_variant": info["preprocessing_variant"],
+            "split_variant": info["split_variant"],
             "n_dropped_rows": info["n_dropped_rows"],
             "lof_per_point": info["lof_per_point"].tolist(),
             "y_pred": info["y_pred"].tolist(),
@@ -597,6 +651,21 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--validation-fraction",
+        type=float,
+        default=0.0,
+        help=(
+            "Fraction of the provisional 80%% train partition reserved for "
+            "validation; 0.2 gives a fixed 64/16/20 split."
+        ),
+    )
+    parser.add_argument(
+        "--test-selection",
+        choices=["first", "stratified"],
+        default="first",
+        help="How --max-test selects held-out factuals (default: first).",
+    )
+    parser.add_argument(
         "--drop-heloc-all-minus9",
         action="store_true",
         help=(
@@ -649,6 +718,8 @@ def main() -> None:
             probability_slack=args.probability_slack,
             max_rounds=args.max_rounds,
             categorical_fallback=args.categorical_fallback,
+            validation_fraction=args.validation_fraction,
+            test_selection=args.test_selection,
             drop_heloc_all_minus9=args.drop_heloc_all_minus9,
             cache_dir=args.cache_dir,
         )

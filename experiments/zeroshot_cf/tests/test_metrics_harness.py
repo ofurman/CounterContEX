@@ -13,7 +13,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from experiments.zeroshot_cf.metrics_harness import compute_metrics
+from experiments.zeroshot_cf.metrics_harness import (
+    compute_dicoflex_common_metrics,
+    compute_metrics,
+)
 
 
 class _MockDisc:
@@ -197,3 +200,56 @@ def test_proximity_uses_valid_mask_from_y_target():
     assert metrics["validity"] == pytest.approx(0.5)
     # proximity: mean L2 of idx 0 and 2 = (1.0 + 2.0) / 2 = 1.5
     assert metrics["proximity_l2_jaccard"] == pytest.approx(1.5)
+
+
+def test_dicoflex_common_metrics_match_reference_definitions():
+    X_test = np.zeros((3, 3), dtype=float)
+    X_cf = np.array(
+        [
+            [0.04, 0.00, 0.0],
+            [0.20, 0.30, 0.0],
+            [0.60, 0.80, 0.0],
+        ]
+    )
+    X_train = np.random.default_rng(21).uniform(0, 1, (40, 3))
+    disc = _MockDisc(np.array([1, 1, 0]))
+
+    metrics = compute_dicoflex_common_metrics(
+        disc,
+        X_cf,
+        X_test,
+        X_train,
+        y_target=np.ones(3, dtype=int),
+        numerical_idx=[0, 1],
+        immutable_idx=[2],
+    )
+
+    assert metrics["coverage"] == pytest.approx(1.0)
+    assert metrics["validity"] == pytest.approx(2 / 3)
+    assert metrics["actionability"] == pytest.approx(1.0)
+    # Four of nine transformed entries exceed DiCoFlex's epsilon of 0.05.
+    assert metrics["sparsity"] == pytest.approx(4 / 9)
+    # Only the first two, valid rows contribute: (0.04 + 0.50) / 2.
+    assert metrics["proximity_continuous_manhattan"] == pytest.approx(0.27)
+    assert metrics["proximity_continuous_euclidean"] == pytest.approx(
+        (0.04 + np.hypot(0.2, 0.3)) / 2
+    )
+    assert np.isfinite(metrics["lof_scores_cf"])
+    assert np.isfinite(metrics["lof_scores_test"])
+    assert np.isfinite(metrics["isolation_forest_scores_cf"])
+    assert np.isfinite(metrics["isolation_forest_scores_test"])
+
+
+def test_dicoflex_common_metrics_keep_singleton_target_dimension():
+    X_train = np.random.default_rng(22).uniform(0, 1, (40, 2))
+    metrics = compute_dicoflex_common_metrics(
+        _MockDisc(np.array([1])),
+        X_cf=np.array([[0.2, 0.3]]),
+        X_test=np.array([[0.1, 0.3]]),
+        X_train=X_train,
+        y_target=np.array([1]),
+        numerical_idx=[0, 1],
+    )
+
+    assert metrics["coverage"] == pytest.approx(1.0)
+    assert metrics["validity"] == pytest.approx(1.0)

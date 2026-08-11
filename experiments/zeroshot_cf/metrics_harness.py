@@ -25,6 +25,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 import numpy as np
+from sklearn.ensemble import IsolationForest
 from sklearn.neighbors import LocalOutlierFactor
 
 
@@ -110,6 +111,101 @@ def compute_metrics(
         "actionability": actionability,
         "true_actionability": true_actionability,
         "proximity_l2_jaccard": proximity_l2_jaccard,
+    }
+
+
+def compute_dicoflex_common_metrics(
+    disc_model,
+    X_cf: np.ndarray,
+    X_test: np.ndarray,
+    X_train: np.ndarray,
+    y_target: np.ndarray,
+    numerical_idx: List[int],
+    immutable_idx: Optional[List[int]] = None,
+    *,
+    sparsity_eps: float = 0.05,
+    lof_n_neighbors: int = 20,
+    isolation_forest_estimators: int = 100,
+) -> Dict[str, float]:
+    """Compute the method-independent metrics reported by DiCoFlex.
+
+    DiCoFlex also reports generator likelihood metrics. Those are deliberately
+    omitted because they are model-specific and TabICL does not expose a
+    comparable joint counterfactual log density. Distances are evaluated only
+    on valid counterfactuals, matching ``CFMetrics.feature_distance``.
+    """
+    X_cf = np.asarray(X_cf, dtype=np.float64)
+    X_test = np.asarray(X_test, dtype=np.float64)
+    X_train = np.asarray(X_train, dtype=np.float64)
+    target = np.asarray(y_target).reshape(-1)
+    if X_cf.shape != X_test.shape:
+        raise ValueError("X_cf and X_test must have the same shape")
+    if X_cf.ndim != 2 or X_train.ndim != 2:
+        raise ValueError("X_cf, X_test, and X_train must be 2D")
+    if X_cf.shape[1] != X_train.shape[1]:
+        raise ValueError("X_cf and X_train must have the same columns")
+    if target.shape != (len(X_cf),):
+        raise ValueError("y_target must contain one label per counterfactual")
+    if not 0 <= sparsity_eps:
+        raise ValueError("sparsity_eps must be non-negative")
+
+    covered = ~np.isnan(X_cf).any(axis=1)
+    coverage = float(covered.mean())
+    if not covered.all():
+        raise ValueError(
+            "DiCoFlex common metrics require complete counterfactuals; "
+            f"coverage was {coverage:.4f}"
+        )
+
+    y_cf_pred = np.asarray(disc_model.predict(X_cf)).reshape(-1)
+    valid = y_cf_pred == target
+    validity = float(valid.mean())
+    sparsity = float((np.abs(X_test - X_cf) > sparsity_eps).mean())
+
+    immutable = np.asarray(immutable_idx or [], dtype=int)
+    actionability = (
+        1.0
+        if len(immutable) == 0
+        else float(np.all(X_test[:, immutable] == X_cf[:, immutable], axis=1).mean())
+    )
+
+    numerical = np.asarray(numerical_idx, dtype=int)
+    if valid.any() and len(numerical) > 0:
+        continuous_diff = X_cf[valid][:, numerical] - X_test[valid][:, numerical]
+        proximity_manhattan = float(np.abs(continuous_diff).sum(axis=1).mean())
+        proximity_euclidean = float(
+            np.linalg.norm(continuous_diff, axis=1).mean()
+        )
+    else:
+        proximity_manhattan = float("nan")
+        proximity_euclidean = float("nan")
+
+    lof = LocalOutlierFactor(n_neighbors=lof_n_neighbors, novelty=True).fit(X_train)
+    lof_scores_cf = float((-lof.score_samples(X_cf)).mean())
+    lof_scores_test = float((-lof.score_samples(X_test)).mean())
+
+    isolation_forest = IsolationForest(
+        n_estimators=isolation_forest_estimators,
+        random_state=42,
+    ).fit(X_train)
+    isolation_forest_scores_cf = float(
+        isolation_forest.decision_function(X_cf).mean()
+    )
+    isolation_forest_scores_test = float(
+        isolation_forest.decision_function(X_test).mean()
+    )
+
+    return {
+        "coverage": coverage,
+        "validity": validity,
+        "actionability": actionability,
+        "sparsity": sparsity,
+        "proximity_continuous_manhattan": proximity_manhattan,
+        "proximity_continuous_euclidean": proximity_euclidean,
+        "lof_scores_cf": lof_scores_cf,
+        "lof_scores_test": lof_scores_test,
+        "isolation_forest_scores_cf": isolation_forest_scores_cf,
+        "isolation_forest_scores_test": isolation_forest_scores_test,
     }
 
 

@@ -6,6 +6,7 @@ import numpy as np
 
 from experiments.zeroshot_cf.data import OneHotActionGroup
 from experiments.zeroshot_cf.grouped_categorical import (
+    CompactMixedSampler,
     GroupedCategoricalCodec,
     grouped_categorical_fallback,
 )
@@ -54,6 +55,29 @@ def test_codec_rejects_malformed_one_hot_rows():
 
     with np.testing.assert_raises_regex(ValueError, "invalid row"):
         GroupedCategoricalCodec.from_matrix(malformed, [group])
+
+
+def test_compact_sampler_maps_original_scalar_columns():
+    group = OneHotActionGroup("job", (1, 2, 3))
+    X = np.array([[0.2, 1.0, 0.0, 0.0, 0.7]])
+    codec = GroupedCategoricalCodec.from_matrix(X, [group])
+
+    class _Recorder:
+        def sample_candidate_grid(self, query, columns, **kwargs):
+            np.testing.assert_array_equal(query, [[0.2, 0.7, 0.0]])
+            assert columns == (0, 1)
+            assert kwargs["fixed_target"] == 1
+            return np.array([[0.1, 0.2], [0.3, 0.4]])
+
+    sampler = CompactMixedSampler(_Recorder(), codec)
+    values = sampler.sample_candidate_grid(
+        X,
+        [0, 4],
+        quantiles=(0.25, 0.75),
+        fixed_target=1,
+    )
+
+    np.testing.assert_array_equal(values, [[0.1, 0.2], [0.3, 0.4]])
 
 
 def test_grouped_fallback_uses_validity_gate_then_minimum_lof():

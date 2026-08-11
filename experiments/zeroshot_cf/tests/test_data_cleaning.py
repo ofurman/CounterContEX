@@ -64,3 +64,25 @@ def test_german_credit_grouped_action_space_preserves_protected_group() -> None:
         group for group in all_groups if group.name == "personal_status_sex"
     )
     assert immutable == list(protected.columns)
+
+
+def test_single_validation_split_is_fixed_64_16_20() -> None:
+    """Create one deterministic split instead of repeated CV folds."""
+    first = load_dataset("moons", validation_fraction=0.2)
+    second = load_dataset("moons", validation_fraction=0.2)
+
+    assert (len(first.X_train), len(first.X_val), len(first.X_test)) == (640, 160, 200)
+    assert first.split_variant == "train_val_test_0.64_0.16_0.20"
+    np.testing.assert_array_equal(first.X_train, second.X_train)
+    np.testing.assert_array_equal(first.X_val, second.X_val)
+    np.testing.assert_array_equal(first.y_val, second.y_val)
+
+    scaler = first.method_dataset.preprocessing_pipeline.get_step("minmax").scaler
+    np.testing.assert_allclose(
+        scaler.data_min_,
+        first.method_dataset.X_train_raw.min(axis=0),
+    )
+    np.testing.assert_allclose(
+        scaler.data_max_,
+        first.method_dataset.X_train_raw.max(axis=0),
+    )

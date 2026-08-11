@@ -41,6 +41,19 @@ class GroupedCategoricalCodec:
     def encoded_column_for_group(self, group: OneHotActionGroup) -> int:
         return len(self.scalar_columns) + self.groups.index(group)
 
+    def encoded_columns_for_scalars(
+        self,
+        columns: Sequence[int],
+    ) -> tuple[int, ...]:
+        """Map original scalar columns to their compact encoded positions."""
+        positions = {column: i for i, column in enumerate(self.scalar_columns)}
+        try:
+            return tuple(positions[int(column)] for column in columns)
+        except KeyError as exc:
+            raise ValueError(
+                f"column {exc.args[0]} belongs to a categorical group"
+            ) from exc
+
     def encode(self, X: np.ndarray) -> np.ndarray:
         matrix = np.asarray(X, dtype=np.float64)
         if matrix.ndim == 1:
@@ -64,6 +77,60 @@ class GroupedCategoricalCodec:
 
     def encode_row(self, x: np.ndarray) -> np.ndarray:
         return self.encode(np.asarray(x).reshape(1, -1))[0]
+
+
+class CompactMixedSampler:
+    """Present the original feature API over a compact mixed TabICL sampler.
+
+    The greedy search continues to use original transformed column indices, but
+    TabICL receives one column per categorical variable instead of every dummy.
+    Only scalar numerical columns are sampled through this adapter; categorical
+    changes are handled atomically by :func:`grouped_categorical_fallback`.
+    """
+
+    def __init__(self, sampler, codec: GroupedCategoricalCodec) -> None:
+        self.sampler = sampler
+        self.codec = codec
+
+    def _encoded_candidates(self, columns: Sequence[int]) -> tuple[int, ...]:
+        return self.codec.encoded_columns_for_scalars(columns)
+
+    def sample_candidates(
+        self,
+        X_query: np.ndarray,
+        candidate_cols: Sequence[int],
+        **kwargs,
+    ) -> np.ndarray:
+        return self.sampler.sample_candidates(
+            self.codec.encode(X_query),
+            self._encoded_candidates(candidate_cols),
+            **kwargs,
+        )
+
+    def sample_candidate_grid(
+        self,
+        X_query: np.ndarray,
+        candidate_cols: Sequence[int],
+        **kwargs,
+    ) -> np.ndarray:
+        return self.sampler.sample_candidate_grid(
+            self.codec.encode(X_query),
+            self._encoded_candidates(candidate_cols),
+            **kwargs,
+        )
+
+    def sample_feature(
+        self,
+        X_query: np.ndarray,
+        target_col: int,
+        **kwargs,
+    ) -> np.ndarray:
+        encoded_col = self._encoded_candidates([target_col])[0]
+        return self.sampler.sample_feature(
+            self.codec.encode(X_query),
+            encoded_col,
+            **kwargs,
+        )
 
 
 CategoryDistribution = Callable[

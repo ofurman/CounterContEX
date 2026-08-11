@@ -14,8 +14,10 @@ import numpy as np
 import yaml
 from cel.datasets.file_dataset import FileDataset
 from cel.datasets.method_dataset import MethodDataset
+from cel.preprocessing.base import PreprocessingContext
 from cel.preprocessing.pipeline import PreprocessingPipeline
 from cel.preprocessing.scalers import MinMaxScalingStep
+from sklearn.model_selection import train_test_split
 
 CEL_REPO = Path(__file__).parent / "vendor" / "counterfactuals"
 CONFIGS_DIR = Path(__file__).parent / "configs"
@@ -34,6 +36,9 @@ class DatasetBundle:
     numerical_features_indices: List[int]
     categorical_features_indices: List[int]
     method_dataset: MethodDataset  # for inverse_transform back to original space
+    X_val: np.ndarray | None = None
+    y_val: np.ndarray | None = None
+    split_variant: str = "train_test_80_20"
     n_dropped_rows: int = 0
     preprocessing_variant: str = "original"
 
@@ -114,6 +119,7 @@ def load_dataset(
     name: str,
     *,
     drop_heloc_all_minus9: bool = False,
+    validation_fraction: float = 0.0,
 ) -> DatasetBundle:
     """Load a supported cel classification dataset, MinMax-scaled.
 
@@ -123,7 +129,13 @@ def load_dataset(
     When ``drop_heloc_all_minus9`` is enabled, completely unavailable HELOC
     bureau records are removed before splitting and scaling. Partial special
     codes are intentionally preserved for this controlled comparison.
+
+    ``validation_fraction`` is the fraction split from the provisional 80%
+    training partition with a second fixed, stratified split. A value of 0.2
+    therefore produces one reproducible 64%/16%/20% train/validation/test split.
     """
+    if not 0.0 <= validation_fraction < 1.0:
+        raise ValueError("validation_fraction must be in [0, 1)")
     config_path = CEL_REPO / "config" / "datasets" / f"{name}.yaml"
     if not config_path.exists():
         raise FileNotFoundError(f"Dataset config not found: {config_path}")
@@ -148,18 +160,76 @@ def load_dataset(
             ("minmax", MinMaxScalingStep()),
         ]
     )
-    md = MethodDataset(file_dataset, preprocessing_pipeline=preprocessing)
+    md = MethodDataset(
+        file_dataset,
+        preprocessing_pipeline=(
+            preprocessing if validation_fraction == 0 else None
+        ),
+    )
+
+    X_val = None
+    y_val = None
+    split_variant = "train_test_80_20"
+    if validation_fraction > 0:
+        X_train_raw, X_val_raw, y_train, y_val = train_test_split(
+            md.X_train_raw,
+            md.y_train,
+            test_size=validation_fraction,
+            random_state=42,
+            stratify=md.y_train,
+        )
+        n_val = len(X_val_raw)
+        evaluation_raw = np.concatenate([X_val_raw, md.X_test_raw], axis=0)
+        evaluation_y = np.concatenate([y_val, md.y_test], axis=0)
+        context = PreprocessingContext(
+            X_train=X_train_raw,
+            X_test=evaluation_raw,
+            y_train=y_train,
+            y_test=evaluation_y,
+            categorical_indices=file_dataset.categorical_features_indices,
+            continuous_indices=file_dataset.numerical_features_indices,
+        )
+        preprocessing.fit(context)
+        transformed = preprocessing.transform(context)
+        X_train = transformed.X_train.astype(np.float64)
+        X_val = transformed.X_test[:n_val].astype(np.float64)
+        X_test = transformed.X_test[n_val:].astype(np.float64)
+        y_train = np.asarray(y_train, dtype=np.int64)
+        y_val = np.asarray(y_val, dtype=np.int64)
+        y_test = md.y_test.astype(np.int64)
+
+        # Preserve MethodDataset's inverse-transform API using the scaler that
+        # was fitted exclusively on the final training partition.
+        md.preprocessing_pipeline = preprocessing
+        md.X_train_raw = X_train_raw.copy()
+        md.X_test_raw = md.X_test_raw.copy()
+        md.X_train = X_train
+        md.X_test = X_test
+        md.y_train = y_train
+        md.y_test = y_test
+        split_variant = (
+            f"train_val_test_{0.8 * (1 - validation_fraction):.2f}_"
+            f"{0.8 * validation_fraction:.2f}_0.20"
+        )
+    else:
+        X_train = md.X_train.astype(np.float64)
+        X_test = md.X_test.astype(np.float64)
+        y_train = md.y_train.astype(np.int64)
+        y_test = md.y_test.astype(np.int64)
 
     return DatasetBundle(
         name=name,
-        X_train=md.X_train.astype(np.float64),
-        X_test=md.X_test.astype(np.float64),
-        y_train=md.y_train.astype(np.int64),
-        y_test=md.y_test.astype(np.int64),
+        X_train=X_train,
+        X_test=X_test,
+        y_train=y_train,
+        y_test=y_test,
         feature_names=list(md.features),
         numerical_features_indices=list(md.numerical_features_indices),
         categorical_features_indices=list(md.categorical_features_indices),
         method_dataset=md,
+        X_val=X_val,
+        y_val=y_val,
+        split_variant=split_variant,
         n_dropped_rows=n_dropped_rows,
         preprocessing_variant=preprocessing_variant,
     )

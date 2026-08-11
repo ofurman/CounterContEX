@@ -179,3 +179,35 @@ ZEROSHOT_CF_MODELS_DIR="$PWD/experiments/zeroshot_cf/results/athena/tabicl_quant
   --tabicl-cache-dir experiments/zeroshot_cf/models/tabicl \
   --results-dir experiments/zeroshot_cf/results/athena/tabicl_quantile_smoke
 ```
+
+## Exp9: Single-split DiCoFlex datasets with TabICL
+
+Exp9 evaluates only TabICL on HELOC and the four suitable mixed DiCoFlex
+datasets: Bank Marketing, Give Me Some Credit, Lending Club, and Credit
+Default. Adult is excluded. Every dataset uses one fixed stratified 64/16/20
+train/validation/test split (seed 42), up to 1,000 stratified held-out
+factuals, and one counterfactual per factual.
+
+The five rows are independent Slurm array tasks and can run concurrently. Each
+gets one A100, 8 CPUs, 64 GB RAM, and a six-hour wall-time on the
+`plgfoundationeconom-gpu-a100` allocation:
+
+```bash
+bash experiments/zeroshot_cf/athena/submit_exp9_dicoflex.sh
+```
+
+The fixed search uses 19 numerical quantiles from 0.05 to 0.95, five empirical
+target-confidence levels, LOF-first valid-candidate selection, and atomic
+categorical changes. Each task writes aggregate metrics, per-point diagnostics,
+and compressed factual/CF arrays under:
+
+```text
+experiments/zeroshot_cf/results/athena/exp9_dicoflex/
+```
+
+After all tasks finish, combine the five metric rows without loading TabICL:
+
+```bash
+.venv/bin/python -m experiments.zeroshot_cf.exp9_dicoflex_benchmark \
+  --dataset aggregate
+```
