@@ -30,16 +30,16 @@ from experiments.zeroshot_cf.data import (
     load_dataset,
 )
 from experiments.zeroshot_cf.discriminator import train_discriminator
-from experiments.zeroshot_cf.exp11_nice_nun_baseline import _action_units
-from experiments.zeroshot_cf.exp12_optimization_baselines import (
-    contract_scalar_actions,
-    prune_counterfactual_actions,
-)
 from experiments.zeroshot_cf.exp8_tabicl_cf import _select_test_rows
 from experiments.zeroshot_cf.exp9_dicoflex_benchmark import (
     DATASETS,
     DEFAULT_MAX_TEST,
     DEFAULT_VALIDATION_FRACTION,
+)
+from experiments.zeroshot_cf.exp11_nice_nun_baseline import _action_units
+from experiments.zeroshot_cf.exp12_optimization_baselines import (
+    contract_scalar_actions,
+    prune_counterfactual_actions,
 )
 from experiments.zeroshot_cf.metrics_harness import (
     compute_dicoflex_common_metrics,
@@ -167,55 +167,91 @@ def _features_to_vary(
 def generate_dice_counterfactuals(
     explainer: Any,
     codec: DiceMixedAdapter,
+    classifier: Any,
     X_test: np.ndarray,
     y_target: np.ndarray,
     features_to_vary: list[str],
     *,
     max_iterations: int = 200,
+    search_total_cfs: int = 1,
+    search_restarts: int = 1,
+    stopping_threshold: float = 0.5,
     random_state: int = 42,
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
-    """Generate one official DiCE-genetic counterfactual per factual."""
+    """Generate one CF per factual from DiCE's valid pre-sparsification set."""
+    if search_total_cfs < 1:
+        raise ValueError("search_total_cfs must be positive")
+    if search_restarts < 1:
+        raise ValueError("search_restarts must be positive")
+    if not 0.5 <= stopping_threshold < 1.0:
+        raise ValueError("stopping_threshold must be in [0.5, 1.0)")
     X_cf = np.asarray(X_test, dtype=np.float64).copy()
     point_info: list[dict[str, Any]] = []
     queries = codec.encode(X_test)
     for index, target in enumerate(np.asarray(y_target, dtype=int)):
-        random.seed(random_state + index)
-        np.random.seed(random_state + index)
         started = time.perf_counter()
-        try:
-            explanation = explainer.generate_counterfactuals(
-                queries.iloc[[index]],
-                total_CFs=1,
-                desired_class=int(target),
-                features_to_vary=features_to_vary,
-                stopping_threshold=0.5,
-                posthoc_sparsity_param=0.1,
-                posthoc_sparsity_algorithm="binary",
-                initialization="kdtree",
-                proximity_weight=1.0,
-                sparsity_weight=1.0,
-                diversity_weight=0.0,
-                categorical_penalty=1.0,
-                maxiterations=max_iterations,
-                verbose=False,
+        returned = False
+        valid_candidates = 0
+        attempts_used = 0
+        for attempt in range(search_restarts):
+            attempts_used = attempt + 1
+            attempt_seed = random_state + index + attempt * 100_003
+            random.seed(attempt_seed)
+            np.random.seed(attempt_seed)
+            try:
+                explainer.generate_counterfactuals(
+                    queries.iloc[[index]],
+                    total_CFs=search_total_cfs,
+                    desired_class=int(target),
+                    features_to_vary=features_to_vary,
+                    stopping_threshold=stopping_threshold,
+                    posthoc_sparsity_param=0.0,
+                    posthoc_sparsity_algorithm="binary",
+                    initialization="kdtree",
+                    proximity_weight=0.2,
+                    sparsity_weight=0.2,
+                    diversity_weight=5.0 if search_total_cfs > 1 else 0.0,
+                    categorical_penalty=0.1,
+                    maxiterations=max_iterations,
+                    verbose=False,
+                )
+                # DiCE rounds continuous values before exposing final_cfs_df
+                # and may thereby move a marginal CF back across the boundary.
+                # Recover the genetic solver's unrounded candidates instead.
+                final_frame = explainer.label_decode_cfs(explainer.final_cfs)
+                attempt_returned = final_frame is not None and len(final_frame) > 0
+            except UserConfigValidationException as error:
+                if "No counterfactuals found" not in str(error):
+                    raise
+                final_frame = None
+                attempt_returned = False
+            returned = returned or attempt_returned
+            if not attempt_returned:
+                continue
+
+            candidates = codec.decode(final_frame)
+            predictions = np.asarray(
+                classifier.predict(candidates), dtype=int
             )
-            example = explanation.cf_examples_list[0]
-            final_frame = (
-                example.final_cfs_df_sparse
-                if example.final_cfs_df_sparse is not None
-                else example.final_cfs_df
-            )
-            found = final_frame is not None and len(final_frame) > 0
-        except UserConfigValidationException as error:
-            if "No counterfactuals found" not in str(error):
-                raise
-            final_frame = None
-            found = False
-        if found:
-            X_cf[index] = codec.decode(final_frame.iloc[[0]])[0]
+            valid_indices = np.flatnonzero(predictions == int(target))
+            valid_candidates = len(valid_indices)
+            if valid_candidates:
+                candidates = candidates[valid_indices]
+                compact_factual = queries.iloc[index].to_numpy()
+                compact_candidates = final_frame.iloc[valid_indices][
+                    codec.feature_names
+                ].to_numpy()
+                changed_actions = (compact_candidates != compact_factual).sum(axis=1)
+                l2 = np.linalg.norm(candidates - X_test[index], axis=1)
+                selected = np.lexsort((l2, changed_actions))[0]
+                X_cf[index] = candidates[selected]
+                break
         point_info.append(
             {
-                "found": bool(found),
+                "returned": bool(returned),
+                "found": bool(valid_candidates),
+                "valid_candidates": int(valid_candidates),
+                "attempts": attempts_used,
                 "runtime_s": time.perf_counter() - started,
             }
         )
@@ -227,6 +263,9 @@ def run_dataset(  # noqa: PLR0913
     *,
     max_test: int = DEFAULT_MAX_TEST,
     max_iterations: int = 200,
+    search_total_cfs: int = 1,
+    search_restarts: int = 1,
+    stopping_threshold: float = 0.5,
     validation_fraction: float = DEFAULT_VALIDATION_FRACTION,
     drop_heloc_all_minus9: bool = True,
     results_dir: Path = RESULTS_DIR,
@@ -288,10 +327,14 @@ def run_dataset(  # noqa: PLR0913
     X_cf, point_info = generate_dice_counterfactuals(
         explainer,
         codec,
+        disc_model,
         X_test,
         y_target,
         vary,
         max_iterations=max_iterations,
+        search_total_cfs=search_total_cfs,
+        search_restarts=search_restarts,
+        stopping_threshold=stopping_threshold,
     )
     X_cf_raw = X_cf.copy()
     action_units = _action_units(scalar_actionable, grouped_actionable)
@@ -357,8 +400,13 @@ def run_dataset(  # noqa: PLR0913
         "search": "genetic",
         "initialization": "kdtree",
         "max_iterations": max_iterations,
-        "proximity_weight": 1.0,
-        "sparsity_weight": 1.0,
+        "search_total_cfs": search_total_cfs,
+        "search_restarts": search_restarts,
+        "stopping_threshold": stopping_threshold,
+        "proximity_weight": 0.2,
+        "sparsity_weight": 0.2,
+        "diversity_weight": 5.0 if search_total_cfs > 1 else 0.0,
+        "categorical_penalty": 0.1,
         "categorical_actions": "compact_atomic_groups",
         "posthoc_action_pruning": True,
         "posthoc_scalar_contraction": True,
@@ -367,6 +415,9 @@ def run_dataset(  # noqa: PLR0913
         "n_dropped_rows": bundle.n_dropped_rows,
         "runtime_generation_s": round(runtime_generation, 3),
         "dice_found_fraction": float(found.mean()),
+        "dice_returned_fraction": float(
+            np.mean([info["returned"] for info in point_info])
+        ),
         **common_metrics,
         "sparsity_exact": float((X_test != X_cf).mean()),
         "true_actionability": common_metrics["actionability"],
@@ -399,6 +450,9 @@ def run_dataset(  # noqa: PLR0913
                 "cf_prediction": int(y_cf_pred[index]),
                 "valid": bool(valid[index]),
                 "dice_found": bool(info["found"]),
+                "dice_returned": bool(info["returned"]),
+                "valid_candidates": int(info["valid_candidates"]),
+                "search_attempts": int(info["attempts"]),
                 "target_probability": float(probabilities[index]),
                 "changed_columns": int(changed_columns[index]),
                 "raw_changed_columns": int(raw_changed_columns[index]),
@@ -427,6 +481,9 @@ def main() -> None:
     parser.add_argument("--dataset", choices=[*DATASETS, "all"], default="all")
     parser.add_argument("--max-test", type=int, default=DEFAULT_MAX_TEST)
     parser.add_argument("--max-iterations", type=int, default=200)
+    parser.add_argument("--search-total-cfs", type=int, default=1)
+    parser.add_argument("--search-restarts", type=int, default=1)
+    parser.add_argument("--stopping-threshold", type=float, default=0.5)
     parser.add_argument(
         "--validation-fraction",
         type=float,
@@ -446,6 +503,9 @@ def main() -> None:
             dataset,
             max_test=args.max_test,
             max_iterations=args.max_iterations,
+            search_total_cfs=args.search_total_cfs,
+            search_restarts=args.search_restarts,
+            stopping_threshold=args.stopping_threshold,
             validation_fraction=args.validation_fraction,
             drop_heloc_all_minus9=args.drop_heloc_all_minus9,
             results_dir=args.results_dir,
