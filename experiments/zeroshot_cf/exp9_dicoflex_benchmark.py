@@ -46,6 +46,9 @@ DATASETS = (
 DEFAULT_MAX_TEST = 1000
 DEFAULT_VALIDATION_FRACTION = 0.2
 DEFAULT_N_ESTIMATORS = 1
+DEFAULT_MAX_REFINEMENT_STEPS = 2
+DEFAULT_MIN_RELATIVE_LOF_GAIN = 0.05
+DEFAULT_REFINEMENT_LOF_QUANTILE = 0.90
 DEFAULT_CANDIDATE_QUANTILES = tuple(i / 20 for i in range(1, 20))
 DEFAULT_CONFIDENCE_QUANTILES = (0.10, 0.25, 0.50, 0.75, 0.90)
 RESULTS_DIR = Path(__file__).parent / "results" / "athena" / "exp9_dicoflex"
@@ -82,6 +85,9 @@ def run_dataset(  # noqa: PLR0913
     confidence_quantiles: tuple[float, ...] = DEFAULT_CONFIDENCE_QUANTILES,
     lof_first: bool = True,
     max_rounds: int = 1,
+    max_refinement_steps: int = DEFAULT_MAX_REFINEMENT_STEPS,
+    min_relative_lof_gain: float = DEFAULT_MIN_RELATIVE_LOF_GAIN,
+    refinement_lof_quantile: float = DEFAULT_REFINEMENT_LOF_QUANTILE,
     validation_fraction: float = DEFAULT_VALIDATION_FRACTION,
     drop_heloc_all_minus9: bool = True,
     tabicl_cache_dir: Path | None = None,
@@ -109,6 +115,9 @@ def run_dataset(  # noqa: PLR0913
         lof_first=lof_first,
         probability_slack=0.0,
         max_rounds=max_rounds,
+        max_refinement_steps=max_refinement_steps,
+        min_relative_lof_gain=min_relative_lof_gain,
+        refinement_lof_quantile=refinement_lof_quantile,
         categorical_fallback=True,
         validation_fraction=validation_fraction,
         test_selection="stratified",
@@ -146,6 +155,48 @@ def run_dataset(  # noqa: PLR0913
     )
     steps = np.asarray(info["steps_per_point"], dtype=float)
     rounds = np.asarray(info["rounds_per_point"], dtype=float)
+    refinement_steps = np.asarray(info["refinement_steps_per_point"], dtype=float)
+    initial_valid_records = [
+        next(
+            (
+                step
+                for step in history
+                if isinstance(step, dict) and step.get("immediate_valid")
+            ),
+            None,
+        )
+        for history in info["history_per_point"]
+    ]
+
+    def history_value(record: dict[str, Any] | None, key: str) -> float:
+        value = None if record is None else record.get(key)
+        return float("nan") if value is None else float(value)
+
+    def finite_mean(values: np.ndarray) -> float:
+        finite = values[np.isfinite(values)]
+        return float(finite.mean()) if len(finite) else float("nan")
+
+    initial_valid_lof = np.asarray(
+        [history_value(record, "lof") for record in initial_valid_records],
+        dtype=float,
+    )
+    initial_valid_sparsity = np.asarray(
+        [history_value(record, "action_sparsity") for record in initial_valid_records],
+        dtype=float,
+    )
+    initial_valid_proximity = np.asarray(
+        [history_value(record, "proximity_l2") for record in initial_valid_records],
+        dtype=float,
+    )
+    final_action_sparsity = np.asarray(
+        [
+            0.0
+            if not history or not isinstance(history[-1], dict)
+            else float(history[-1].get("action_sparsity", np.nan))
+            for history in info["history_per_point"]
+        ],
+        dtype=float,
+    )
     first_action_types = [
         (
             history[0].get("action_type", "numerical")
@@ -171,7 +222,7 @@ def run_dataset(  # noqa: PLR0913
 
     row: dict[str, Any] = {
         "dataset": dataset_name,
-        "method": "tabicl_v2_greedy_icl",
+        "method": "tabicl_v2_greedy_icl_post_valid_lof",
         "split_variant": bundle.split_variant,
         "split_seed": 42,
         "test_selection": "stratified",
@@ -190,8 +241,12 @@ def run_dataset(  # noqa: PLR0913
         "confidence_quantiles": _levels_text(confidence_quantiles),
         "lof_first": lof_first,
         "max_rounds": max_rounds,
+        "max_refinement_steps": max_refinement_steps,
+        "min_relative_lof_gain": min_relative_lof_gain,
+        "refinement_lof_quantile": refinement_lof_quantile,
+        "refinement_lof_threshold": info["refinement_lof_threshold"],
         "round_schedule": (
-            "global_mixed_action_competition"
+            "global_mixed_action_competition_post_valid_lof"
             if info["grouped_actionable"]
             else "numerical_only"
         ),
@@ -210,6 +265,14 @@ def run_dataset(  # noqa: PLR0913
         "l0_count_mean": l0_count_mean,
         "steps_mean": steps_mean,
         "rounds_mean": rounds_mean,
+        "post_valid_refinement": bool(info["grouped_actionable"] and lof_first),
+        "refinement_steps_mean": float(refinement_steps.mean()),
+        "refined_fraction": float((refinement_steps > 0).mean()),
+        "initial_valid_lof_mean": finite_mean(initial_valid_lof),
+        "initial_valid_action_sparsity_mean": finite_mean(initial_valid_sparsity),
+        "initial_valid_proximity_l2_mean": finite_mean(initial_valid_proximity),
+        "final_action_sparsity_mean": finite_mean(final_action_sparsity),
+        "refinement_lof_reduction_mean": finite_mean(initial_valid_lof - lof_per_point),
         "categorical_first_fraction": float(
             np.mean(np.asarray(first_action_types) == "categorical")
         ),
@@ -237,6 +300,13 @@ def run_dataset(  # noqa: PLR0913
             "steps": int(info["steps_per_point"][i]),
             "rounds": int(info["rounds_per_point"][i]),
             "attempt_steps": len(info["attempt_history_per_point"][i]),
+            "initial_valid_step": info["initial_valid_step_per_point"][i],
+            "refinement_steps": int(info["refinement_steps_per_point"][i]),
+            "initial_valid_lof": float(initial_valid_lof[i]),
+            "initial_valid_action_sparsity": float(initial_valid_sparsity[i]),
+            "initial_valid_proximity_l2": float(initial_valid_proximity[i]),
+            "final_action_sparsity": float(final_action_sparsity[i]),
+            "refinement_lof_reduction": float(initial_valid_lof[i] - lof_per_point[i]),
             "first_action_type": first_action_types[i],
         }
         for i in range(len(X_test))
@@ -321,6 +391,24 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--max-refinement-steps",
+        type=int,
+        default=DEFAULT_MAX_REFINEMENT_STEPS,
+        help="Maximum validity-preserving LOF refinement actions.",
+    )
+    parser.add_argument(
+        "--min-relative-lof-gain",
+        type=float,
+        default=DEFAULT_MIN_RELATIVE_LOF_GAIN,
+        help="Minimum relative LOF reduction required per refinement action.",
+    )
+    parser.add_argument(
+        "--refinement-lof-quantile",
+        type=float,
+        default=DEFAULT_REFINEMENT_LOF_QUANTILE,
+        help="Training-LOF quantile above which valid CFs are refined.",
+    )
+    parser.add_argument(
         "--drop-heloc-all-minus9",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -342,6 +430,9 @@ def main() -> None:
         confidence_quantiles=tuple(args.confidence_quantiles),
         lof_first=args.lof_first,
         max_rounds=args.max_rounds,
+        max_refinement_steps=args.max_refinement_steps,
+        min_relative_lof_gain=args.min_relative_lof_gain,
+        refinement_lof_quantile=args.refinement_lof_quantile,
         validation_fraction=args.validation_fraction,
         drop_heloc_all_minus9=args.drop_heloc_all_minus9,
         tabicl_cache_dir=args.tabicl_cache_dir,

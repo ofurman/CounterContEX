@@ -154,6 +154,9 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     validity_first: bool = False,
     probability_slack: float = 0.0,
     max_rounds: int = 1,
+    max_refinement_steps: int = 2,
+    min_relative_lof_gain: float = 0.05,
+    refinement_lof_threshold: float | None = None,
     tau: float = 0.5,
     temperature: float = 1e-9,
     category_distribution: CategoryDistribution | None = None,
@@ -163,8 +166,10 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     At every step, all remaining scalar feature proposals and all legal atomic
     category swaps compete in one discriminator batch. If any candidate is
     valid, validity is a hard gate and the lowest-LOF valid candidate wins.
-    Otherwise the candidate with the highest target-class probability wins
-    (with optional LOF tie-breaking inside ``probability_slack``).
+    Once validity is reached, search continues and commits only candidates that
+    remain valid and strictly improve LOF. Otherwise the candidate with the
+    highest target-class probability wins (with optional LOF tie-breaking
+    inside ``probability_slack``).
 
     Each scalar feature or categorical group may be changed once per round.
     Later rounds revisit all action units, but only strict target-probability
@@ -174,6 +179,12 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         raise ValueError("max_rounds must be at least 1")
     if probability_slack < 0:
         raise ValueError("probability_slack must be non-negative")
+    if max_refinement_steps < 0:
+        raise ValueError("max_refinement_steps must be non-negative")
+    if not 0.0 <= min_relative_lof_gain < 1.0:
+        raise ValueError("min_relative_lof_gain must be in [0, 1)")
+    if refinement_lof_threshold is not None and refinement_lof_threshold <= 0:
+        raise ValueError("refinement_lof_threshold must be positive")
     numerical = [int(column) for column in numerical_columns]
     groups = list(categorical_groups)
     quantiles = (
@@ -203,20 +214,52 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         prediction = int(disc.predict(batch)[0])
         return prediction == y_target and probability >= tau, probability
 
+    def counterfactual_costs(rows: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Return action-level sparsity and Euclidean factual distance."""
+        matrix = np.atleast_2d(rows)
+        sparsity = np.zeros(len(matrix), dtype=np.int64)
+        if numerical:
+            sparsity += np.count_nonzero(
+                ~np.isclose(matrix[:, numerical], factual[numerical]),
+                axis=1,
+            )
+        for group in groups:
+            columns = list(group.columns)
+            factual_category = int(np.argmax(factual[columns]))
+            sparsity += np.argmax(matrix[:, columns], axis=1) != factual_category
+        proximity = np.linalg.norm(matrix - factual, axis=1)
+        return sparsity, proximity
+
     flipped, current_probability = flip_state(current)
+    current_lof = (
+        None
+        if plausibility_model is None
+        else float(-plausibility_model.score_samples(current.reshape(1, -1))[0])
+    )
     best_row = current.copy()
     best_probability = current_probability
     best_history_length = 0
+    initial_valid_step = 0 if flipped else None
+    refinement_steps = 0
 
     for round_index in range(max_rounds):
-        if flipped:
+        if flipped and (
+            not validity_first
+            or plausibility_model is None
+            or refinement_steps >= max_refinement_steps
+            or (
+                refinement_lof_threshold is not None
+                and current_lof is not None
+                and current_lof <= refinement_lof_threshold
+            )
+        ):
             break
         rounds_used = round_index + 1
         used_numerical: set[int] = set()
         used_groups: set[str] = set()
         committed_this_round = 0
 
-        while not flipped:
+        while True:
             trial_rows: list[np.ndarray] = []
             metadata: list[dict] = []
             available_numerical = [
@@ -364,7 +407,35 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                 else -np.asarray(plausibility_model.score_samples(trials))
             )
 
-            if validity_first and valid.any():
+            if flipped:
+                if (
+                    lof_scores is None
+                    or current_lof is None
+                    or refinement_steps >= max_refinement_steps
+                    or (
+                        refinement_lof_threshold is not None
+                        and current_lof <= refinement_lof_threshold
+                    )
+                ):
+                    break
+                relative_lof_gain = (current_lof - lof_scores) / max(
+                    abs(current_lof), 1e-12
+                )
+                eligible = np.flatnonzero(
+                    valid & (relative_lof_gain >= min_relative_lof_gain)
+                )
+                if not len(eligible):
+                    break
+                candidate_sparsity, candidate_proximity = counterfactual_costs(trials)
+                ranked = np.lexsort(
+                    (
+                        lof_scores[eligible],
+                        candidate_proximity[eligible],
+                        candidate_sparsity[eligible],
+                    )
+                )
+                best = int(eligible[ranked[0]])
+            elif validity_first and valid.any():
                 eligible = np.flatnonzero(valid)
                 best = (
                     int(eligible[np.argmax(probabilities[eligible])])
@@ -373,34 +444,47 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                 )
             elif validity_first and lof_scores is not None:
                 maximum = float(np.max(probabilities))
-                eligible = np.flatnonzero(
-                    probabilities >= maximum - probability_slack
-                )
+                eligible = np.flatnonzero(probabilities >= maximum - probability_slack)
                 best = int(eligible[np.argmin(lof_scores[eligible])])
             else:
                 best = int(np.argmax(probabilities))
 
             selected_probability = float(probabilities[best])
-            if round_index > 0 and selected_probability <= current_probability:
+            if (
+                not flipped
+                and round_index > 0
+                and selected_probability <= current_probability
+            ):
                 break
 
             previous = current.copy()
+            was_flipped = flipped
             selected = dict(metadata[best])
             selected.pop("group_object", None)
             selected.update(
                 {
                     "round": rounds_used,
-                    "target_probability": selected_probability,
-                    "lof": (
-                        None if lof_scores is None else float(lof_scores[best])
+                    "selection_phase": (
+                        "plausibility_refinement" if was_flipped else "validity_search"
                     ),
+                    "target_probability": selected_probability,
+                    "lof": (None if lof_scores is None else float(lof_scores[best])),
                     "immediate_valid": bool(valid[best]),
                     "n_candidates": len(trials),
                     "n_valid_candidates": int(valid.sum()),
                 }
             )
+            selected_sparsity, selected_proximity = counterfactual_costs(trials[best])
+            selected["action_sparsity"] = int(selected_sparsity[0])
+            selected["proximity_l2"] = float(selected_proximity[0])
+            if was_flipped and current_lof is not None and lof_scores is not None:
+                selected["relative_lof_gain"] = float(
+                    (current_lof - lof_scores[best]) / max(abs(current_lof), 1e-12)
+                )
             current = trials[best]
             current_probability = selected_probability
+            if lof_scores is not None:
+                current_lof = float(lof_scores[best])
             committed_this_round += 1
 
             raw_selected = metadata[best]
@@ -430,6 +514,10 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
 
             history.append(selected)
             flipped, current_probability = flip_state(current)
+            if was_flipped:
+                refinement_steps += 1
+            elif flipped and initial_valid_step is None:
+                initial_valid_step = len(history)
             if current_probability > best_probability:
                 best_row = current.copy()
                 best_probability = current_probability
@@ -448,18 +536,24 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
 
     for column in np.flatnonzero(current != factual):
         changed_order.append(int(column))
-    return current, changed_order, {
-        "flipped": bool(flipped),
-        "steps": len(history),
-        "rounds": rounds_used,
-        "history": history,
-        "attempt_history": attempt_history,
-        "selection_history": history,
-        "attempt_selection_history": attempt_history,
-        "categorical_history": categorical_history,
-        "round_history": [],
-        "best_target_probability": float(best_probability),
-    }
+    return (
+        current,
+        changed_order,
+        {
+            "flipped": bool(flipped),
+            "steps": len(history),
+            "rounds": rounds_used,
+            "history": history,
+            "attempt_history": attempt_history,
+            "selection_history": history,
+            "attempt_selection_history": attempt_history,
+            "categorical_history": categorical_history,
+            "round_history": [],
+            "best_target_probability": float(best_probability),
+            "initial_valid_step": initial_valid_step,
+            "refinement_steps": refinement_steps,
+        },
+    )
 
 
 def grouped_categorical_fallback(
@@ -521,9 +615,7 @@ def grouped_categorical_fallback(
             break
 
         trial_matrix = np.stack(trials)
-        target_probabilities = np.asarray(disc.predict_proba(trial_matrix))[
-            :, y_target
-        ]
+        target_probabilities = np.asarray(disc.predict_proba(trial_matrix))[:, y_target]
         predictions = np.asarray(disc.predict(trial_matrix))
         valid = (predictions == y_target) & (target_probabilities >= tau)
         lof_scores = (
@@ -553,13 +645,8 @@ def grouped_categorical_fallback(
             conditional_probabilities,
             dtype=np.float64,
         )
-        if (
-            categories.ndim != 1
-            or conditional_probabilities.shape != categories.shape
-        ):
-            raise ValueError(
-                "category_distribution must return aligned 1D arrays"
-            )
+        if categories.ndim != 1 or conditional_probabilities.shape != categories.shape:
+            raise ValueError("category_distribution must return aligned 1D arrays")
         if any(
             category < 0 or category >= len(selected_group.columns)
             for category in categories
@@ -570,9 +657,7 @@ def grouped_categorical_fallback(
         conditional_probability = dict(
             zip(categories.tolist(), conditional_probabilities.tolist())
         ).get(trial_categories[best], 0.0)
-        previous_category = int(
-            np.argmax(x_cf[list(selected_group.columns)])
-        )
+        previous_category = int(np.argmax(x_cf[list(selected_group.columns)]))
         x_cf = trial_matrix[best]
         used_groups.add(selected_group.name)
         for column in (
@@ -596,9 +681,13 @@ def grouped_categorical_fallback(
             }
         )
 
-    return x_cf, changed_columns, {
-        "flipped": bool(flipped),
-        "steps": len(history),
-        "history": history,
-        "final_target_probability": float(current_probability),
-    }
+    return (
+        x_cf,
+        changed_columns,
+        {
+            "flipped": bool(flipped),
+            "steps": len(history),
+            "history": history,
+            "final_target_probability": float(current_probability),
+        },
+    )

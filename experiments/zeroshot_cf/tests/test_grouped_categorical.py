@@ -181,11 +181,7 @@ class _MixedActionDisc:
         self.categorical_weight = categorical_weight
 
     def predict_proba(self, X):
-        p1 = (
-            0.1
-            + self.numerical_weight * X[:, 0]
-            + self.categorical_weight * X[:, 2]
-        )
+        p1 = 0.1 + self.numerical_weight * X[:, 0] + self.categorical_weight * X[:, 2]
         p1 = np.clip(p1, 0.0, 0.99)
         return np.column_stack([1.0 - p1, p1])
 
@@ -197,6 +193,26 @@ class _PreferCategoricalLOF:
     def score_samples(self, X):
         # The categorical-only trial has LOF 1; numerical-only has LOF 2.
         return -(2.0 - X[:, 2])
+
+
+class _NumericalRefinementLOF:
+    def score_samples(self, X):
+        # After a categorical flip establishes validity, increasing the scalar
+        # feature moves the valid point into a denser region.
+        return -(3.0 - 2.0 * X[:, 0])
+
+
+class _RejectNumericalRefinementLOF:
+    def score_samples(self, X):
+        # The same validity-preserving scalar edit would make LOF worse.
+        return -(1.0 + 2.0 * X[:, 0])
+
+
+class _ProximityTradeoffLOF:
+    def score_samples(self, X):
+        # Both scalar values improve plausibility by at least 5%, but the more
+        # distant value has the lowest absolute LOF.
+        return -(2.0 - X[:, 0])
 
 
 def test_global_mixed_search_chooses_categorical_action_over_numerical() -> None:
@@ -265,3 +281,103 @@ def test_global_mixed_validity_gate_compares_lof_across_action_types() -> None:
     np.testing.assert_array_equal(counterfactual, [0.0, 0.0, 1.0])
     assert info["history"][0]["action_type"] == "categorical"
     assert info["history"][0]["n_valid_candidates"] == 2
+
+
+def test_global_mixed_search_refines_lof_after_reaching_validity() -> None:
+    """A valid incumbent can be improved without losing target validity."""
+    group = OneHotActionGroup("job", (1, 2))
+    factual = np.array([0.0, 1.0, 0.0])
+
+    counterfactual, changed, info = greedy_mixed_counterfactual(
+        _MixedGridSampler([[0.8]]),
+        _MixedActionDisc(numerical_weight=0.2, categorical_weight=0.5),
+        factual,
+        y_target=1,
+        numerical_columns=[0],
+        categorical_groups=[group],
+        candidate_quantiles=(0.5,),
+        plausibility_model=_NumericalRefinementLOF(),
+        validity_first=True,
+    )
+
+    np.testing.assert_array_equal(counterfactual, [0.8, 0.0, 1.0])
+    assert changed == [0, 1, 2]
+    assert info["flipped"] is True
+    assert info["initial_valid_step"] == 1
+    assert info["refinement_steps"] == 1
+    assert [step["selection_phase"] for step in info["history"]] == [
+        "validity_search",
+        "plausibility_refinement",
+    ]
+
+
+def test_global_mixed_search_rejects_valid_but_less_plausible_refinement() -> None:
+    """Validity alone is insufficient to replace the valid incumbent."""
+    group = OneHotActionGroup("job", (1, 2))
+    factual = np.array([0.0, 1.0, 0.0])
+
+    counterfactual, changed, info = greedy_mixed_counterfactual(
+        _MixedGridSampler([[0.8]]),
+        _MixedActionDisc(numerical_weight=0.2, categorical_weight=0.5),
+        factual,
+        y_target=1,
+        numerical_columns=[0],
+        categorical_groups=[group],
+        candidate_quantiles=(0.5,),
+        plausibility_model=_RejectNumericalRefinementLOF(),
+        validity_first=True,
+    )
+
+    np.testing.assert_array_equal(counterfactual, [0.0, 0.0, 1.0])
+    assert changed == [1, 2]
+    assert info["flipped"] is True
+    assert info["initial_valid_step"] == 1
+    assert info["refinement_steps"] == 0
+    assert len(info["history"]) == 1
+
+
+def test_global_mixed_search_does_not_refine_below_lof_threshold() -> None:
+    """An already plausible valid CF keeps its minimal one-action solution."""
+    group = OneHotActionGroup("job", (1, 2))
+    factual = np.array([0.0, 1.0, 0.0])
+
+    counterfactual, changed, info = greedy_mixed_counterfactual(
+        _MixedGridSampler([[0.8]]),
+        _MixedActionDisc(numerical_weight=0.2, categorical_weight=0.5),
+        factual,
+        y_target=1,
+        numerical_columns=[0],
+        categorical_groups=[group],
+        candidate_quantiles=(0.5,),
+        plausibility_model=_NumericalRefinementLOF(),
+        validity_first=True,
+        refinement_lof_threshold=3.1,
+    )
+
+    np.testing.assert_array_equal(counterfactual, [0.0, 0.0, 1.0])
+    assert changed == [1, 2]
+    assert info["refinement_steps"] == 0
+
+
+def test_global_mixed_refinement_prefers_proximity_after_lof_gain_gate() -> None:
+    """Meaningful LOF gains are ranked by sparsity and factual proximity."""
+    group = OneHotActionGroup("job", (1, 2))
+    factual = np.array([0.0, 1.0, 0.0])
+
+    counterfactual, _, info = greedy_mixed_counterfactual(
+        _MixedGridSampler([[0.2, 0.8]]),
+        _MixedActionDisc(numerical_weight=0.2, categorical_weight=0.5),
+        factual,
+        y_target=1,
+        numerical_columns=[0],
+        categorical_groups=[group],
+        candidate_quantiles=(0.25, 0.75),
+        plausibility_model=_ProximityTradeoffLOF(),
+        validity_first=True,
+    )
+
+    # x=0.8 has lower LOF, but x=0.2 already clears the relative-gain gate and
+    # is closer to the factual while having the same action-level sparsity.
+    np.testing.assert_allclose(counterfactual, [0.2, 0.0, 1.0])
+    assert info["refinement_steps"] == 1
+    assert info["history"][1]["action_sparsity"] == 2

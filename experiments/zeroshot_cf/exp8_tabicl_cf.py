@@ -123,6 +123,9 @@ def generate_tabicl_counterfactuals(
     lof_first: bool = False,
     probability_slack: float = 0.0,
     max_rounds: int = 1,
+    max_refinement_steps: int = 2,
+    min_relative_lof_gain: float = 0.05,
+    refinement_lof_quantile: float = 0.90,
     categorical_fallback: bool = False,
     validation_fraction: float = 0.0,
     test_selection: str = "first",
@@ -152,6 +155,12 @@ def generate_tabicl_counterfactuals(
         raise ValueError("probability_slack must be non-negative")
     if max_rounds < 1:
         raise ValueError("max_rounds must be at least 1")
+    if max_refinement_steps < 0:
+        raise ValueError("max_refinement_steps must be non-negative")
+    if not 0.0 <= min_relative_lof_gain < 1.0:
+        raise ValueError("min_relative_lof_gain must be in [0, 1)")
+    if not 0.0 < refinement_lof_quantile < 1.0:
+        raise ValueError("refinement_lof_quantile must be in (0, 1)")
     if test_selection not in {"first", "stratified"}:
         raise ValueError("test_selection must be 'first' or 'stratified'")
 
@@ -219,9 +228,7 @@ def generate_tabicl_counterfactuals(
         else dataset_name
     )
     if bundle.X_val is not None:
-        discriminator_cache_tag = (
-            f"{discriminator_cache_tag}_{bundle.split_variant}"
-        )
+        discriminator_cache_tag = f"{discriminator_cache_tag}_{bundle.split_variant}"
     X_disc_eval = bundle.X_val if bundle.X_val is not None else X_test
     y_disc_eval = bundle.y_val if bundle.y_val is not None else y_test
     disc_model = train_discriminator(
@@ -241,11 +248,18 @@ def generate_tabicl_counterfactuals(
     )
 
     plausibility_model = None
+    refinement_lof_threshold = None
     if lof_first:
         from sklearn.neighbors import LocalOutlierFactor
 
         plausibility_model = LocalOutlierFactor(n_neighbors=20, novelty=True)
         plausibility_model.fit(X_train)
+        train_lof_scores = -np.asarray(
+            plausibility_model.score_samples(X_train), dtype=np.float64
+        )
+        refinement_lof_threshold = float(
+            np.quantile(train_lof_scores, refinement_lof_quantile)
+        )
 
     print(f"\n=== Experiment 8 (TabICL): {dataset_name.upper()} ===")
     print(
@@ -280,9 +294,7 @@ def generate_tabicl_counterfactuals(
         context_update=context_update,
         numerical_point_estimate=point_estimate,
         categorical_features=(
-            None
-            if categorical_codec is None
-            else categorical_codec.categorical_columns
+            None if categorical_codec is None else categorical_codec.categorical_columns
         ),
     )
     if categorical_codec is None:
@@ -298,22 +310,16 @@ def generate_tabicl_counterfactuals(
     flipped_per_point = [False] * len(X_test)
     steps_per_point = [0] * len(X_test)
     history_per_point: list[list[tuple]] = [[] for _ in range(len(X_test))]
-    attempt_history_per_point: list[list[tuple]] = [
-        [] for _ in range(len(X_test))
-    ]
-    selection_history_per_point: list[list[dict]] = [
-        [] for _ in range(len(X_test))
-    ]
+    attempt_history_per_point: list[list[tuple]] = [[] for _ in range(len(X_test))]
+    selection_history_per_point: list[list[dict]] = [[] for _ in range(len(X_test))]
     confidence_grid_per_point: list[tuple[float, ...] | None] = [
         None for _ in range(len(X_test))
     ]
-    categorical_history_per_point: list[list[dict]] = [
-        [] for _ in range(len(X_test))
-    ]
+    categorical_history_per_point: list[list[dict]] = [[] for _ in range(len(X_test))]
     rounds_per_point = [0] * len(X_test)
-    round_history_per_point: list[list[dict]] = [
-        [] for _ in range(len(X_test))
-    ]
+    initial_valid_step_per_point: list[int | None] = [None for _ in range(len(X_test))]
+    refinement_steps_per_point = [0] * len(X_test)
+    round_history_per_point: list[list[dict]] = [[] for _ in range(len(X_test))]
 
     started = time.perf_counter()
     for i, (x, target) in enumerate(zip(X_test, y_target, strict=True)):
@@ -407,6 +413,9 @@ def generate_tabicl_counterfactuals(
                 validity_first=lof_first,
                 probability_slack=probability_slack,
                 max_rounds=max_rounds,
+                max_refinement_steps=max_refinement_steps,
+                min_relative_lof_gain=min_relative_lof_gain,
+                refinement_lof_threshold=refinement_lof_threshold,
                 tau=tau,
                 temperature=temperature,
                 category_distribution=category_distribution,
@@ -428,6 +437,8 @@ def generate_tabicl_counterfactuals(
         confidence_grid_per_point[i] = confidence_grid
         categorical_history_per_point[i] = greedy_info["categorical_history"]
         rounds_per_point[i] = greedy_info["rounds"]
+        initial_valid_step_per_point[i] = greedy_info.get("initial_valid_step")
+        refinement_steps_per_point[i] = greedy_info.get("refinement_steps", 0)
         round_history_per_point[i] = greedy_info["round_history"]
 
         if i == 0:
@@ -471,6 +482,10 @@ def generate_tabicl_counterfactuals(
         "lof_first": lof_first,
         "probability_slack": probability_slack,
         "max_rounds": max_rounds,
+        "max_refinement_steps": max_refinement_steps,
+        "min_relative_lof_gain": min_relative_lof_gain,
+        "refinement_lof_quantile": refinement_lof_quantile,
+        "refinement_lof_threshold": refinement_lof_threshold,
         "categorical_fallback": categorical_fallback,
         "grouped_actionable": [group.name for group in grouped_actionable],
         "validation_fraction": validation_fraction,
@@ -490,6 +505,8 @@ def generate_tabicl_counterfactuals(
         "confidence_grid_per_point": confidence_grid_per_point,
         "categorical_history_per_point": categorical_history_per_point,
         "rounds_per_point": rounds_per_point,
+        "initial_valid_step_per_point": initial_valid_step_per_point,
+        "refinement_steps_per_point": refinement_steps_per_point,
         "round_history_per_point": round_history_per_point,
         "lof_per_point": lof_per_point,
         "target_probability_per_point": target_probability_per_point,
@@ -563,13 +580,13 @@ def run_and_report(
             "attempt_history_per_point": info["attempt_history_per_point"],
             "selection_history_per_point": info["selection_history_per_point"],
             "confidence_grid_per_point": info["confidence_grid_per_point"],
-            "categorical_history_per_point": info[
-                "categorical_history_per_point"
-            ],
+            "categorical_history_per_point": info["categorical_history_per_point"],
             "X_test": X_test.tolist(),
             "X_cf": X_cf.tolist(),
         }
-        diagnostics_output = RESULTS_DIR / f"exp8_tabicl_{dataset_name}_diagnostics.json"
+        diagnostics_output = (
+            RESULTS_DIR / f"exp8_tabicl_{dataset_name}_diagnostics.json"
+        )
         with diagnostics_output.open("w") as handle:
             json.dump(diagnostics, handle, indent=2)
         print(f"  Wrote {diagnostics_output}")
@@ -670,6 +687,26 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--max-refinement-steps",
+        type=int,
+        default=2,
+        help="Maximum validity-preserving LOF refinement actions (default: 2).",
+    )
+    parser.add_argument(
+        "--min-relative-lof-gain",
+        type=float,
+        default=0.05,
+        help="Minimum relative LOF reduction required per refinement (default: 0.05).",
+    )
+    parser.add_argument(
+        "--refinement-lof-quantile",
+        type=float,
+        default=0.90,
+        help=(
+            "Refine only valid CFs above this training-LOF quantile (default: 0.90)."
+        ),
+    )
+    parser.add_argument(
         "--categorical-fallback",
         action="store_true",
         help=(
@@ -714,9 +751,7 @@ def main() -> None:
     args = parser.parse_args()
 
     datasets = (
-        ["moons", "heloc", "german_credit"]
-        if args.dataset == "all"
-        else [args.dataset]
+        ["moons", "heloc", "german_credit"] if args.dataset == "all" else [args.dataset]
     )
     for dataset_name in datasets:
         run_and_report(
@@ -744,6 +779,9 @@ def main() -> None:
             lof_first=args.lof_first,
             probability_slack=args.probability_slack,
             max_rounds=args.max_rounds,
+            max_refinement_steps=args.max_refinement_steps,
+            min_relative_lof_gain=args.min_relative_lof_gain,
+            refinement_lof_quantile=args.refinement_lof_quantile,
             categorical_fallback=args.categorical_fallback,
             validation_fraction=args.validation_fraction,
             test_selection=args.test_selection,
