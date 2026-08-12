@@ -260,6 +260,17 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         committed_this_round = 0
 
         while True:
+            if flipped and (
+                not validity_first
+                or plausibility_model is None
+                or refinement_steps >= max_refinement_steps
+                or (
+                    refinement_lof_threshold is not None
+                    and current_lof is not None
+                    and current_lof <= refinement_lof_threshold
+                )
+            ):
+                break
             trial_rows: list[np.ndarray] = []
             metadata: list[dict] = []
             available_numerical = [
