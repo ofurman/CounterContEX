@@ -1,5 +1,12 @@
-# Local TabPFN core (editable install from repo root)
--e .
+# Local TabPFN core (editable install from repo root) — only needed if you're
+# editing this repo's own tabpfn fork. Commented out by default: the
+# zeroshot_cf experiment (including run_full_benchmark.py) only uses tabpfn's
+# and tabpfn-extensions' public API, and this repo's pyproject.toml pins
+# itself as tabpfn==8.0.8, which conflicts with tabpfn-extensions requiring
+# tabpfn>=8.1.0. Uncomment (and drop the `tabpfn` line below) if you need the
+# local fork instead of a normal PyPI tabpfn install.
+# -e .
+tabpfn>=8.1.0
 
 # TabPFN extensions — unsupervised module (imputation/generation)
 tabpfn-extensions[all] @ git+https://github.com/PriorLabs/tabpfn-extensions.git

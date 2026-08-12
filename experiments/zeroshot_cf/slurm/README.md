@@ -20,27 +20,56 @@ run in parallel as an array.
 
 ## 1. One-time setup (login node, needs network)
 
+`run_benchmark_array.sbatch` activates a conda env with `conda activate
+/net/tscratch/people/plgbrinpow/envs/ccex` and runs the benchmark with plain
+`python` (not `uv run python` — `uv run` would ignore that activated env and
+manage its own, so this must stay in sync with whatever env path the sbatch
+activates). Create and populate it once:
+
 ```bash
-bash experiments/zeroshot_cf/slurm/stage_offline_assets.sh
+module load Miniconda3
+eval "$(conda shell.bash hook)"
+
+conda create -y -p /net/tscratch/people/plgbrinpow/envs/ccex python=3.11
+conda activate /net/tscratch/people/plgbrinpow/envs/ccex
+
+cd /net/pr2/projects/plgrid/plggtabrep/brinpow/CounterContEX
+python -m pip install --upgrade pip
+python -m pip install -r experiments/zeroshot_cf/requirements.txt
 ```
 
-This installs dependencies, downloads the TabPFN v2 checkpoints into
-`experiments/zeroshot_cf/models/` (compute nodes are usually offline —
-`run_full_benchmark.py` is run with `HF_HUB_OFFLINE=1`), checks that the 10
-ported datasets are present under `experiments/zeroshot_cf/datasets/<name>/`
-(gitignored — copy them from a machine that has them, e.g. `rsync -av`), runs
-a 1-point offline CPU smoke test (with `--no-wandb`, since it's just checking
-TabPFN/dataset readiness), and offers to run `wandb login` (only needed if you
-want the array job's offline W&B runs synced to the cloud later).
+Notes:
+- `cel` (line 8 of `requirements.txt`, installed via `git+https://...`) isn't
+  needed by anything `run_full_benchmark.py` touches — the local-dataset path
+  is cel-free by design (see `data.py`'s lazy import). Delete that line first
+  if the git install is slow/flaky on the cluster's network.
+- On Linux, `pip install torch` pulls CUDA-enabled wheels directly from PyPI
+  (unlike Windows, no special `--index-url` needed) — `tabpfn`'s own
+  dependency resolution should get this right automatically.
+- Then stage the TabPFN checkpoints + verify the datasets are present (still
+  useful even with a conda env — it just calls into the activated `python`):
+  ```bash
+  bash experiments/zeroshot_cf/slurm/stage_offline_assets.sh
+  ```
+  That script itself still says `uv run python`/`uv pip install` — either
+  swap those two lines for plain `python`/`python -m pip install` to match
+  the conda env, or run its steps manually: stage checkpoints
+  (`python -c "from experiments.zeroshot_cf.checkpoints import stage_checkpoints; stage_checkpoints()"`),
+  confirm `experiments/zeroshot_cf/datasets/<name>/{config.json,train.csv,test.csv}`
+  exist for all 10 datasets, and `wandb login` if you want W&B synced.
 
-## 2. Edit `run_benchmark_array.sbatch`
+## 2. `run_benchmark_array.sbatch` is configured for PLGrid
 
-Fill in `--partition`/`--account` for your cluster, and the environment-setup
-block (the script defaults to `uv run python ...`, matching this project's own
-README convention — swap for `module load` / `conda activate` if your cluster
-doesn't have `uv`). `WANDB_PROJECT` can be overridden via the environment
-(`sbatch --export=WANDB_PROJECT=my-project run_benchmark_array.sbatch`) — see
-"Weights & Biases" below.
+`--partition=plgrid-gpu-a100`, `--account=plgtabanomdet-gpu-a100`, 1 A100
+GPU/task, `--cpus-per-task=16`, `--mem=120G`, `--time=10:00:00`,
+`--job-name=ccex`. `--time` is comfortably over the ~3.75h calibrated worst
+case (`default`) even allowing for the A100s behaving differently from the
+local RTX 4070 Ti this was calibrated on (see "Timing" below) — tighten it if
+you want less queue-priority impact.
+
+If you're on a different cluster, swap these `#SBATCH` values, and swap the
+`conda activate .../envs/ccex` line + `python` invocation for whatever your
+cluster uses (`uv run python`, `module load` + a different env, etc.).
 
 ## 3. Submit
 
@@ -88,7 +117,7 @@ Serial total (all 10 on one GPU, one after another): ~10.7h. As a SLURM array
 with GPUs available in parallel, wall-clock is bounded by the slowest single
 task (`default`, ~3.75h).
 
-The default `--time=06:00:00` in the sbatch covers the worst case (`default`,
+The current `--time=10:00:00` in the sbatch covers the worst case (`default`,
 ~3.75h estimated) with margin, applied uniformly across the array (SLURM
 arrays don't support per-task time limits) — the cheaper datasets will just
 finish early. If you want tighter individual budgets, submit each dataset
@@ -116,17 +145,26 @@ named `<dataset>-<disc_type>-<metric_suite>-mt256-nr5-seed42` (e.g.
 with config (dataset/disc_type/metric_suite/max_test/n_repeats/n_permutations/seed)
 and every metric logged.
 
-The sbatch sets `WANDB_MODE=offline` (compute nodes are usually offline) —
-runs are written locally under `<repo_root>/wandb/offline-run-*` and print
-their own `wandb sync <path>` command in the job's `.out` log. From a login
-node afterward (needs network + `wandb login` once, see step 1), sync
-everything from a job at once:
+The sbatch currently sets `WANDB_MODE=online` and a fixed
+`WANDB_PROJECT=CounterContEX` — this assumes the PLGrid A100 compute nodes
+have outbound network access (unlike the TabPFN-checkpoint download, which
+this project always treats as login-node-only via `HF_HUB_OFFLINE=1`).
+**Verify that assumption** — if a compute node turns out to be offline,
+`wandb.init()` will hang/retry rather than fail fast. If so, switch back to
+offline logging + sync afterward:
 
 ```bash
+# in the sbatch, replace WANDB_MODE=online with:
+export WANDB_MODE=offline
+```
+```bash
+# then, from a login node afterward (needs network + `wandb login` once, see step 1):
 wandb sync wandb/offline-run-*
 ```
+(runs are written locally under `<repo_root>/wandb/offline-run-*` and each
+prints its own `wandb sync <path>` command in the job's `.out` log either way).
 
-Project defaults to `zeroshot-cf-benchmark`; override per-submission with
-`sbatch --export=ALL,WANDB_PROJECT=my-project run_benchmark_array.sbatch`. If
+`WANDB_PROJECT` is hardcoded to `CounterContEX` in the sbatch now rather than
+overridable via `sbatch --export` — edit that line directly to change it. If
 you don't want W&B at all, drop `--wandb-project "$WANDB_PROJECT"` from the
 sbatch's `run_full_benchmark.py` call and add `--no-wandb` instead.

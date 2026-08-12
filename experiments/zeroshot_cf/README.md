@@ -190,6 +190,24 @@ uv run python experiments/zeroshot_cf/run_full_benchmark.py --max-test 1
 HF_HUB_OFFLINE=1 TABPFN_DEVICE=cuda uv run python experiments/zeroshot_cf/run_full_benchmark.py --max-test 256
 ```
 
+### Comparing against the CounterFlowNet paper
+
+`compare_with_paper.py` merges our W&B benchmark runs with the published
+baseline numbers from arXiv:2602.17244 (the paper ../CETGFN implements —
+L2C/DiCE-R/DiCE-G/COPA/MCCE/CFN on Table 1, DICE/CCHVAE/DiCoFlex/CFN on Table
+2) into one comparison table per dataset. **The paper's numbers were
+transcribed by visually reading the PDF and are not fully verified** — a few
+cells have inconsistent column counts in the source render and are left
+blank rather than guessed; see the module docstring for exactly which, plus
+the protocol differences (K=10 CFs/point in the paper vs. our default 5;
+their uniform B=4 bins vs. our per-feature CETGFN bin counts) that make this
+informative rather than strictly apples-to-apples.
+
+```bash
+uv run python experiments/zeroshot_cf/compare_with_paper.py --wandb-project zeroshot-cf-benchmark
+uv run python experiments/zeroshot_cf/compare_with_paper.py --paper-only  # just the paper's own tables, no W&B
+```
+
 ## Results
 
 Metric reports are committed to `experiments/zeroshot_cf/results/`.

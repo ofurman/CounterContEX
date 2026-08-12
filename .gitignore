@@ -175,6 +175,7 @@ experiments/zeroshot_cf/models/
 experiments/zeroshot_cf/results/data/
 experiments/zeroshot_cf/vendor/
 experiments/zeroshot_cf/vendor
+experiments/zeroshot_cf/results/
 
 # CETGFN-derived local datasets (ported from ../CETGFN): CSVs and checkpoints are
 # large binary/data files, gitignored like the rest of this experiment's artifacts.
