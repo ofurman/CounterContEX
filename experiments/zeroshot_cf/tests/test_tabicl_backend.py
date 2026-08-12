@@ -8,14 +8,11 @@ context/masking/batching logic without downloading TabICL checkpoints.
 
 from __future__ import annotations
 
-from typing import Any
-
 import numpy as np
 import torch
 from experiments.zeroshot_cf.data import get_actionable_immutable
 from experiments.zeroshot_cf.greedy import greedy_counterfactual
 from experiments.zeroshot_cf.exp8_tabicl_cf import (
-    _alternating_mixed_rounds,
     _select_test_rows,
     empirical_confidence_grid,
 )
@@ -431,101 +428,3 @@ def test_batched_and_sequential_greedy_are_equivalent_and_preserve_immutable():
     # One batched call evaluates both initial candidates; the sequential path
     # needs one call for each of them.
     assert batched_sampler.model.impute_calls < sequential_sampler.model.impute_calls
-
-
-def _mixed_info(*, flipped: bool, steps: int = 1) -> dict[str, Any]:
-    return {
-        "flipped": flipped,
-        "steps": steps,
-        "history": [(0, 0.0, 0.0, 0.0)] * steps,
-        "attempt_history": [(0, 0.0, 0.0, 0.0)] * steps,
-        "selection_history": [{}] * steps,
-        "attempt_selection_history": [{}] * steps,
-    }
-
-
-def test_mixed_round_stops_after_first_categorical_flip() -> None:
-    """A categorical success prevents unnecessary later numerical passes."""
-    numerical_flags: list[bool] = []
-    categorical_calls = 0
-
-    def numerical_round(
-        row: np.ndarray,
-        require_improvement: bool,
-    ) -> tuple[np.ndarray, list[int], dict[str, Any]]:
-        numerical_flags.append(require_improvement)
-        changed = row.copy()
-        changed[0] = 0.25
-        return changed, [0], _mixed_info(flipped=False)
-
-    def categorical_round(
-        row: np.ndarray,
-    ) -> tuple[np.ndarray, list[int], dict[str, Any]]:
-        nonlocal categorical_calls
-        categorical_calls += 1
-        changed = row.copy()
-        changed[1] = 1.0
-        return changed, [1], {
-            "flipped": True,
-            "steps": 1,
-            "history": [{"group": "category"}],
-        }
-
-    counterfactual, changed, info = _alternating_mixed_rounds(
-        np.array([0.0, 0.0]),
-        max_rounds=3,
-        numerical_round=numerical_round,
-        categorical_round=categorical_round,
-    )
-
-    np.testing.assert_array_equal(counterfactual, [0.25, 1.0])
-    assert changed == [0, 1]
-    assert numerical_flags == [False]
-    assert categorical_calls == 1
-    assert info["rounds"] == 1
-    assert info["steps"] == 2
-    assert info["flipped"] is True
-
-
-def test_mixed_round_revisits_numerical_only_after_categorical_pass() -> None:
-    """Round two is strict and sees the categorical update from round one."""
-    numerical_inputs: list[np.ndarray] = []
-    numerical_flags: list[bool] = []
-    categorical_calls = 0
-
-    def numerical_round(
-        row: np.ndarray,
-        require_improvement: bool,
-    ) -> tuple[np.ndarray, list[int], dict[str, Any]]:
-        numerical_inputs.append(row.copy())
-        numerical_flags.append(require_improvement)
-        changed = row.copy()
-        changed[0] += 0.25
-        return changed, [0], _mixed_info(flipped=require_improvement)
-
-    def categorical_round(
-        row: np.ndarray,
-    ) -> tuple[np.ndarray, list[int], dict[str, Any]]:
-        nonlocal categorical_calls
-        categorical_calls += 1
-        changed = row.copy()
-        changed[1] = 1.0
-        return changed, [1], {
-            "flipped": False,
-            "steps": 1,
-            "history": [{"group": "category"}],
-        }
-
-    counterfactual, _, info = _alternating_mixed_rounds(
-        np.array([0.0, 0.0]),
-        max_rounds=3,
-        numerical_round=numerical_round,
-        categorical_round=categorical_round,
-    )
-
-    assert numerical_flags == [False, True]
-    assert numerical_inputs[1][1] == 1.0
-    assert categorical_calls == 1
-    assert counterfactual[0] == 0.5
-    assert info["rounds"] == 2
-    assert info["flipped"] is True

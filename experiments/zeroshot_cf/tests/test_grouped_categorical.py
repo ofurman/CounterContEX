@@ -8,6 +8,7 @@ from experiments.zeroshot_cf.data import OneHotActionGroup
 from experiments.zeroshot_cf.grouped_categorical import (
     CompactMixedSampler,
     GroupedCategoricalCodec,
+    greedy_mixed_counterfactual,
     grouped_categorical_fallback,
 )
 
@@ -152,3 +153,115 @@ def test_grouped_fallback_queries_tabicl_only_for_selected_group():
 
     assert info["flipped"]
     assert queried == ["job"]
+
+
+class _MixedGridSampler:
+    def __init__(self, values):
+        self.values = np.asarray(values, dtype=float)
+
+    def sample_candidate_grid(
+        self,
+        _query,
+        columns,
+        *,
+        quantiles,
+        fixed_target,
+        confidences=None,
+    ):
+        assert fixed_target == 1
+        assert len(columns) == self.values.shape[0]
+        assert len(quantiles) == self.values.shape[-1]
+        assert confidences is None
+        return self.values
+
+
+class _MixedActionDisc:
+    def __init__(self, numerical_weight, categorical_weight):
+        self.numerical_weight = numerical_weight
+        self.categorical_weight = categorical_weight
+
+    def predict_proba(self, X):
+        p1 = (
+            0.1
+            + self.numerical_weight * X[:, 0]
+            + self.categorical_weight * X[:, 2]
+        )
+        p1 = np.clip(p1, 0.0, 0.99)
+        return np.column_stack([1.0 - p1, p1])
+
+    def predict(self, X):
+        return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
+
+
+class _PreferCategoricalLOF:
+    def score_samples(self, X):
+        # The categorical-only trial has LOF 1; numerical-only has LOF 2.
+        return -(2.0 - X[:, 2])
+
+
+def test_global_mixed_search_chooses_categorical_action_over_numerical() -> None:
+    """A category swap goes first when it has the largest classifier effect."""
+    group = OneHotActionGroup("job", (1, 2))
+    factual = np.array([0.0, 1.0, 0.0])
+
+    counterfactual, changed, info = greedy_mixed_counterfactual(
+        _MixedGridSampler([[0.2, 0.8]]),
+        _MixedActionDisc(numerical_weight=0.3, categorical_weight=0.5),
+        factual,
+        y_target=1,
+        numerical_columns=[0],
+        categorical_groups=[group],
+        candidate_quantiles=(0.25, 0.75),
+        validity_first=True,
+    )
+
+    np.testing.assert_array_equal(counterfactual, [0.0, 0.0, 1.0])
+    assert changed == [1, 2]
+    assert info["history"][0]["action_type"] == "categorical"
+    assert info["flipped"] is True
+
+
+def test_global_mixed_search_chooses_numerical_action_over_categorical() -> None:
+    """A scalar proposal goes first when it has the largest classifier effect."""
+    group = OneHotActionGroup("job", (1, 2))
+    factual = np.array([0.0, 1.0, 0.0])
+
+    counterfactual, changed, info = greedy_mixed_counterfactual(
+        _MixedGridSampler([[0.2, 0.8]]),
+        _MixedActionDisc(numerical_weight=0.7, categorical_weight=0.3),
+        factual,
+        y_target=1,
+        numerical_columns=[0],
+        categorical_groups=[group],
+        candidate_quantiles=(0.25, 0.75),
+        validity_first=True,
+    )
+
+    np.testing.assert_array_equal(counterfactual, [0.8, 1.0, 0.0])
+    assert changed == [0]
+    assert info["history"][0]["action_type"] == "numerical"
+    assert info["flipped"] is True
+
+
+def test_global_mixed_validity_gate_compares_lof_across_action_types() -> None:
+    """LOF chooses across all globally valid numerical and category trials."""
+    group = OneHotActionGroup("job", (1, 2))
+    factual = np.array([0.0, 1.0, 0.0])
+
+    counterfactual, _, info = greedy_mixed_counterfactual(
+        _MixedGridSampler([[1.0]]),
+        _MixedActionDisc(numerical_weight=0.8, categorical_weight=0.5),
+        factual,
+        y_target=1,
+        numerical_columns=[0],
+        categorical_groups=[group],
+        candidate_quantiles=(0.5,),
+        plausibility_model=_PreferCategoricalLOF(),
+        validity_first=True,
+    )
+
+    # Both trials flip; numerical has higher confidence, but categorical has
+    # lower LOF and therefore wins inside the global valid-candidate set.
+    np.testing.assert_array_equal(counterfactual, [0.0, 0.0, 1.0])
+    assert info["history"][0]["action_type"] == "categorical"
+    assert info["history"][0]["n_valid_candidates"] == 2

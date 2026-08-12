@@ -146,6 +146,14 @@ def run_dataset(  # noqa: PLR0913
     )
     steps = np.asarray(info["steps_per_point"], dtype=float)
     rounds = np.asarray(info["rounds_per_point"], dtype=float)
+    first_action_types = [
+        (
+            history[0].get("action_type", "numerical")
+            if history and isinstance(history[0], dict)
+            else "numerical"
+        )
+        for history in info["history_per_point"]
+    ]
     project_l2 = (
         float(np.linalg.norm(X_cf[valid] - X_test[valid], axis=1).mean())
         if valid.any()
@@ -183,7 +191,7 @@ def run_dataset(  # noqa: PLR0913
         "lof_first": lof_first,
         "max_rounds": max_rounds,
         "round_schedule": (
-            "alternating_numerical_categorical"
+            "global_mixed_action_competition"
             if info["grouped_actionable"]
             else "numerical_only"
         ),
@@ -202,6 +210,9 @@ def run_dataset(  # noqa: PLR0913
         "l0_count_mean": l0_count_mean,
         "steps_mean": steps_mean,
         "rounds_mean": rounds_mean,
+        "categorical_first_fraction": float(
+            np.mean(np.asarray(first_action_types) == "categorical")
+        ),
         "factual_oob_fraction": float(
             (((X_test < 0.0) | (X_test > 1.0)).any(axis=1)).mean()
         ),
@@ -226,6 +237,7 @@ def run_dataset(  # noqa: PLR0913
             "steps": int(info["steps_per_point"][i]),
             "rounds": int(info["rounds_per_point"][i]),
             "attempt_steps": len(info["attempt_history_per_point"][i]),
+            "first_action_type": first_action_types[i],
         }
         for i in range(len(X_test))
     ]
