@@ -11,6 +11,7 @@ tabicl==2.1.1
 
 # Counterfactuals evaluation harness
 cel @ git+https://github.com/ofurman/counterfactuals.git
+dice-ml==0.12
 
 # Utilities
 scikit-learn>=1.2.0
