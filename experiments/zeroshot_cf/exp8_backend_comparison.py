@@ -152,7 +152,10 @@ def run_tabicl_v2(
     tabicl_cache_dir: Path | None,
     candidate_quantiles: tuple[float, ...] | None = None,
     confidence_quantiles: tuple[float, ...] | None = None,
-    use_lof_refinement: bool = False,
+    cf_mode: str = "sparse",
+    refinement_budget: int = 2,
+    max_extra_actions: int = 2,
+    min_joint_gain: float = 0.01,
     max_validity_steps: int | None = None,
     allow_revisits: bool = True,
     drop_heloc_all_minus9: bool = False,
@@ -168,10 +171,13 @@ def run_tabicl_v2(
         candidate_mode="batched",
         candidate_quantiles=candidate_quantiles,
         confidence_quantiles=confidence_quantiles,
-        use_lof_refinement=use_lof_refinement,
+        cf_mode=cf_mode,
         max_validity_steps=max_validity_steps,
         allow_revisits=allow_revisits,
-        validation_fraction=0.2 if use_lof_refinement else 0.0,
+        refinement_budget=refinement_budget,
+        max_extra_actions=max_extra_actions,
+        min_joint_gain=min_joint_gain,
+        validation_fraction=0.2 if cf_mode == "data_plausible" else 0.0,
         drop_heloc_all_minus9=drop_heloc_all_minus9,
         cache_dir=tabicl_cache_dir,
     )
@@ -221,7 +227,7 @@ def run_tabicl_v2(
         "project_to_domain": info["project_to_domain"],
         "candidate_quantiles": info["candidate_quantiles"],
         "confidence_quantiles": info["confidence_quantiles"],
-        "use_lof_refinement": info["use_lof_refinement"],
+        "cf_mode": info["cf_mode"],
         "max_validity_steps": info["max_validity_steps"],
         "allow_revisits": info["allow_revisits"],
         "categorical_proposal_count": info["categorical_proposal_count"],
@@ -299,10 +305,13 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--tabicl-lof-refinement",
-        action="store_true",
-        help="Refine valid TabICL counterfactuals using validation-calibrated LOF.",
+        "--tabicl-cf-mode",
+        choices=["sparse", "data-plausible"],
+        default="sparse",
     )
+    parser.add_argument("--tabicl-refinement-budget", type=int, default=2)
+    parser.add_argument("--tabicl-max-extra-actions", type=int, default=2)
+    parser.add_argument("--tabicl-min-joint-gain", type=float, default=0.01)
     parser.add_argument(
         "--tabicl-max-validity-steps",
         type=int,
@@ -362,7 +371,10 @@ def main() -> None:
                         if args.tabicl_confidence_quantiles is None
                         else tuple(args.tabicl_confidence_quantiles)
                     ),
-                    use_lof_refinement=args.tabicl_lof_refinement,
+                    cf_mode=args.tabicl_cf_mode.replace("-", "_"),
+                    refinement_budget=args.tabicl_refinement_budget,
+                    max_extra_actions=args.tabicl_max_extra_actions,
+                    min_joint_gain=args.tabicl_min_joint_gain,
                     max_validity_steps=args.tabicl_max_validity_steps,
                     allow_revisits=args.tabicl_allow_revisits,
                     **common,

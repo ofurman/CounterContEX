@@ -35,7 +35,7 @@ def run_variant(
         "heloc",
         max_test=max_test,
         n_estimators=n_estimators,
-        use_lof_refinement=VARIANTS[variant],
+        _legacy_lof_refinement=VARIANTS[variant],
         max_validity_steps=max_validity_steps,
         allow_revisits=True,
         tabicl_cache_dir=tabicl_cache_dir,

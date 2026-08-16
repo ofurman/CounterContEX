@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import numpy as np
-
 from experiments.zeroshot_cf.data import OneHotActionGroup
 from experiments.zeroshot_cf.grouped_categorical import (
     CompactMixedSampler,
     GroupedCategoricalCodec,
     greedy_mixed_counterfactual,
     grouped_categorical_fallback,
-    quantile_grid_log_density,
 )
 from experiments.zeroshot_cf.tabicl_joint_plausibility import TabICLJointScoreBatch
 
@@ -217,60 +215,23 @@ class _ProximityTradeoffLOF:
         return -(2.0 - X[:, 0])
 
 
-def test_quantile_grid_log_density_reuses_local_quantile_spacing() -> None:
-    values = np.array([[[0.0, 0.1, 1.0], [0.0, 0.5, 1.0]]])
-
-    scores = quantile_grid_log_density(values, (0.25, 0.5, 0.75))
-
-    assert scores.shape == values.shape
-    assert scores[0, 0, 0] > scores[0, 0, 1] > scores[0, 0, 2]
-    np.testing.assert_allclose(scores[0, 1], -np.log(2.0))
-
-
-def test_tabicl_local_density_selects_plausible_valid_quantile() -> None:
-    class ScalarDisc:
-        def predict_proba(self, X):
-            p1 = np.clip(0.1 + 0.7 * X[:, 0], 0.0, 0.99)
-            return np.column_stack([1.0 - p1, p1])
-
-    counterfactual, _, info = greedy_mixed_counterfactual(
-        _MixedGridSampler([[0.7, 0.8, 1.0]]),
-        ScalarDisc(),
-        np.array([0.0]),
-        y_target=1,
-        numerical_columns=[0],
-        categorical_groups=[],
-        candidate_quantiles=(0.25, 0.5, 0.75),
-        use_tabicl_local_plausibility=True,
-    )
-
-    # All three proposals are valid and target probability prefers 1.0. The
-    # more tightly spaced lower quantiles have greater TabICL local density.
-    np.testing.assert_allclose(counterfactual, [0.7])
-    assert info["flipped"] is True
-    assert info["steps"] == 1
-    assert info["refinement_steps"] == 0
-    assert info["history"][0]["tabicl_local_log_score"] > 0.0
-
-
 class _WholeRowTabICLScorer:
-    threshold = 0.10
+    def __init__(self):
+        self.scored_rows = []
 
-    def score_rows(self, rows, target_class, target_probabilities):
+    def score_rows(self, rows, target_class):
         assert target_class == 1
-        assert len(target_probabilities) == len(rows)
+        self.scored_rows.append(np.asarray(rows).copy())
         joint = 0.05 + 0.5 * (
             np.count_nonzero(~np.isclose(rows, 0.0), axis=1) - 1
         )
         return TabICLJointScoreBatch(
-            combined_percentile=joint,
             joint_log_density=joint - 10.0,
             joint_percentile=joint,
-            classifier_margin_percentile=np.full(len(rows), 0.75),
         )
 
 
-def test_tabicl_joint_score_refines_valid_row_until_threshold() -> None:
+def test_data_plausible_mode_refines_relative_to_initial_sparse_score() -> None:
     class ReusableSampler:
         def sample_candidate_grid(
             self,
@@ -290,6 +251,7 @@ def test_tabicl_joint_score_refines_valid_row_until_threshold() -> None:
             p1 = np.clip(0.1 + 0.5 * X[:, 0] + 0.5 * X[:, 1], 0.0, 0.99)
             return np.column_stack([1.0 - p1, p1])
 
+    scorer = _WholeRowTabICLScorer()
     counterfactual, changed, info = greedy_mixed_counterfactual(
         ReusableSampler(),
         AdditiveDisc(),
@@ -298,34 +260,44 @@ def test_tabicl_joint_score_refines_valid_row_until_threshold() -> None:
         numerical_columns=[0, 1],
         categorical_groups=[],
         candidate_quantiles=(0.5,),
-        tabicl_joint_plausibility=_WholeRowTabICLScorer(),
+        cf_mode="data_plausible",
+        tabicl_joint_plausibility=scorer,
+        refinement_budget=2,
+        min_joint_gain=0.01,
     )
 
     np.testing.assert_array_equal(counterfactual, [1.0, 1.0])
     assert changed == [0, 1]
     assert info["flipped"] is True
     assert info["initial_valid_step"] == 1
-    assert info["refinement_steps"] == 1
+    assert info["accepted_refinement_count"] == 1
+    assert info["initial_tabicl_joint_score"] == 0.05
     assert info["final_tabicl_joint_score"] == 0.55
-    assert info["tabicl_joint_threshold_reached"] is True
+    assert info["tabicl_joint_score_gain"] == 0.5
+    np.testing.assert_array_equal(info["initial_sparse_row"], [1.0, 0.0])
+    assert info["initial_sparse_action_count"] == 1
+    assert info["final_action_count"] == 2
+    assert info["extra_actions"] == 1
 
 
-def test_tabicl_joint_score_is_only_evaluated_for_valid_rows() -> None:
+def test_data_plausible_joint_score_is_only_evaluated_after_validity() -> None:
     class ValidOnlyScorer:
-        threshold = 0.10
+        def __init__(self):
+            self.calls = 0
 
-        def score_rows(self, rows, target_class, target_probabilities):
+        def score_rows(self, rows, target_class):
             assert target_class == 1
-            assert np.all(target_probabilities >= 0.5)
             assert np.all(rows[:, 0] >= 0.8)
+            self.calls += 1
             values = np.full(len(rows), 0.5)
-            return TabICLJointScoreBatch(values, values, values, None)
+            return TabICLJointScoreBatch(values, values)
 
     class ScalarDisc:
         def predict_proba(self, X):
             p1 = 0.1 + 0.6 * X[:, 0]
             return np.column_stack([1.0 - p1, p1])
 
+    scorer = ValidOnlyScorer()
     counterfactual, _, info = greedy_mixed_counterfactual(
         _MixedGridSampler([[0.2, 0.8]]),
         ScalarDisc(),
@@ -334,11 +306,72 @@ def test_tabicl_joint_score_is_only_evaluated_for_valid_rows() -> None:
         numerical_columns=[0],
         categorical_groups=[],
         candidate_quantiles=(0.25, 0.75),
-        tabicl_joint_plausibility=ValidOnlyScorer(),
+        cf_mode="data_plausible",
+        tabicl_joint_plausibility=scorer,
+        refinement_budget=1,
     )
 
     np.testing.assert_array_equal(counterfactual, [0.8])
-    assert info["tabicl_joint_threshold_reached"] is True
+    assert scorer.calls == 1
+    assert info["refinement_stopping_reason"] == "no_candidates"
+
+
+def test_data_plausible_can_replace_action_without_increasing_sparsity() -> None:
+    class StatefulSampler:
+        def __init__(self):
+            self.calls = 0
+
+        def sample_candidate_grid(
+            self,
+            _query,
+            columns,
+            *,
+            quantiles,
+            fixed_target,
+            confidences=None,
+        ):
+            del quantiles, fixed_target, confidences
+            self.calls += 1
+            values = {
+                0: 1.0 if self.calls == 1 else 0.8,
+                1: 0.2,
+            }
+            return np.asarray([[values[column]] for column in columns])
+
+    class ScalarDisc:
+        def predict_proba(self, X):
+            p1 = 0.1 + 0.6 * X[:, 0]
+            return np.column_stack([1.0 - p1, p1])
+
+    class PreferReplacementScorer:
+        def score_rows(self, rows, target_class):
+            assert target_class == 1
+            scores = np.where(np.isclose(rows[:, 0], 0.8), 0.9, 0.5)
+            scores = np.where(rows[:, 1] > 0.0, 0.4, scores)
+            return TabICLJointScoreBatch(scores, scores)
+
+    counterfactual, changed, info = greedy_mixed_counterfactual(
+        StatefulSampler(),
+        ScalarDisc(),
+        np.array([0.0, 0.0]),
+        y_target=1,
+        numerical_columns=[0, 1],
+        categorical_groups=[],
+        candidate_quantiles=(0.5,),
+        cf_mode="data_plausible",
+        tabicl_joint_plausibility=PreferReplacementScorer(),
+        refinement_budget=1,
+        max_extra_actions=0,
+        min_joint_gain=0.01,
+    )
+
+    np.testing.assert_allclose(counterfactual, [0.8, 0.0])
+    assert changed == [0]
+    assert info["accepted_refinement_count"] == 1
+    assert info["initial_sparse_action_count"] == 1
+    assert info["final_action_count"] == 1
+    assert info["extra_actions"] == 0
+    assert info["refinement_stopping_reason"] == "budget_exhausted"
 
 
 def test_global_mixed_search_chooses_categorical_action_over_numerical() -> None:

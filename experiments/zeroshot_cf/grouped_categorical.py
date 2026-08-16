@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Callable, Sequence
 
 import numpy as np
-
 from experiments.zeroshot_cf.data import OneHotActionGroup
 from experiments.zeroshot_cf.greedy import project_candidate_values
 
@@ -146,43 +145,6 @@ ConditionedCategoryDistribution = Callable[
 ]
 
 
-def quantile_grid_log_density(
-    values: np.ndarray,
-    quantiles: Sequence[float],
-    *,
-    min_slope: float = 1e-6,
-    max_slope: float = 1e6,
-) -> np.ndarray:
-    """Approximate TabICL log-density from an already evaluated quantile grid.
-
-    TabICL represents a numerical conditional through a monotone quantile
-    function ``Q(alpha)``. Its density satisfies
-    ``log p(Q(alpha)) = -log(dQ / d alpha)``. Central finite differences use
-    the returned counterfactual grid directly, so this score requires no
-    additional TabICL prediction. The last axis of ``values`` must correspond
-    to ``quantiles``; any leading feature/confidence dimensions are preserved.
-    """
-    grid = np.asarray(values, dtype=np.float64)
-    levels = np.asarray(quantiles, dtype=np.float64)
-    if grid.ndim == 0 or grid.shape[-1] != len(levels):
-        raise ValueError(
-            "values must have one trailing entry per quantile; "
-            f"got shape {grid.shape} and {len(levels)} levels"
-        )
-    if levels.ndim != 1 or len(levels) == 0:
-        raise ValueError("quantiles must be a non-empty 1D sequence")
-    if not np.all(np.isfinite(levels)) or np.any(np.diff(levels) <= 0):
-        raise ValueError("quantiles must be finite, strictly increasing values")
-    if min_slope <= 0 or max_slope < min_slope:
-        raise ValueError("density slope bounds are invalid")
-    if len(levels) == 1:
-        return np.zeros_like(grid, dtype=np.float64)
-
-    slopes = np.gradient(grid, levels, axis=-1, edge_order=1)
-    slopes = np.clip(slopes, min_slope, max_slope)
-    return -np.log(slopes)
-
-
 def greedy_mixed_counterfactual(  # noqa: PLR0913
     sampler,
     disc,
@@ -194,11 +156,14 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     candidate_quantiles: Sequence[float] | None = None,
     candidate_confidences: Sequence[float] | None = None,
     feature_domains=None,
+    cf_mode: str = "sparse",
     plausibility_model=None,
-    use_tabicl_local_plausibility: bool = False,
     tabicl_joint_plausibility=None,
     max_validity_steps: int | None = None,
     allow_revisits: bool = True,
+    refinement_budget: int = 2,
+    max_extra_actions: int = 2,
+    min_joint_gain: float = 0.01,
     max_refinement_steps: int = 2,
     min_relative_lof_gain: float = 0.05,
     refinement_lof_threshold: float | None = None,
@@ -209,16 +174,13 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
 ) -> tuple[np.ndarray, list[int], dict]:
     """Greedily select the best action across numerical and categorical types.
 
-    At every step, all remaining scalar feature proposals and all legal atomic
-    category swaps compete in one discriminator batch. Before a valid proposal
-    exists, the proposal with the highest target-class probability wins,
-    provided it strictly improves on the incumbent. As soon as one or more
-    proposals are valid, validity becomes a hard gate. The valid proposal is
-    then selected by LOF, by the local conditional score already produced by
-    TabICL, or by a validation-calibrated TabICL joint score for the completed
-    row. LOF and the joint score support post-valid refinement; the local score
-    deliberately stops at the validity boundary because it describes only the
-    proposed feature.
+    At every validity-search step, all scalar and categorical TabICL proposals
+    compete in one discriminator batch. Invalid states are ranked only by
+    target-probability ascent. The first valid state is selected by action-unit
+    sparsity and factual proximity, then committed without any joint-density
+    call. ``sparse`` mode returns it immediately. ``data_plausible`` mode then
+    spends a bounded refinement budget on validity-preserving actions that
+    improve the validation-calibrated TabICL complete-row score.
 
     TabICL ranks categorical alternatives within each group before the target
     classifier compares the resulting rows globally. Each action unit is used
@@ -229,23 +191,26 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         max_validity_steps = n_action_units
     if max_validity_steps < 1:
         raise ValueError("max_validity_steps must be at least 1")
+    if cf_mode not in {"sparse", "data_plausible"}:
+        raise ValueError("cf_mode must be 'sparse' or 'data_plausible'")
+    if refinement_budget < 0:
+        raise ValueError("refinement_budget must be non-negative")
+    if max_extra_actions < 0:
+        raise ValueError("max_extra_actions must be non-negative")
+    if min_joint_gain < 0:
+        raise ValueError("min_joint_gain must be non-negative")
+    if cf_mode == "data_plausible" and tabicl_joint_plausibility is None:
+        raise ValueError("data_plausible mode requires a TabICL joint scorer")
+    if cf_mode == "sparse" and tabicl_joint_plausibility is not None:
+        raise ValueError("sparse mode must not receive a TabICL joint scorer")
     if max_refinement_steps < 0:
         raise ValueError("max_refinement_steps must be non-negative")
     if not 0.0 <= min_relative_lof_gain < 1.0:
         raise ValueError("min_relative_lof_gain must be in [0, 1)")
     if refinement_lof_threshold is not None and refinement_lof_threshold <= 0:
         raise ValueError("refinement_lof_threshold must be positive")
-    configured_plausibility = sum(
-        (
-            plausibility_model is not None,
-            use_tabicl_local_plausibility,
-            tabicl_joint_plausibility is not None,
-        )
-    )
-    if configured_plausibility > 1:
-        raise ValueError("LOF, TabICL local, and TabICL joint modes are exclusive")
-    if use_tabicl_local_plausibility and candidate_quantiles is None:
-        raise ValueError("TabICL local plausibility requires candidate_quantiles")
+    if plausibility_model is not None and cf_mode != "sparse":
+        raise ValueError("legacy LOF refinement cannot be combined with cf_mode")
     if categorical_proposal_count < 1:
         raise ValueError("categorical_proposal_count must be at least 1")
     numerical = [int(column) for column in numerical_columns]
@@ -255,10 +220,6 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         if candidate_quantiles is None
         else np.asarray(candidate_quantiles, dtype=np.float64)
     )
-    if use_tabicl_local_plausibility and len(quantiles) < 2:
-        raise ValueError(
-            "TabICL local plausibility requires at least two candidate quantiles"
-        )
     confidences = (
         None
         if candidate_confidences is None
@@ -328,7 +289,6 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     def valid_tabicl_joint_scores(
         rows: np.ndarray,
         valid_mask: np.ndarray,
-        probabilities: np.ndarray,
     ) -> dict[str, np.ndarray] | None:
         """Score complete valid rows; invalid candidates incur no TabICL work."""
         if tabicl_joint_plausibility is None or not np.any(valid_mask):
@@ -337,70 +297,50 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         batch = tabicl_joint_plausibility.score_rows(
             valid_rows,
             y_target,
-            probabilities[valid_mask],
         )
         scores = {
-            "combined": np.full(len(rows), -np.inf, dtype=np.float64),
             "joint_log_density": np.full(len(rows), np.nan, dtype=np.float64),
             "joint_percentile": np.full(len(rows), np.nan, dtype=np.float64),
-            "classifier_margin_percentile": np.full(
-                len(rows), np.nan, dtype=np.float64
-            ),
         }
-        scores["combined"][valid_mask] = batch.combined_percentile
         scores["joint_log_density"][valid_mask] = batch.joint_log_density
         scores["joint_percentile"][valid_mask] = batch.joint_percentile
-        if batch.classifier_margin_percentile is not None:
-            scores["classifier_margin_percentile"][valid_mask] = (
-                batch.classifier_margin_percentile
-            )
         return scores
 
     def select_valid_candidate(
         eligible: np.ndarray,
         probabilities: np.ndarray,
         lof_scores: np.ndarray | None,
-        tabicl_local_scores: np.ndarray,
-        tabicl_joint_scores: dict[str, np.ndarray] | None,
         rows: np.ndarray,
+        candidate_metadata: Sequence[dict],
     ) -> int:
-        """Apply the configured plausibility rule within the validity gate."""
-        if tabicl_joint_scores is not None:
-            combined = tabicl_joint_scores["combined"]
-            threshold = float(tabicl_joint_plausibility.threshold)
-            passing = eligible[combined[eligible] >= threshold]
-            candidate_sparsity, candidate_proximity = counterfactual_costs(rows)
-            if len(passing):
-                ranked = np.lexsort(
-                    (
-                        -probabilities[passing],
-                        -combined[passing],
-                        candidate_proximity[passing],
-                        candidate_sparsity[passing],
-                    )
-                )
-                return int(passing[ranked[0]])
-            ranked = np.lexsort(
-                (
-                    -probabilities[eligible],
-                    candidate_proximity[eligible],
-                    candidate_sparsity[eligible],
-                    -combined[eligible],
-                )
-            )
-            return int(eligible[ranked[0]])
-        if use_tabicl_local_plausibility and np.any(
-            np.isfinite(tabicl_local_scores[eligible])
-        ):
-            eligible_scores = tabicl_local_scores[eligible]
-            best_score = np.max(eligible_scores)
-            tied = eligible[
-                np.isclose(eligible_scores, best_score, rtol=1e-9, atol=1e-12)
-            ]
-            return int(tied[np.argmax(probabilities[tied])])
+        """Choose a sparse valid candidate without querying joint TabICL."""
         if lof_scores is not None:
             return int(eligible[np.argmin(lof_scores[eligible])])
-        return int(eligible[np.argmax(probabilities[eligible])])
+        candidate_sparsity, candidate_proximity = counterfactual_costs(rows)
+        proposal_support = np.asarray(
+            [
+                (
+                    1.0
+                    if item.get("quantile") is None
+                    else 2.0
+                    * min(float(item["quantile"]), 1.0 - float(item["quantile"]))
+                )
+                if item["action_type"] == "numerical"
+                else float(item.get("tabicl_conditional_probability", 0.0))
+                for item in candidate_metadata
+            ],
+            dtype=np.float64,
+        )
+        support_penalty = -np.log(np.clip(proposal_support, 1e-12, 1.0))
+        ranked = np.lexsort(
+            (
+                -probabilities[eligible],
+                support_penalty[eligible],
+                candidate_proximity[eligible],
+                candidate_sparsity[eligible],
+            )
+        )
+        return int(eligible[ranked[0]])
 
     flipped, current_probability = flip_state(current)
     current_lof = (
@@ -409,6 +349,11 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         else float(-plausibility_model.score_samples(current.reshape(1, -1))[0])
     )
     current_tabicl_joint_score: float | None = None
+    initial_tabicl_joint_score: float | None = None
+    initial_sparse_action_count: int | None = (
+        int(counterfactual_costs(current)[0][0]) if flipped else None
+    )
+    initial_sparse_row: np.ndarray | None = current.copy() if flipped else None
     best_row = current.copy()
     best_probability = current_probability
     best_history_length = 0
@@ -421,15 +366,17 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     post_valid_refinement = (
         plausibility_model is not None or tabicl_joint_plausibility is not None
     )
+    refinement_stopping_reason = "not_started"
+
+    if flipped and tabicl_joint_plausibility is not None:
+        initial_batch = tabicl_joint_plausibility.score_rows(
+            current.reshape(1, -1),
+            y_target,
+        )
+        current_tabicl_joint_score = float(initial_batch.joint_percentile[0])
+        initial_tabicl_joint_score = current_tabicl_joint_score
 
     def plausibility_threshold_reached() -> bool:
-        if (
-            tabicl_joint_plausibility is not None
-            and current_tabicl_joint_score is not None
-        ):
-            return current_tabicl_joint_score >= float(
-                tabicl_joint_plausibility.threshold
-            )
         return bool(
             plausibility_model is not None
             and refinement_lof_threshold is not None
@@ -439,9 +386,14 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
 
     round_limit = max_validity_steps if allow_revisits else 1
     for round_index in range(round_limit):
+        refinement_limit = (
+            refinement_budget
+            if tabicl_joint_plausibility is not None
+            else max_refinement_steps
+        )
         if flipped and (
             not post_valid_refinement
-            or refinement_steps >= max_refinement_steps
+            or refinement_steps >= refinement_limit
             or plausibility_threshold_reached()
         ):
             break
@@ -455,7 +407,7 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                 break
             if flipped and (
                 not post_valid_refinement
-                or refinement_steps >= max_refinement_steps
+                or refinement_steps >= refinement_limit
                 or plausibility_threshold_reached()
             ):
                 break
@@ -525,10 +477,6 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                             "sample_candidate_grid returned an unexpected shape; "
                             f"expected {expected}, got {numerical_values.shape}"
                         )
-                    numerical_log_density = quantile_grid_log_density(
-                        numerical_values,
-                        quantiles,
-                    )
                     expanded_columns = np.repeat(
                         np.asarray(available_numerical, dtype=int),
                         n_confidences * len(quantiles),
@@ -560,10 +508,6 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                                 if expanded_confidences is None
                                 else float(expanded_confidences[position])
                             ),
-                            "tabicl_local_log_score": float(
-                                numerical_log_density.reshape(-1)[position]
-                            ),
-                            "tabicl_local_score_kind": "log_density",
                         }
                         for position, column in enumerate(expanded_columns)
                     ]
@@ -579,6 +523,34 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                 ] = flat_values
                 trial_rows.extend(numerical_trials)
                 metadata.extend(numerical_metadata)
+
+                if flipped:
+                    reversion_columns = [
+                        column
+                        for column in available_numerical
+                        if not np.isclose(current[column], factual[column])
+                    ]
+                    if reversion_columns:
+                        reversion_trials = np.repeat(
+                            current.reshape(1, -1),
+                            len(reversion_columns),
+                            axis=0,
+                        )
+                        reversion_trials[
+                            np.arange(len(reversion_columns)),
+                            reversion_columns,
+                        ] = factual[reversion_columns]
+                        trial_rows.extend(reversion_trials)
+                        metadata.extend(
+                            {
+                                "action_type": "numerical",
+                                "feature": int(column),
+                                "quantile": None,
+                                "confidence": None,
+                                "proposal_kind": "revert",
+                            }
+                            for column in reversion_columns
+                        )
 
             category_scores_by_group: dict[
                 str, dict[int, tuple[float, float | None]]
@@ -634,6 +606,13 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                 # target classifier subsequently compares their complete rows
                 # against all numerical proposals.
                 alternatives = alternatives[:categorical_proposal_count]
+                factual_category = int(np.argmax(factual[columns]))
+                if (
+                    flipped
+                    and previous_category != factual_category
+                    and factual_category not in alternatives
+                ):
+                    alternatives.append(factual_category)
                 for proposal_rank, category in enumerate(alternatives, start=1):
                     if category == previous_category:
                         continue
@@ -652,60 +631,84 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                             "from_category": previous_category,
                             "to_category": category,
                             "tabicl_conditional_probability": (conditional_probability),
-                            "tabicl_local_log_score": float(
-                                np.log(max(conditional_probability, 1e-12))
-                            ),
-                            "tabicl_local_score_kind": "log_probability",
                             "tabicl_confidence_anchor": confidence_anchor,
                             "tabicl_proposal_rank": proposal_rank,
                             "in_tabicl_support": category in category_scores,
+                            "proposal_kind": (
+                                "revert"
+                                if flipped and category == factual_category
+                                else "conditional"
+                            ),
                         }
                     )
 
             if not trial_rows:
+                if flipped and tabicl_joint_plausibility is not None:
+                    refinement_stopping_reason = "no_candidates"
                 break
             trials = np.stack(trial_rows)
             probabilities, predictions = classifier_outputs(trials)
             valid = (predictions == y_target) & (probabilities >= tau)
             lof_scores = valid_lof_scores(trials, valid)
-            tabicl_joint_scores = valid_tabicl_joint_scores(
-                trials,
-                valid,
-                probabilities,
-            )
-            tabicl_local_scores = np.asarray(
-                [
-                    float(item.get("tabicl_local_log_score", -np.inf))
-                    for item in metadata
-                ],
-                dtype=np.float64,
+            joint_score_mask = valid
+            if flipped and tabicl_joint_plausibility is not None:
+                if initial_sparse_action_count is None:
+                    raise RuntimeError("initial sparse action count is unavailable")
+                trial_sparsity = counterfactual_costs(trials)[0]
+                joint_score_mask = (
+                    valid
+                    & (
+                        trial_sparsity
+                        <= initial_sparse_action_count + max_extra_actions
+                    )
+                    & np.asarray(
+                        [row.tobytes() not in visited_rows for row in trials]
+                    )
+                )
+            tabicl_joint_scores = (
+                valid_tabicl_joint_scores(trials, joint_score_mask)
+                if flipped
+                else None
             )
 
             if flipped:
                 unvisited = np.asarray(
                     [row.tobytes() not in visited_rows for row in trials]
                 )
-                if tabicl_joint_scores is not None:
+                if tabicl_joint_plausibility is not None:
+                    if tabicl_joint_scores is None:
+                        refinement_stopping_reason = "no_eligible_candidate"
+                        break
                     if current_tabicl_joint_score is None:
                         raise RuntimeError("valid TabICL joint incumbent has no score")
+                    candidate_sparsity, candidate_proximity = counterfactual_costs(
+                        trials
+                    )
+                    if initial_sparse_action_count is None:
+                        raise RuntimeError("initial sparse action count is unavailable")
                     eligible = np.flatnonzero(
                         valid
                         & unvisited
                         & (
-                            tabicl_joint_scores["combined"]
-                            > current_tabicl_joint_score + 1e-12
+                            candidate_sparsity
+                            <= initial_sparse_action_count + max_extra_actions
+                        )
+                        & (
+                            tabicl_joint_scores["joint_percentile"]
+                            >= current_tabicl_joint_score + min_joint_gain
                         )
                     )
                     if not len(eligible):
+                        refinement_stopping_reason = "no_improving_candidate"
                         break
-                    best = select_valid_candidate(
-                        eligible,
-                        probabilities,
-                        lof_scores,
-                        tabicl_local_scores,
-                        tabicl_joint_scores,
-                        trials,
+                    ranked = np.lexsort(
+                        (
+                            candidate_proximity[eligible],
+                            candidate_sparsity[eligible],
+                            -tabicl_joint_scores["joint_percentile"][eligible],
+                        )
                     )
+                    best = int(eligible[ranked[0]])
                 else:
                     if lof_scores is None or current_lof is None:
                         break
@@ -736,9 +739,8 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                     eligible,
                     probabilities,
                     lof_scores,
-                    tabicl_local_scores,
-                    tabicl_joint_scores,
                     trials,
+                    metadata,
                 )
             else:
                 best = int(np.argmax(probabilities))
@@ -786,10 +788,6 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                                 "tabicl_conditional_probability": (
                                     conditional_probability
                                 ),
-                                "tabicl_local_log_score": float(
-                                    np.log(max(conditional_probability, 1e-12))
-                                ),
-                                "tabicl_local_score_kind": "log_probability",
                                 "tabicl_confidence_anchor": confidence_anchor,
                                 "tabicl_proposal_rank": None,
                                 "in_tabicl_support": category in fallback_scores,
@@ -800,27 +798,15 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                 probabilities, predictions = classifier_outputs(trials)
                 valid = (predictions == y_target) & (probabilities >= tau)
                 lof_scores = valid_lof_scores(trials, valid)
-                tabicl_joint_scores = valid_tabicl_joint_scores(
-                    trials,
-                    valid,
-                    probabilities,
-                )
-                tabicl_local_scores = np.asarray(
-                    [
-                        float(item.get("tabicl_local_log_score", -np.inf))
-                        for item in metadata
-                    ],
-                    dtype=np.float64,
-                )
+                tabicl_joint_scores = None
                 if valid.any():
                     eligible = np.flatnonzero(valid)
                     best = select_valid_candidate(
                         eligible,
                         probabilities,
                         lof_scores,
-                        tabicl_local_scores,
-                        tabicl_joint_scores,
                         trials,
+                        metadata,
                     )
                 else:
                     best = int(np.argmax(probabilities))
@@ -841,15 +827,10 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                     ),
                     "target_probability": selected_probability,
                     "lof": (None if lof_scores is None else float(lof_scores[best])),
-                    "tabicl_local_log_score": (
-                        None
-                        if not np.isfinite(tabicl_local_scores[best])
-                        else float(tabicl_local_scores[best])
-                    ),
                     "tabicl_joint_score": (
                         None
                         if tabicl_joint_scores is None
-                        else float(tabicl_joint_scores["combined"][best])
+                        else float(tabicl_joint_scores["joint_percentile"][best])
                     ),
                     "tabicl_joint_log_density": (
                         None
@@ -860,25 +841,6 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                         None
                         if tabicl_joint_scores is None
                         else float(tabicl_joint_scores["joint_percentile"][best])
-                    ),
-                    "tabicl_classifier_margin_percentile": (
-                        None
-                        if tabicl_joint_scores is None
-                        or not np.isfinite(
-                            tabicl_joint_scores[
-                                "classifier_margin_percentile"
-                            ][best]
-                        )
-                        else float(
-                            tabicl_joint_scores[
-                                "classifier_margin_percentile"
-                            ][best]
-                        )
-                    ),
-                    "tabicl_joint_threshold": (
-                        None
-                        if tabicl_joint_plausibility is None
-                        else float(tabicl_joint_plausibility.threshold)
                     ),
                     "immediate_valid": bool(valid[best]),
                     "n_candidates": len(trials),
@@ -899,7 +861,7 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                 current_lof = float(lof_scores[best])
             if tabicl_joint_scores is not None:
                 current_tabicl_joint_score = float(
-                    tabicl_joint_scores["combined"][best]
+                    tabicl_joint_scores["joint_percentile"][best]
                 )
             committed_this_round += 1
 
@@ -922,6 +884,19 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                 refinement_steps += 1
             elif flipped and initial_valid_step is None:
                 initial_valid_step = len(history)
+                initial_sparse_action_count = int(
+                    counterfactual_costs(current)[0][0]
+                )
+                initial_sparse_row = current.copy()
+                if tabicl_joint_plausibility is not None:
+                    initial_batch = tabicl_joint_plausibility.score_rows(
+                        current.reshape(1, -1),
+                        y_target,
+                    )
+                    current_tabicl_joint_score = float(
+                        initial_batch.joint_percentile[0]
+                    )
+                    initial_tabicl_joint_score = current_tabicl_joint_score
             if not was_flipped:
                 validity_steps += 1
             if current_probability > best_probability:
@@ -939,6 +914,23 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         categorical_history = [
             item for item in history if item["action_type"] == "categorical"
         ]
+
+    final_action_count = int(counterfactual_costs(current)[0][0])
+    if not flipped:
+        refinement_stopping_reason = "validity_not_reached"
+    elif tabicl_joint_plausibility is None:
+        refinement_stopping_reason = (
+            "legacy_lof_complete" if plausibility_model is not None else "sparse_valid"
+        )
+    elif refinement_steps >= refinement_budget:
+        refinement_stopping_reason = "budget_exhausted"
+    elif refinement_stopping_reason == "not_started":
+        refinement_stopping_reason = "search_exhausted"
+    joint_score_gain = (
+        None
+        if initial_tabicl_joint_score is None or current_tabicl_joint_score is None
+        else current_tabicl_joint_score - initial_tabicl_joint_score
+    )
 
     for column in np.flatnonzero(current != factual):
         changed_order.append(int(column))
@@ -960,13 +952,19 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
             "best_target_probability": float(best_probability),
             "initial_valid_step": initial_valid_step,
             "refinement_steps": refinement_steps,
+            "accepted_refinement_count": refinement_steps,
+            "initial_sparse_action_count": initial_sparse_action_count,
+            "initial_sparse_row": initial_sparse_row,
+            "final_action_count": final_action_count,
+            "initial_tabicl_joint_score": initial_tabicl_joint_score,
             "final_tabicl_joint_score": current_tabicl_joint_score,
-            "tabicl_joint_threshold_reached": bool(
-                tabicl_joint_plausibility is not None
-                and current_tabicl_joint_score is not None
-                and current_tabicl_joint_score
-                >= float(tabicl_joint_plausibility.threshold)
+            "tabicl_joint_score_gain": joint_score_gain,
+            "extra_actions": (
+                0
+                if initial_sparse_action_count is None
+                else max(0, final_action_count - initial_sparse_action_count)
             ),
+            "refinement_stopping_reason": refinement_stopping_reason,
         },
     )
 

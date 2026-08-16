@@ -9,6 +9,7 @@ from pathlib import Path
 
 from experiments.zeroshot_cf.exp9_dicoflex_benchmark import (
     DATASETS,
+    DEFAULT_CANDIDATE_QUANTILES,
     DEFAULT_MAX_TEST,
     aggregate_results,
 )
@@ -25,6 +26,7 @@ def test_exp9_excludes_adult_and_uses_larger_common_test_set() -> None:
         "credit_default",
     )
     assert DEFAULT_MAX_TEST == 1000
+    assert DEFAULT_CANDIDATE_QUANTILES == tuple(i / 10 for i in range(1, 10))
 
 
 def test_exp9_aggregates_independent_dataset_outputs(tmp_path: Path) -> None:
