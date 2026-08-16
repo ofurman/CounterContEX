@@ -227,7 +227,6 @@ class _WholeRowTabICLScorer:
         )
         return TabICLJointScoreBatch(
             joint_log_density=joint - 10.0,
-            joint_percentile=joint,
         )
 
 
@@ -262,8 +261,8 @@ def test_data_plausible_mode_refines_relative_to_initial_sparse_score() -> None:
         candidate_quantiles=(0.5,),
         cf_mode="data_plausible",
         tabicl_joint_plausibility=scorer,
-        refinement_budget=2,
-        min_joint_gain=0.01,
+        joint_shortlist_size=16,
+        min_joint_log_gain=0.0,
     )
 
     np.testing.assert_array_equal(counterfactual, [1.0, 1.0])
@@ -271,9 +270,11 @@ def test_data_plausible_mode_refines_relative_to_initial_sparse_score() -> None:
     assert info["flipped"] is True
     assert info["initial_valid_step"] == 1
     assert info["accepted_refinement_count"] == 1
-    assert info["initial_tabicl_joint_score"] == 0.05
-    assert info["final_tabicl_joint_score"] == 0.55
-    assert info["tabicl_joint_score_gain"] == 0.5
+    assert info["initial_tabicl_joint_log_density"] == -9.95
+    assert info["final_tabicl_joint_log_density"] == -9.45
+    assert info["tabicl_joint_log_density_gain"] == 0.5
+    assert len(scorer.scored_rows) == 1
+    assert len(scorer.scored_rows[0]) == 2
     np.testing.assert_array_equal(info["initial_sparse_row"], [1.0, 0.0])
     assert info["initial_sparse_action_count"] == 1
     assert info["final_action_count"] == 2
@@ -290,7 +291,7 @@ def test_data_plausible_joint_score_is_only_evaluated_after_validity() -> None:
             assert np.all(rows[:, 0] >= 0.8)
             self.calls += 1
             values = np.full(len(rows), 0.5)
-            return TabICLJointScoreBatch(values, values)
+            return TabICLJointScoreBatch(values)
 
     class ScalarDisc:
         def predict_proba(self, X):
@@ -308,12 +309,11 @@ def test_data_plausible_joint_score_is_only_evaluated_after_validity() -> None:
         candidate_quantiles=(0.25, 0.75),
         cf_mode="data_plausible",
         tabicl_joint_plausibility=scorer,
-        refinement_budget=1,
     )
 
     np.testing.assert_array_equal(counterfactual, [0.8])
-    assert scorer.calls == 1
-    assert info["refinement_stopping_reason"] == "no_candidates"
+    assert scorer.calls == 0
+    assert info["refinement_stopping_reason"] == "no_eligible_candidate"
 
 
 def test_data_plausible_can_replace_action_without_increasing_sparsity() -> None:
@@ -348,7 +348,7 @@ def test_data_plausible_can_replace_action_without_increasing_sparsity() -> None
             assert target_class == 1
             scores = np.where(np.isclose(rows[:, 0], 0.8), 0.9, 0.5)
             scores = np.where(rows[:, 1] > 0.0, 0.4, scores)
-            return TabICLJointScoreBatch(scores, scores)
+            return TabICLJointScoreBatch(scores)
 
     counterfactual, changed, info = greedy_mixed_counterfactual(
         StatefulSampler(),
@@ -360,9 +360,8 @@ def test_data_plausible_can_replace_action_without_increasing_sparsity() -> None
         candidate_quantiles=(0.5,),
         cf_mode="data_plausible",
         tabicl_joint_plausibility=PreferReplacementScorer(),
-        refinement_budget=1,
         max_extra_actions=0,
-        min_joint_gain=0.01,
+        min_joint_log_gain=0.0,
     )
 
     np.testing.assert_allclose(counterfactual, [0.8, 0.0])
@@ -371,7 +370,60 @@ def test_data_plausible_can_replace_action_without_increasing_sparsity() -> None
     assert info["initial_sparse_action_count"] == 1
     assert info["final_action_count"] == 1
     assert info["extra_actions"] == 0
-    assert info["refinement_stopping_reason"] == "budget_exhausted"
+    assert info["refinement_stopping_reason"] == "one_shot_accepted"
+
+
+def test_data_plausible_scores_one_bounded_action_diverse_batch() -> None:
+    class UniformSampler:
+        def sample_candidate_grid(
+            self,
+            _query,
+            columns,
+            *,
+            quantiles,
+            fixed_target,
+            confidences=None,
+        ):
+            del quantiles, fixed_target, confidences
+            return np.ones((len(columns), 1))
+
+    class AnyActionDisc:
+        def predict_proba(self, X):
+            p1 = 0.1 + 0.6 * np.max(X, axis=1)
+            return np.column_stack([1.0 - p1, p1])
+
+    class CountingScorer:
+        def __init__(self):
+            self.batch_count = 0
+            self.row_count = 0
+
+        def score_rows(self, rows, target_class):
+            assert target_class == 1
+            self.batch_count += 1
+            self.row_count += len(rows)
+            return TabICLJointScoreBatch(np.count_nonzero(rows, axis=1).astype(float))
+
+    scorer = CountingScorer()
+    counterfactual, _, info = greedy_mixed_counterfactual(
+        UniformSampler(),
+        AnyActionDisc(),
+        np.zeros(20),
+        y_target=1,
+        numerical_columns=list(range(20)),
+        categorical_groups=[],
+        candidate_quantiles=(0.5,),
+        cf_mode="data_plausible",
+        tabicl_joint_plausibility=scorer,
+        joint_shortlist_size=4,
+        max_extra_actions=1,
+    )
+
+    assert np.count_nonzero(counterfactual) == 2
+    assert scorer.batch_count == 1
+    assert scorer.row_count == 5  # sparse incumbent plus four action units
+    assert info["joint_scoring_batch_count"] == 1
+    assert info["joint_rows_scored"] == 5
+    assert info["accepted_refinement_count"] == 1
 
 
 def test_global_mixed_search_chooses_categorical_action_over_numerical() -> None:

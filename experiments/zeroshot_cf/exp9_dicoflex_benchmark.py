@@ -47,10 +47,9 @@ DEFAULT_MAX_TEST = 1000
 DEFAULT_VALIDATION_FRACTION = 0.2
 DEFAULT_N_ESTIMATORS = 1
 DEFAULT_MAX_VALIDITY_STEPS = 100
-DEFAULT_REFINEMENT_BUDGET = 2
-DEFAULT_MAX_EXTRA_ACTIONS = 2
-DEFAULT_MIN_JOINT_GAIN = 0.01
-DEFAULT_TABICL_JOINT_VALIDATION_SIZE = 128
+DEFAULT_JOINT_SHORTLIST_SIZE = 16
+DEFAULT_MAX_EXTRA_ACTIONS = 1
+DEFAULT_MIN_JOINT_LOG_GAIN = 0.0
 DEFAULT_TABICL_JOINT_PERMUTATIONS = 1
 DEFAULT_CANDIDATE_QUANTILES = tuple(i / 10 for i in range(1, 10))
 DEFAULT_CONFIDENCE_QUANTILES = (0.10, 0.25, 0.50, 0.75, 0.90)
@@ -87,13 +86,12 @@ def run_dataset(  # noqa: PLR0913
     candidate_quantiles: tuple[float, ...] = DEFAULT_CANDIDATE_QUANTILES,
     confidence_quantiles: tuple[float, ...] = DEFAULT_CONFIDENCE_QUANTILES,
     cf_mode: str = "sparse",
-    tabicl_joint_validation_size: int = DEFAULT_TABICL_JOINT_VALIDATION_SIZE,
     tabicl_joint_permutations: int = DEFAULT_TABICL_JOINT_PERMUTATIONS,
     max_validity_steps: int = DEFAULT_MAX_VALIDITY_STEPS,
     allow_revisits: bool = True,
-    refinement_budget: int = DEFAULT_REFINEMENT_BUDGET,
+    joint_shortlist_size: int = DEFAULT_JOINT_SHORTLIST_SIZE,
     max_extra_actions: int = DEFAULT_MAX_EXTRA_ACTIONS,
-    min_joint_gain: float = DEFAULT_MIN_JOINT_GAIN,
+    min_joint_log_gain: float = DEFAULT_MIN_JOINT_LOG_GAIN,
     _legacy_lof_refinement: bool = False,
     validation_fraction: float = DEFAULT_VALIDATION_FRACTION,
     drop_heloc_all_minus9: bool = True,
@@ -119,13 +117,12 @@ def run_dataset(  # noqa: PLR0913
         candidate_quantiles=candidate_quantiles,
         confidence_quantiles=confidence_quantiles,
         cf_mode=cf_mode,
-        tabicl_joint_validation_size=tabicl_joint_validation_size,
         tabicl_joint_permutations=tabicl_joint_permutations,
         max_validity_steps=max_validity_steps,
         allow_revisits=allow_revisits,
-        refinement_budget=refinement_budget,
+        joint_shortlist_size=joint_shortlist_size,
         max_extra_actions=max_extra_actions,
-        min_joint_gain=min_joint_gain,
+        min_joint_log_gain=min_joint_log_gain,
         _legacy_lof_refinement=_legacy_lof_refinement,
         validation_fraction=validation_fraction,
         test_selection="stratified",
@@ -229,13 +226,19 @@ def run_dataset(  # noqa: PLR0913
     )
     extra_actions = np.asarray(info["extra_actions_per_point"], dtype=float)
     initial_joint_scores = np.asarray(
-        info["initial_tabicl_joint_score_per_point"], dtype=float
+        info["initial_tabicl_joint_log_density_per_point"], dtype=float
     )
     final_joint_scores = np.asarray(
-        info["final_tabicl_joint_score_per_point"], dtype=float
+        info["final_tabicl_joint_log_density_per_point"], dtype=float
     )
     joint_score_gains = np.asarray(
-        info["tabicl_joint_score_gain_per_point"], dtype=float
+        info["tabicl_joint_log_density_gain_per_point"], dtype=float
+    )
+    joint_batch_counts = np.asarray(
+        info["joint_scoring_batch_count_per_point"], dtype=float
+    )
+    joint_rows_scored = np.asarray(
+        info["joint_rows_scored_per_point"], dtype=float
     )
     stopping_reasons = list(info["refinement_stopping_reason_per_point"])
     stopping_reason_counts = ";".join(
@@ -274,7 +277,6 @@ def run_dataset(  # noqa: PLR0913
         "candidate_quantiles": _levels_text(candidate_quantiles),
         "confidence_quantiles": _levels_text(confidence_quantiles),
         "plausibility_backend": info["plausibility_backend"],
-        "tabicl_joint_validation_size": tabicl_joint_validation_size,
         "tabicl_joint_permutations": tabicl_joint_permutations,
         "max_validity_steps": max_validity_steps,
         "allow_revisits": allow_revisits,
@@ -284,14 +286,14 @@ def run_dataset(  # noqa: PLR0913
         ],
         "conditional_estimator_cache": info["conditional_estimator_cache"],
         "tabicl_kv_cache": info["tabicl_kv_cache"],
-        "refinement_budget": refinement_budget,
+        "joint_shortlist_size": joint_shortlist_size,
         "max_extra_actions": max_extra_actions,
-        "min_joint_gain": min_joint_gain,
+        "min_joint_log_gain": min_joint_log_gain,
         "search_schedule": (
             "legacy_probability_ascent_then_lof_refinement"
             if _legacy_lof_refinement
             else (
-                "probability_ascent_until_valid_then_bounded_joint_refinement"
+                "probability_ascent_until_valid_then_one_shot_joint_reranking"
                 if cf_mode == "data_plausible"
                 else "probability_ascent_until_first_sparse_valid"
             )
@@ -316,9 +318,11 @@ def run_dataset(  # noqa: PLR0913
         "refinement_steps_mean": float(refinement_steps.mean()),
         "refined_fraction": float((refinement_steps > 0).mean()),
         "accepted_refinement_count_mean": float(accepted_refinements.mean()),
-        "initial_tabicl_joint_score_mean": finite_mean(initial_joint_scores),
-        "final_tabicl_joint_score_mean": finite_mean(final_joint_scores),
-        "tabicl_joint_score_gain_mean": finite_mean(joint_score_gains),
+        "initial_tabicl_joint_log_density_mean": finite_mean(initial_joint_scores),
+        "final_tabicl_joint_log_density_mean": finite_mean(final_joint_scores),
+        "tabicl_joint_log_density_gain_mean": finite_mean(joint_score_gains),
+        "joint_scoring_batch_count_mean": float(joint_batch_counts.mean()),
+        "joint_rows_scored_mean": float(joint_rows_scored.mean()),
         "extra_actions_mean": float(extra_actions.mean()),
         "initial_sparse_action_count_mean": finite_mean(
             np.where(initial_action_counts >= 0, initial_action_counts, np.nan)
@@ -362,22 +366,23 @@ def run_dataset(  # noqa: PLR0913
             "accepted_refinement_count": int(
                 info["accepted_refinement_count_per_point"][i]
             ),
-            "initial_tabicl_joint_score": float(
-                info["initial_tabicl_joint_score_per_point"][i]
+            "initial_tabicl_joint_log_density": float(
+                info["initial_tabicl_joint_log_density_per_point"][i]
             ),
-            "final_tabicl_joint_score": float(
-                info["final_tabicl_joint_score_per_point"][i]
+            "final_tabicl_joint_log_density": float(
+                info["final_tabicl_joint_log_density_per_point"][i]
             ),
-            "tabicl_joint_score_gain": float(
-                info["tabicl_joint_score_gain_per_point"][i]
+            "tabicl_joint_log_density_gain": float(
+                info["tabicl_joint_log_density_gain_per_point"][i]
             ),
+            "joint_scoring_batch_count": int(
+                info["joint_scoring_batch_count_per_point"][i]
+            ),
+            "joint_rows_scored": int(info["joint_rows_scored_per_point"][i]),
             "extra_actions": int(info["extra_actions_per_point"][i]),
             "refinement_stopping_reason": info[
                 "refinement_stopping_reason_per_point"
             ][i],
-            "tabicl_joint_calibration_count": int(
-                info["tabicl_joint_calibration_count_per_point"][i]
-            ),
             "initial_valid_action_sparsity": float(initial_valid_sparsity[i]),
             "initial_valid_proximity_l2": float(initial_valid_proximity[i]),
             "final_action_sparsity": float(final_action_sparsity[i]),
@@ -458,12 +463,6 @@ def main() -> None:
         help="Counterfactual objective (default: sparse).",
     )
     parser.add_argument(
-        "--tabicl-joint-validation-size",
-        type=int,
-        default=DEFAULT_TABICL_JOINT_VALIDATION_SIZE,
-        help="Nearest target-class validation rows used per factual.",
-    )
-    parser.add_argument(
         "--tabicl-joint-permutations",
         type=int,
         default=DEFAULT_TABICL_JOINT_PERMUTATIONS,
@@ -482,10 +481,10 @@ def main() -> None:
         help="Allow action units to be proposed again after intervening edits.",
     )
     parser.add_argument(
-        "--refinement-budget",
+        "--joint-shortlist-size",
         type=int,
-        default=DEFAULT_REFINEMENT_BUDGET,
-        help="Maximum accepted whole-row refinement actions.",
+        default=DEFAULT_JOINT_SHORTLIST_SIZE,
+        help="Maximum alternatives in the one-shot whole-row scoring batch.",
     )
     parser.add_argument(
         "--max-extra-actions",
@@ -494,10 +493,10 @@ def main() -> None:
         help="Maximum action-count increase over the initial sparse CFE.",
     )
     parser.add_argument(
-        "--min-joint-gain",
+        "--min-joint-log-gain",
         type=float,
-        default=DEFAULT_MIN_JOINT_GAIN,
-        help="Minimum calibrated joint-score gain per accepted refinement.",
+        default=DEFAULT_MIN_JOINT_LOG_GAIN,
+        help="Minimum raw joint-log-density gain over the sparse CFE.",
     )
     parser.add_argument(
         "--drop-heloc-all-minus9",
@@ -520,13 +519,12 @@ def main() -> None:
         candidate_quantiles=tuple(args.candidate_quantiles),
         confidence_quantiles=tuple(args.confidence_quantiles),
         cf_mode=args.cf_mode.replace("-", "_"),
-        tabicl_joint_validation_size=args.tabicl_joint_validation_size,
         tabicl_joint_permutations=args.tabicl_joint_permutations,
         max_validity_steps=args.max_validity_steps,
         allow_revisits=args.allow_revisits,
-        refinement_budget=args.refinement_budget,
+        joint_shortlist_size=args.joint_shortlist_size,
         max_extra_actions=args.max_extra_actions,
-        min_joint_gain=args.min_joint_gain,
+        min_joint_log_gain=args.min_joint_log_gain,
         validation_fraction=args.validation_fraction,
         drop_heloc_all_minus9=args.drop_heloc_all_minus9,
         tabicl_cache_dir=args.tabicl_cache_dir,
