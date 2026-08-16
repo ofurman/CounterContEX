@@ -346,21 +346,71 @@ def generate_tabicl_counterfactuals(
 
         category_distribution = None
         if categorical_codec is not None and grouped_actionable:
+            category_distribution_cache: dict[
+                tuple[bytes, str], tuple[np.ndarray, np.ndarray]
+            ] = {}
+            categorical_confidence_anchors = (
+                (None,)
+                if point_confidence_grid is None
+                else tuple(float(value) for value in point_confidence_grid)
+            )
 
             def category_distribution(
                 row: np.ndarray,
                 group: Any,
                 confidence: float | None,
                 _target_class: int = target_class,
+                _cache: dict[
+                    tuple[bytes, str], tuple[np.ndarray, np.ndarray]
+                ] = category_distribution_cache,
+                _anchors: tuple[float | None, ...] = (
+                    categorical_confidence_anchors
+                ),
+                _codec: Any = categorical_codec,
+                _sampler_context: Any = sampler_context,
             ) -> tuple[np.ndarray, np.ndarray]:
-                encoded_row = categorical_codec.encode_row(row)
-                encoded_col = categorical_codec.encoded_column_for_group(group)
-                return sampler_context.categorical_distribution(
-                    encoded_row.reshape(1, -1),
-                    encoded_col,
-                    fixed_target=_target_class,
-                    fixed_confidence=confidence,
-                )
+                key = (np.ascontiguousarray(row).tobytes(), group.name)
+                if key not in _cache:
+                    encoded_row = _codec.encode_row(row)
+                    encoded_col = _codec.encoded_column_for_group(group)
+                    fixed_confidences = (
+                        None
+                        if _anchors == (None,)
+                        else np.asarray(
+                            _anchors,
+                            dtype=np.float32,
+                        )
+                    )
+                    categories, probability_grid = (
+                        _sampler_context.categorical_distribution(
+                            encoded_row.reshape(1, -1),
+                            encoded_col,
+                            fixed_target=_target_class,
+                            fixed_confidence=fixed_confidences,
+                        )
+                    )
+                    _cache[key] = (
+                        np.asarray(categories, dtype=int),
+                        np.atleast_2d(
+                            np.asarray(probability_grid, dtype=np.float64)
+                        ),
+                    )
+                categories, probability_grid = _cache[key]
+                if confidence is None:
+                    anchor_index = 0
+                else:
+                    matches = np.flatnonzero(
+                        np.isclose(
+                            np.asarray(_anchors, dtype=float),
+                            confidence,
+                        )
+                    )
+                    if not len(matches):
+                        raise ValueError(
+                            f"unknown categorical confidence anchor: {confidence}"
+                        )
+                    anchor_index = int(matches[0])
+                return categories, probability_grid[anchor_index]
 
         x_cf, changed, greedy_info = greedy_mixed_counterfactual(
             sampler,
@@ -437,6 +487,9 @@ def generate_tabicl_counterfactuals(
         "max_validity_steps": effective_max_validity_steps,
         "allow_revisits": allow_revisits,
         "categorical_proposal_count": CATEGORICAL_PROPOSAL_COUNT,
+        "categorical_confidence_batching": True,
+        "conditional_estimator_cache": True,
+        "tabicl_kv_cache": sampler_context.estimator_params.get("kv_cache", False),
         "max_refinement_steps": max_refinement_steps,
         "min_relative_lof_gain": min_relative_lof_gain,
         "refinement_lof_quantile": refinement_lof_quantile,
@@ -502,6 +555,11 @@ def run_and_report(
         "max_validity_steps": info["max_validity_steps"],
         "allow_revisits": info["allow_revisits"],
         "categorical_proposal_count": info["categorical_proposal_count"],
+        "categorical_confidence_batching": info[
+            "categorical_confidence_batching"
+        ],
+        "conditional_estimator_cache": info["conditional_estimator_cache"],
+        "tabicl_kv_cache": info["tabicl_kv_cache"],
         "split_variant": info["split_variant"],
         "test_selection": info["test_selection"],
         "n_estimators": info["n_estimators"],

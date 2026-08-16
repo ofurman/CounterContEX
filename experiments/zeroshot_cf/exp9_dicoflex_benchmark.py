@@ -222,7 +222,7 @@ def run_dataset(  # noqa: PLR0913
 
     row: dict[str, Any] = {
         "dataset": dataset_name,
-        "method": "tabicl_v2_greedy_icl_post_valid_lof",
+        "method": "tabicl_v2_greedy_icl_validity_gate_lof",
         "split_variant": bundle.split_variant,
         "split_seed": 42,
         "test_selection": "stratified",
@@ -243,12 +243,17 @@ def run_dataset(  # noqa: PLR0913
         "max_validity_steps": max_validity_steps,
         "allow_revisits": allow_revisits,
         "categorical_proposal_count": info["categorical_proposal_count"],
+        "categorical_confidence_batching": info[
+            "categorical_confidence_batching"
+        ],
+        "conditional_estimator_cache": info["conditional_estimator_cache"],
+        "tabicl_kv_cache": info["tabicl_kv_cache"],
         "max_refinement_steps": max_refinement_steps,
         "min_relative_lof_gain": min_relative_lof_gain,
         "refinement_lof_quantile": refinement_lof_quantile,
         "refinement_lof_threshold": info["refinement_lof_threshold"],
         "refinement_lof_threshold_source": info["refinement_lof_threshold_source"],
-        "search_schedule": "probability_ascent_then_validity_preserving_lof",
+        "search_schedule": "probability_ascent_until_valid_then_lof_gate",
         "n_estimators": n_estimators,
         "temperature": temperature,
         "tau": tau,

@@ -147,8 +147,8 @@ def _local_tabicl_model_factory(
 
     TabICL 2.1.1 forwards one shared ``estimator_params`` mapping to both inner
     estimators, which cannot express two different ``model_path`` values. This
-    narrow subclass only overrides initial shared-weight loading; downstream
-    conditional estimators still use the upstream implementation unchanged.
+    narrow subclass keeps the upstream estimator implementation while adding
+    explicit local loading and per-context full-conditional memoization.
     """
     class _LocalCheckpointTabICLUnsupervised(TabICLUnsupervised):
         def _load_shared_model(self, estimator_cls):
@@ -183,6 +183,29 @@ def _local_tabicl_model_factory(
             if numerical_point_estimate == "mode" and temperature <= 1e-8:
                 return quantile_mode(dist)
             return TabICLUnsupervised._sample_numerical(dist, temperature, rng)
+
+        def _fit_conditional_estimator(self, col_idx, X_train, y_train):
+            """Reuse a fitted full-conditional estimator within one context."""
+            cache = getattr(self, "_conditional_estimator_cache", None)
+            if cache is None:
+                return super()._fit_conditional_estimator(
+                    col_idx,
+                    X_train,
+                    y_train,
+                )
+            key = (
+                int(col_idx),
+                X_train.shape,
+                np.ascontiguousarray(X_train).tobytes(),
+                np.ascontiguousarray(y_train).tobytes(),
+            )
+            if key not in cache:
+                cache[key] = super()._fit_conditional_estimator(
+                    col_idx,
+                    X_train,
+                    y_train,
+                )
+            return cache[key]
 
     return _LocalCheckpointTabICLUnsupervised(**kwargs)
 
@@ -227,6 +250,7 @@ class TabICLConditionalDensitySampler:
         self.batch_size = batch_size
         self.cache_dir = cache_dir
         self.estimator_params = dict(estimator_params or {})
+        self.estimator_params.setdefault("kv_cache", True)
         self._model_factory = model_factory
         self.context_update = context_update
         self.numerical_point_estimate = numerical_point_estimate
@@ -366,6 +390,10 @@ class TabICLConditionalDensitySampler:
                 self.categorical_features,
                 y_idx,
             )
+        # Conditional estimators and their TabICL KV representations are valid
+        # only for this factual's selected context. Reuse them across greedy
+        # iterations, then discard them when the next context is installed.
+        self.model._conditional_estimator_cache = {}
 
         self.selected_context_ = X.copy()
         self.selected_labels_ = np.asarray(y).copy()
@@ -459,24 +487,34 @@ class TabICLConditionalDensitySampler:
         target_col: int,
         *,
         fixed_target: int,
-        fixed_confidence: float | None = None,
+        fixed_confidence: float | Sequence[float] | np.ndarray | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Predict ``p(X[target_col] | X[-target_col], target)`` with TabICL.
 
         This is the categorical counterpart of the numerical quantile call. It
         returns the complete learned category support and probabilities rather
         than drawing one category, allowing the counterfactual search to retain
-        full coverage while recording TabICL's conditional preference.
+        full coverage while recording TabICL's conditional preference. A
+        confidence sequence is evaluated as one prediction batch and returns a
+        probability matrix with one row per confidence value.
         """
         if not self._fitted or self.model is None:
             raise RuntimeError("Call set_context() before predicting categories.")
         if target_col not in self.categorical_features:
             raise ValueError(f"column {target_col} is not categorical")
 
+        confidence = (
+            None
+            if fixed_confidence is None
+            else np.asarray(fixed_confidence, dtype=np.float32)
+        )
+        is_batched = confidence is not None and confidence.ndim == 1
+        n_queries = len(confidence) if is_batched else 1
         X_aug = self._augmented_candidate_rows(
             X_query,
-            [target_col],
+            [target_col] * n_queries,
             fixed_target,
+            allow_duplicate_cols=n_queries > 1,
             fixed_confidence=fixed_confidence,
         )
         train_mask = ~np.isnan(self.model.X_[:, target_col])
@@ -500,9 +538,12 @@ class TabICLConditionalDensitySampler:
         )
         if not is_categorical:
             raise RuntimeError(f"column {target_col} was not routed as categorical")
-        probabilities = np.asarray(estimator.predict_proba(X_test_cond))[0]
+        probabilities = np.asarray(estimator.predict_proba(X_test_cond))
         categories = np.asarray(estimator.classes_, dtype=int)
-        return categories, probabilities.astype(np.float64, copy=False)
+        probabilities = probabilities.astype(np.float64, copy=False)
+        if is_batched:
+            return categories, probabilities
+        return categories, probabilities[0]
 
     def sample_candidate_grid(
         self,

@@ -167,11 +167,12 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     """Greedily select the best action across numerical and categorical types.
 
     At every step, all remaining scalar feature proposals and all legal atomic
-    category swaps compete in one discriminator batch. If any candidate is
-    valid or not, the proposal with the highest target-class probability wins,
-    provided it strictly improves on the incumbent. Once validity is reached,
-    search continues and commits only candidates that remain valid and strictly
-    improve LOF.
+    category swaps compete in one discriminator batch. Before a valid proposal
+    exists, the proposal with the highest target-class probability wins,
+    provided it strictly improves on the incumbent. As soon as one or more
+    proposals are valid, validity becomes a hard gate and the valid proposal
+    with the lowest LOF wins. Once validity is reached, search continues and
+    commits only candidates that remain valid and strictly improve LOF.
 
     TabICL ranks categorical alternatives within each group before the target
     classifier compares the resulting rows globally. Each action unit is used
@@ -213,10 +214,24 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     search_passes_used = 0
     flipped = False
 
+    def classifier_outputs(rows: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Return target probabilities and labels from one classifier call."""
+        probability_matrix = np.asarray(disc.predict_proba(np.atleast_2d(rows)))
+        classes = np.asarray(
+            getattr(disc, "classes_", np.arange(probability_matrix.shape[1]))
+        )
+        target_positions = np.flatnonzero(classes == y_target)
+        if len(target_positions) != 1:
+            raise ValueError(
+                f"target class {y_target} is absent from classifier classes"
+            )
+        predictions = classes[np.argmax(probability_matrix, axis=1)]
+        return probability_matrix[:, int(target_positions[0])], predictions
+
     def flip_state(row: np.ndarray) -> tuple[bool, float]:
-        batch = row.reshape(1, -1)
-        probability = float(disc.predict_proba(batch)[0, y_target])
-        prediction = int(disc.predict(batch)[0])
+        probabilities, predictions = classifier_outputs(row.reshape(1, -1))
+        probability = float(probabilities[0])
+        prediction = int(predictions[0])
         return prediction == y_target and probability >= tau, probability
 
     def counterfactual_costs(rows: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -235,10 +250,24 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         proximity = np.linalg.norm(matrix - factual, axis=1)
         return sparsity, proximity
 
+    def valid_lof_scores(
+        rows: np.ndarray,
+        valid_mask: np.ndarray,
+    ) -> np.ndarray | None:
+        """Score only valid candidates; invalid rows do not use plausibility."""
+        if plausibility_model is None or not np.any(valid_mask):
+            return None
+        scores = np.full(len(rows), np.inf, dtype=np.float64)
+        scores[valid_mask] = -np.asarray(
+            plausibility_model.score_samples(rows[valid_mask]),
+            dtype=np.float64,
+        )
+        return scores
+
     flipped, current_probability = flip_state(current)
     current_lof = (
         None
-        if plausibility_model is None
+        if plausibility_model is None or not flipped
         else float(-plausibility_model.score_samples(current.reshape(1, -1))[0])
     )
     best_row = current.copy()
@@ -475,14 +504,9 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
             if not trial_rows:
                 break
             trials = np.stack(trial_rows)
-            probabilities = np.asarray(disc.predict_proba(trials))[:, y_target]
-            predictions = np.asarray(disc.predict(trials))
+            probabilities, predictions = classifier_outputs(trials)
             valid = (predictions == y_target) & (probabilities >= tau)
-            lof_scores = (
-                None
-                if plausibility_model is None
-                else -np.asarray(plausibility_model.score_samples(trials))
-            )
+            lof_scores = valid_lof_scores(trials, valid)
 
             if flipped:
                 if (
@@ -514,6 +538,13 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                     )
                 )
                 best = int(eligible[ranked[0]])
+            elif valid.any():
+                eligible = np.flatnonzero(valid)
+                best = (
+                    int(eligible[np.argmax(probabilities[eligible])])
+                    if lof_scores is None
+                    else int(eligible[np.argmin(lof_scores[eligible])])
+                )
             else:
                 best = int(np.argmax(probabilities))
 
@@ -567,15 +598,18 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                             }
                         )
                 trials = np.stack(trial_rows)
-                probabilities = np.asarray(disc.predict_proba(trials))[:, y_target]
-                predictions = np.asarray(disc.predict(trials))
+                probabilities, predictions = classifier_outputs(trials)
                 valid = (predictions == y_target) & (probabilities >= tau)
-                lof_scores = (
-                    None
-                    if plausibility_model is None
-                    else -np.asarray(plausibility_model.score_samples(trials))
-                )
-                best = int(np.argmax(probabilities))
+                lof_scores = valid_lof_scores(trials, valid)
+                if valid.any():
+                    eligible = np.flatnonzero(valid)
+                    best = (
+                        int(eligible[np.argmax(probabilities[eligible])])
+                        if lof_scores is None
+                        else int(eligible[np.argmin(lof_scores[eligible])])
+                    )
+                else:
+                    best = int(np.argmax(probabilities))
                 selected_probability = float(probabilities[best])
             if not flipped and selected_probability <= current_probability + 1e-12:
                 break
@@ -698,10 +732,23 @@ def grouped_categorical_fallback(
     changed_columns: list[int] = []
     history: list[dict] = []
 
+    def classifier_outputs(rows: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        probability_matrix = np.asarray(disc.predict_proba(np.atleast_2d(rows)))
+        classes = np.asarray(
+            getattr(disc, "classes_", np.arange(probability_matrix.shape[1]))
+        )
+        target_positions = np.flatnonzero(classes == y_target)
+        if len(target_positions) != 1:
+            raise ValueError(
+                f"target class {y_target} is absent from classifier classes"
+            )
+        predictions = classes[np.argmax(probability_matrix, axis=1)]
+        return probability_matrix[:, int(target_positions[0])], predictions
+
     def flip_state(row: np.ndarray) -> tuple[bool, float]:
-        batch = row.reshape(1, -1)
-        probability = float(disc.predict_proba(batch)[0, y_target])
-        prediction = int(disc.predict(batch)[0])
+        probabilities, predictions = classifier_outputs(row.reshape(1, -1))
+        probability = float(probabilities[0])
+        prediction = int(predictions[0])
         return prediction == y_target and probability >= tau, probability
 
     flipped, current_probability = flip_state(x_cf)
@@ -732,14 +779,15 @@ def grouped_categorical_fallback(
             break
 
         trial_matrix = np.stack(trials)
-        target_probabilities = np.asarray(disc.predict_proba(trial_matrix))[:, y_target]
-        predictions = np.asarray(disc.predict(trial_matrix))
+        target_probabilities, predictions = classifier_outputs(trial_matrix)
         valid = (predictions == y_target) & (target_probabilities >= tau)
-        lof_scores = (
-            None
-            if plausibility_model is None
-            else -np.asarray(plausibility_model.score_samples(trial_matrix))
-        )
+        lof_scores = None
+        if plausibility_model is not None and valid.any():
+            lof_scores = np.full(len(trial_matrix), np.inf, dtype=np.float64)
+            lof_scores[valid] = -np.asarray(
+                plausibility_model.score_samples(trial_matrix[valid]),
+                dtype=np.float64,
+            )
 
         if valid.any():
             eligible = np.flatnonzero(valid)

@@ -346,8 +346,8 @@ def test_categorical_proposal_expands_for_coverage_when_top_rank_stalls() -> Non
     assert info["history"][0]["tabicl_conditional_probability"] == 0.1
 
 
-def test_probability_ascent_precedes_cross_type_lof_refinement() -> None:
-    """Validity search maximizes confidence before LOF refines the valid row."""
+def test_valid_mixed_candidates_use_lof_at_the_validity_boundary() -> None:
+    """Once proposals are valid, the lowest-LOF mixed action wins."""
     group = OneHotActionGroup("job", (1, 2))
     factual = np.array([0.0, 1.0, 0.0])
 
@@ -362,12 +362,44 @@ def test_probability_ascent_precedes_cross_type_lof_refinement() -> None:
         plausibility_model=_PreferCategoricalLOF(),
     )
 
-    # Both first-step trials flip. The numerical action wins on classifier
-    # confidence; only the following validity-preserving phase considers LOF.
-    np.testing.assert_array_equal(counterfactual, [1.0, 0.0, 1.0])
-    assert info["history"][0]["action_type"] == "numerical"
-    assert info["history"][1]["selection_phase"] == "plausibility_refinement"
+    # Both first-step trials flip. The categorical action has lower LOF even
+    # though the numerical action has greater target-class confidence.
+    np.testing.assert_array_equal(counterfactual, [0.0, 0.0, 1.0])
+    assert info["history"][0]["action_type"] == "categorical"
+    assert info["history"][0]["selection_phase"] == "validity_search"
     assert info["history"][0]["n_valid_candidates"] == 2
+    assert info["refinement_steps"] == 0
+
+
+def test_validity_search_scores_lof_only_for_valid_candidates() -> None:
+    """Invalid probability-ascent proposals must not incur LOF evaluation."""
+
+    class ScalarDisc:
+        def predict_proba(self, X):
+            p1 = 0.1 + 0.6 * X[:, 0]
+            return np.column_stack([1.0 - p1, p1])
+
+        def predict(self, X):
+            return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
+
+    class ValidOnlyLOF:
+        def score_samples(self, X):
+            assert np.all(X[:, 0] >= 0.8)
+            return -np.ones(len(X))
+
+    counterfactual, _, info = greedy_mixed_counterfactual(
+        _MixedGridSampler([[0.2, 0.8]]),
+        ScalarDisc(),
+        np.array([0.0]),
+        y_target=1,
+        numerical_columns=[0],
+        categorical_groups=[],
+        candidate_quantiles=(0.25, 0.75),
+        plausibility_model=ValidOnlyLOF(),
+    )
+
+    np.testing.assert_array_equal(counterfactual, [0.8])
+    assert info["flipped"] is True
 
 
 def test_global_mixed_search_refines_lof_after_reaching_validity() -> None:

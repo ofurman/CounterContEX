@@ -55,6 +55,7 @@ class _FakeTabICLUnsupervised:
         self.random_state = kwargs["random_state"]
         self.fit_calls = 0
         self.impute_calls = 0
+        self.conditional_fit_calls = 0
 
     def fit(self, X):
         self.fit_calls += 1
@@ -100,6 +101,7 @@ class _FakeTabICLUnsupervised:
 
     def _fit_conditional_estimator(self, col_idx, X_train, y_train):
         del X_train
+        self.conditional_fit_calls += 1
         return _FakeCategoricalEstimator(y_train), (
             col_idx in self.kwargs["categorical_features"]
         )
@@ -155,6 +157,7 @@ def test_knn_both_context_is_selected_and_y_is_appended():
     np.testing.assert_allclose(sampler.model.X_[:, :-1], X[expected_idx])
     np.testing.assert_array_equal(sampler.model.X_[:, -1], y[expected_idx])
     assert sampler.model.kwargs["categorical_features"] == [X.shape[1]]
+    assert sampler.model.kwargs["estimator_params"]["kv_cache"] is True
 
 
 def test_context_update_reuses_loaded_model_weights():
@@ -186,6 +189,31 @@ def test_explicit_categorical_feature_returns_complete_distribution():
     np.testing.assert_array_equal(categories, [0, 1, 2])
     np.testing.assert_allclose(probabilities, [0.35, 0.35, 0.30])
     assert sampler.model.kwargs["categorical_features"] == [0, X.shape[1]]
+
+
+def test_categorical_confidence_conditions_share_one_conditional_fit() -> None:
+    """Confidence anchors for one category share one fitted conditional."""
+    X, y = _context()
+    X[:, 0] = np.resize([0.0, 1.0, 2.0], len(X))
+    confidence = np.linspace(0.1, 0.9, len(X))
+    sampler = _sampler(categorical_features=[0]).set_context(
+        X,
+        y_context=y,
+        confidence_context=confidence,
+    )
+
+    before = sampler.model.conditional_fit_calls
+    categories, probabilities = sampler.categorical_distribution(
+        X[[0]],
+        0,
+        fixed_target=1,
+        fixed_confidence=[0.25, 0.75],
+    )
+
+    np.testing.assert_array_equal(categories, [0, 1, 2])
+    assert probabilities.shape == (2, 3)
+    np.testing.assert_allclose(probabilities[0], probabilities[1])
+    assert sampler.model.conditional_fit_calls == before + 1
 
 
 def test_refit_context_update_calls_upstream_fit_each_time():
