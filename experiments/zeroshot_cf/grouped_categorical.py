@@ -428,6 +428,7 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     diverse_counterfactuals: np.ndarray | None = None
     diverse_joint_log_densities: np.ndarray | None = None
     diverse_target_probabilities: np.ndarray | None = None
+    diversity_sparse_joint_log_density: float | None = None
     joint_scoring_runtime_s = 0.0
     diversity_selection_runtime_s = 0.0
 
@@ -739,36 +740,56 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                     scoring_rows = np.vstack(
                         (current.reshape(1, -1), trials[shortlist])
                     )
-                    joint_started = perf_counter()
-                    joint_batch = tabicl_joint_plausibility.score_rows(
-                        scoring_rows,
-                        y_target,
-                    )
-                    joint_scoring_runtime_s += perf_counter() - joint_started
-                    current_joint_log_density = float(
-                        joint_batch.joint_log_density[0]
-                    )
-                    initial_joint_log_density = current_joint_log_density
-                    tabicl_joint_scores = {
-                        "joint_log_density": np.full(
-                            len(trials), np.nan, dtype=np.float64
-                        )
-                    }
-                    tabicl_joint_scores["joint_log_density"][shortlist] = (
-                        joint_batch.joint_log_density[1:]
-                    )
-                    improving = (
-                        joint_batch.joint_log_density[1:]
-                        > current_joint_log_density + min_joint_log_gain
-                    )
                     primary_limit = (
                         len(shortlist)
                         if primary_shortlist_size is None
                         else min(primary_shortlist_size, len(shortlist))
                     )
-                    primary_improving = improving.copy()
-                    primary_improving[primary_limit:] = False
-                    eligible = shortlist[primary_improving]
+                    joint_started = perf_counter()
+                    if n_counterfactuals > 1 and primary_limit < len(shortlist):
+                        primary_scoring_rows = np.vstack(
+                            (
+                                current.reshape(1, -1),
+                                trials[shortlist[:primary_limit]],
+                            )
+                        )
+                        primary_joint_batch = tabicl_joint_plausibility.score_rows(
+                            primary_scoring_rows,
+                            y_target,
+                        )
+                        diversity_joint_batch = tabicl_joint_plausibility.score_rows(
+                            scoring_rows,
+                            y_target,
+                        )
+                    else:
+                        primary_joint_batch = tabicl_joint_plausibility.score_rows(
+                            scoring_rows,
+                            y_target,
+                        )
+                        diversity_joint_batch = primary_joint_batch
+                    joint_scoring_runtime_s += perf_counter() - joint_started
+                    current_joint_log_density = float(
+                        primary_joint_batch.joint_log_density[0]
+                    )
+                    initial_joint_log_density = current_joint_log_density
+                    diversity_sparse_joint_log_density = float(
+                        diversity_joint_batch.joint_log_density[0]
+                    )
+                    tabicl_joint_scores = {
+                        "joint_log_density": np.full(
+                            len(trials), np.nan, dtype=np.float64
+                        )
+                    }
+                    tabicl_joint_scores["joint_log_density"][
+                        shortlist[:primary_limit]
+                    ] = (
+                        primary_joint_batch.joint_log_density[1:]
+                    )
+                    improving = (
+                        primary_joint_batch.joint_log_density[1:]
+                        > current_joint_log_density + min_joint_log_gain
+                    )
+                    eligible = shortlist[:primary_limit][improving]
                     if len(eligible):
                         ranked = np.lexsort(
                             (
@@ -780,19 +801,22 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                         best = int(eligible[ranked[0]])
                     if n_counterfactuals > 1:
                         quality_preserving = (
-                            joint_batch.joint_log_density[1:]
-                            >= current_joint_log_density + min_joint_log_gain
-                        )
-                        pool_scoring_indices = np.concatenate(
-                            (
-                                np.asarray([0], dtype=int),
-                                np.flatnonzero(quality_preserving) + 1,
-                            )
+                            diversity_joint_batch.joint_log_density[1:]
+                            >= diversity_sparse_joint_log_density + min_joint_log_gain
                         )
                         best_scoring_index = (
                             0
                             if not len(eligible)
                             else int(np.flatnonzero(shortlist == best)[0]) + 1
+                        )
+                        raw_pool_indices = [
+                            0,
+                            best_scoring_index,
+                            *(np.flatnonzero(quality_preserving) + 1).tolist(),
+                        ]
+                        pool_scoring_indices = np.asarray(
+                            list(dict.fromkeys(raw_pool_indices)),
+                            dtype=int,
                         )
                         primary_pool_index = int(
                             np.flatnonzero(
@@ -800,7 +824,7 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                             )[0]
                         )
                         pool_rows = scoring_rows[pool_scoring_indices]
-                        pool_joint_scores = joint_batch.joint_log_density[
+                        pool_joint_scores = diversity_joint_batch.joint_log_density[
                             pool_scoring_indices
                         ]
                         pool_target_probabilities = np.concatenate(
@@ -1100,6 +1124,9 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
             "diverse_counterfactuals": diverse_counterfactuals,
             "diverse_joint_log_densities": diverse_joint_log_densities,
             "diverse_target_probabilities": diverse_target_probabilities,
+            "diversity_sparse_joint_log_density": (
+                diversity_sparse_joint_log_density
+            ),
             "joint_scoring_runtime_s": joint_scoring_runtime_s,
             "diversity_selection_runtime_s": diversity_selection_runtime_s,
             "extra_actions": (

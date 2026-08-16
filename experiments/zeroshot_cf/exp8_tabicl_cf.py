@@ -408,6 +408,7 @@ def generate_tabicl_counterfactuals(
     initial_tabicl_joint_log_density_per_point = np.full(len(X_test), np.nan)
     final_tabicl_joint_log_density_per_point = np.full(len(X_test), np.nan)
     tabicl_joint_log_density_gain_per_point = np.full(len(X_test), np.nan)
+    diversity_sparse_joint_log_density_per_point = np.full(len(X_test), np.nan)
     joint_scoring_batch_count_per_point = np.zeros(len(X_test), dtype=int)
     joint_rows_scored_per_point = np.zeros(len(X_test), dtype=int)
     extra_actions_per_point = np.zeros(len(X_test), dtype=int)
@@ -623,6 +624,13 @@ def generate_tabicl_counterfactuals(
         joint_score_gain = greedy_info.get("tabicl_joint_log_density_gain")
         if joint_score_gain is not None:
             tabicl_joint_log_density_gain_per_point[i] = float(joint_score_gain)
+        diversity_sparse_score = greedy_info.get(
+            "diversity_sparse_joint_log_density"
+        )
+        if diversity_sparse_score is not None:
+            diversity_sparse_joint_log_density_per_point[i] = float(
+                diversity_sparse_score
+            )
         joint_scoring_batch_count_per_point[i] = int(
             greedy_info.get("joint_scoring_batch_count", 0)
         )
@@ -748,6 +756,9 @@ def generate_tabicl_counterfactuals(
         ),
         "tabicl_joint_log_density_gain_per_point": (
             tabicl_joint_log_density_gain_per_point
+        ),
+        "diversity_sparse_joint_log_density_per_point": (
+            diversity_sparse_joint_log_density_per_point
         ),
         "joint_scoring_batch_count_per_point": (
             joint_scoring_batch_count_per_point

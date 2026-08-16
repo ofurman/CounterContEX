@@ -505,10 +505,15 @@ def test_diversity_pool_does_not_change_frozen_primary_shortlist() -> None:
             p1 = 0.1 + 0.6 * np.max(X, axis=1)
             return np.column_stack([1.0 - p1, p1])
 
-    class PreferLateCandidateScorer:
+    class BatchDependentScorer:
         def score_rows(self, rows, target_class):
             assert target_class == 1
-            scores = rows[:, 1] + 2.0 * rows[:, 2] + 3.0 * rows[:, 3]
+            weights = (
+                np.asarray([2.0, 1.0, 3.0])
+                if len(rows) == 3
+                else np.asarray([1.0, 2.0, 3.0])
+            )
+            scores = rows[:, 1:] @ weights
             return TabICLJointScoreBatch(scores)
 
     counterfactual, _, info = greedy_mixed_counterfactual(
@@ -520,9 +525,9 @@ def test_diversity_pool_does_not_change_frozen_primary_shortlist() -> None:
         categorical_groups=[],
         candidate_quantiles=(0.5,),
         cf_mode="data_plausible",
-        tabicl_joint_plausibility=PreferLateCandidateScorer(),
+        tabicl_joint_plausibility=BatchDependentScorer(),
         joint_shortlist_size=3,
-        primary_shortlist_size=1,
+        primary_shortlist_size=2,
         max_extra_actions=1,
         n_counterfactuals=4,
     )

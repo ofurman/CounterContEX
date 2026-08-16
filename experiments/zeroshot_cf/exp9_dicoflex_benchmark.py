@@ -331,6 +331,10 @@ def run_dataset(  # noqa: PLR0913
     joint_score_gains = np.asarray(
         info["tabicl_joint_log_density_gain_per_point"], dtype=float
     )
+    diversity_sparse_joint_scores = np.asarray(
+        info["diversity_sparse_joint_log_density_per_point"],
+        dtype=float,
+    )
     joint_batch_counts = np.asarray(
         info["joint_scoring_batch_count_per_point"], dtype=float
     )
@@ -447,6 +451,9 @@ def run_dataset(  # noqa: PLR0913
         "initial_tabicl_joint_log_density_mean": finite_mean(initial_joint_scores),
         "final_tabicl_joint_log_density_mean": finite_mean(final_joint_scores),
         "tabicl_joint_log_density_gain_mean": finite_mean(joint_score_gains),
+        "diversity_sparse_joint_log_density_mean": finite_mean(
+            diversity_sparse_joint_scores
+        ),
         "joint_scoring_batch_count_mean": float(joint_batch_counts.mean()),
         "joint_rows_scored_mean": float(joint_rows_scored.mean()),
         "extra_actions_mean": float(extra_actions.mean()),
@@ -501,6 +508,9 @@ def run_dataset(  # noqa: PLR0913
             ),
             "tabicl_joint_log_density_gain": float(
                 info["tabicl_joint_log_density_gain_per_point"][i]
+            ),
+            "diversity_sparse_joint_log_density": float(
+                info["diversity_sparse_joint_log_density_per_point"][i]
             ),
             "joint_scoring_batch_count": int(
                 info["joint_scoring_batch_count_per_point"][i]
@@ -557,7 +567,7 @@ def run_dataset(  # noqa: PLR0913
                 grouped_actionable,
             )
             baseline_joint = float(
-                info["initial_tabicl_joint_log_density_per_point"][i]
+                info["diversity_sparse_joint_log_density_per_point"][i]
             )
             for rank in range(count):
                 changed_units = [
@@ -584,6 +594,10 @@ def run_dataset(  # noqa: PLR0913
                         ),
                         "tabicl_joint_log_density": joint_score,
                         "joint_log_gain_over_sparse": joint_score - baseline_joint,
+                        "is_primary": rank == 0,
+                        "meets_full_batch_sparse_floor": (
+                            joint_score >= baseline_joint
+                        ),
                         "action_count": int(signatures[rank].sum()),
                         "changed_action_units": ";".join(changed_units),
                         "proximity_l2": float(
