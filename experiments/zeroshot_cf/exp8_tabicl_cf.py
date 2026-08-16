@@ -131,6 +131,7 @@ def generate_tabicl_counterfactuals(
     joint_shortlist_size: int = 16,
     max_extra_actions: int = 1,
     min_joint_log_gain: float = 0.0,
+    n_counterfactuals: int = 1,
     _legacy_lof_refinement: bool = False,
     _legacy_lof_max_refinement_steps: int = 2,
     _legacy_min_relative_lof_gain: float = 0.05,
@@ -173,6 +174,14 @@ def generate_tabicl_counterfactuals(
         raise ValueError("max_extra_actions must be non-negative")
     if min_joint_log_gain < 0:
         raise ValueError("min_joint_log_gain must be non-negative")
+    if n_counterfactuals < 1:
+        raise ValueError("n_counterfactuals must be at least 1")
+    if n_counterfactuals > 1 and cf_mode != "data_plausible":
+        raise ValueError("multiple counterfactuals require data_plausible mode")
+    if n_counterfactuals > joint_shortlist_size + 1:
+        raise ValueError(
+            "n_counterfactuals cannot exceed joint_shortlist_size + 1"
+        )
     if _legacy_lof_max_refinement_steps < 0:
         raise ValueError("legacy LOF refinement steps must be non-negative")
     if not 0.0 <= _legacy_min_relative_lof_gain < 1.0:
@@ -290,6 +299,7 @@ def generate_tabicl_counterfactuals(
         f"cf_mode={cf_mode}, joint_shortlist_size={joint_shortlist_size}, "
         f"max_extra_actions={max_extra_actions}, "
         f"min_joint_log_gain={min_joint_log_gain}, "
+        f"n_counterfactuals={n_counterfactuals}, "
         f"max_validity_steps={effective_max_validity_steps}, "
         f"allow_revisits={allow_revisits}, "
         f"split={bundle.split_variant}, test_selection={test_selection}, "
@@ -352,6 +362,25 @@ def generate_tabicl_counterfactuals(
 
     X_cf = X_test.copy()
     X_sparse = X_test.copy()
+    X_cf_set = np.full(
+        (len(X_test), n_counterfactuals, X_test.shape[1]),
+        np.nan,
+        dtype=np.float64,
+    )
+    cf_set_available = np.zeros(
+        (len(X_test), n_counterfactuals),
+        dtype=bool,
+    )
+    cf_set_joint_log_density = np.full(
+        (len(X_test), n_counterfactuals),
+        np.nan,
+        dtype=np.float64,
+    )
+    cf_set_target_probability = np.full(
+        (len(X_test), n_counterfactuals),
+        np.nan,
+        dtype=np.float64,
+    )
     changed_per_point: list[list[int]] = [[] for _ in range(len(X_test))]
     flipped_per_point = [False] * len(X_test)
     steps_per_point = [0] * len(X_test)
@@ -375,9 +404,15 @@ def generate_tabicl_counterfactuals(
     joint_rows_scored_per_point = np.zeros(len(X_test), dtype=int)
     extra_actions_per_point = np.zeros(len(X_test), dtype=int)
     refinement_stopping_reason_per_point = ["not_started"] * len(X_test)
+    point_runtime_s = np.zeros(len(X_test), dtype=np.float64)
+    joint_scoring_runtime_s_per_point = np.zeros(len(X_test), dtype=np.float64)
+    diversity_selection_runtime_s_per_point = np.zeros(
+        len(X_test), dtype=np.float64
+    )
 
     started = time.perf_counter()
     for i, (x, target) in enumerate(zip(X_test, y_target, strict=True)):
+        point_started = time.perf_counter()
         # Athena winner: both-class pool, per-factual 512-row kNN context.
         sampler_query = (
             x if categorical_codec is None else categorical_codec.encode_row(x)
@@ -511,6 +546,7 @@ def generate_tabicl_counterfactuals(
             joint_shortlist_size=joint_shortlist_size,
             max_extra_actions=max_extra_actions,
             min_joint_log_gain=min_joint_log_gain,
+            n_counterfactuals=n_counterfactuals,
             max_refinement_steps=_legacy_lof_max_refinement_steps,
             min_relative_lof_gain=_legacy_min_relative_lof_gain,
             refinement_lof_threshold=refinement_lof_threshold,
@@ -520,6 +556,30 @@ def generate_tabicl_counterfactuals(
             categorical_proposal_count=CATEGORICAL_PROPOSAL_COUNT,
         )
         X_cf[i] = x_cf
+        selected_set = np.asarray(
+            greedy_info["diverse_counterfactuals"],
+            dtype=np.float64,
+        )
+        if selected_set.ndim != 2 or selected_set.shape[1] != X_test.shape[1]:
+            raise RuntimeError(
+                "diverse counterfactuals have an incompatible shape: "
+                f"{selected_set.shape}"
+            )
+        if len(selected_set) > n_counterfactuals:
+            raise RuntimeError("diverse selector returned too many counterfactuals")
+        if not np.allclose(selected_set[0], x_cf):
+            raise RuntimeError("the first diverse CFE must equal the primary CFE")
+        cf_count = len(selected_set)
+        X_cf_set[i, :cf_count] = selected_set
+        cf_set_available[i, :cf_count] = True
+        cf_set_joint_log_density[i, :cf_count] = np.asarray(
+            greedy_info["diverse_joint_log_densities"],
+            dtype=np.float64,
+        )
+        cf_set_target_probability[i, :cf_count] = np.asarray(
+            greedy_info["diverse_target_probabilities"],
+            dtype=np.float64,
+        )
         initial_sparse_row = greedy_info.get("initial_sparse_row")
         if initial_sparse_row is not None:
             X_sparse[i] = np.asarray(initial_sparse_row, dtype=X_sparse.dtype)
@@ -564,6 +624,13 @@ def generate_tabicl_counterfactuals(
         refinement_stopping_reason_per_point[i] = str(
             greedy_info.get("refinement_stopping_reason", "unknown")
         )
+        joint_scoring_runtime_s_per_point[i] = float(
+            greedy_info.get("joint_scoring_runtime_s", 0.0)
+        )
+        diversity_selection_runtime_s_per_point[i] = float(
+            greedy_info.get("diversity_selection_runtime_s", 0.0)
+        )
+        point_runtime_s[i] = time.perf_counter() - point_started
         if i == 0:
             first_s = time.perf_counter() - started
             print(
@@ -617,6 +684,7 @@ def generate_tabicl_counterfactuals(
         "joint_shortlist_size": joint_shortlist_size,
         "max_extra_actions": max_extra_actions,
         "min_joint_log_gain": min_joint_log_gain,
+        "n_counterfactuals_requested": n_counterfactuals,
         "categorical_proposal_count": CATEGORICAL_PROPOSAL_COUNT,
         "categorical_confidence_batching": True,
         "conditional_estimator_cache": True,
@@ -631,6 +699,19 @@ def generate_tabicl_counterfactuals(
         "n_estimators": n_estimators,
         "runtime_s": runtime_s,
         "X_sparse": X_sparse,
+        "X_cf_set": X_cf_set,
+        "cf_set_available": cf_set_available,
+        "cf_set_joint_log_density": cf_set_joint_log_density,
+        "cf_set_target_probability": cf_set_target_probability,
+        "point_runtime_s": point_runtime_s,
+        "joint_scoring_runtime_s_per_point": (
+            joint_scoring_runtime_s_per_point
+        ),
+        "diversity_selection_runtime_s_per_point": (
+            diversity_selection_runtime_s_per_point
+        ),
+        "numerical_actionable_idx": tuple(numerical_actionable_idx),
+        "grouped_actionable_objects": tuple(grouped_actionable),
         "changed_per_point": changed_per_point,
         "flipped_per_point": flipped_per_point,
         "steps_per_point": steps_per_point,
@@ -900,6 +981,12 @@ def main() -> None:
         help="Minimum raw whole-row log-density gain over the sparse CFE.",
     )
     parser.add_argument(
+        "--n-counterfactuals",
+        type=int,
+        default=1,
+        help="Number of quality-constrained CFEs requested per factual.",
+    )
+    parser.add_argument(
         "--validation-fraction",
         type=float,
         default=0.0,
@@ -962,6 +1049,7 @@ def main() -> None:
             joint_shortlist_size=args.joint_shortlist_size,
             max_extra_actions=args.max_extra_actions,
             min_joint_log_gain=args.min_joint_log_gain,
+            n_counterfactuals=args.n_counterfactuals,
             validation_fraction=args.validation_fraction,
             test_selection=args.test_selection,
             drop_heloc_all_minus9=args.drop_heloc_all_minus9,

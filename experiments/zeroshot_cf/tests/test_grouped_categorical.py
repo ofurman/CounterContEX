@@ -426,6 +426,66 @@ def test_data_plausible_scores_one_bounded_action_diverse_batch() -> None:
     assert info["accepted_refinement_count"] == 1
 
 
+def test_data_plausible_reuses_one_joint_batch_for_multiple_counterfactuals() -> None:
+    class UniformSampler:
+        def sample_candidate_grid(
+            self,
+            _query,
+            columns,
+            *,
+            quantiles,
+            fixed_target,
+            confidences=None,
+        ):
+            del quantiles, fixed_target, confidences
+            return np.ones((len(columns), 1))
+
+    class AnyActionDisc:
+        def predict_proba(self, X):
+            p1 = 0.1 + 0.6 * np.max(X, axis=1)
+            return np.column_stack([1.0 - p1, p1])
+
+    class CountingScorer:
+        def __init__(self):
+            self.batch_count = 0
+            self.row_count = 0
+
+        def score_rows(self, rows, target_class):
+            assert target_class == 1
+            self.batch_count += 1
+            self.row_count += len(rows)
+            return TabICLJointScoreBatch(
+                np.count_nonzero(rows, axis=1).astype(float)
+            )
+
+    scorer = CountingScorer()
+    counterfactual, _, info = greedy_mixed_counterfactual(
+        UniformSampler(),
+        AnyActionDisc(),
+        np.zeros(8),
+        y_target=1,
+        numerical_columns=list(range(8)),
+        categorical_groups=[],
+        candidate_quantiles=(0.5,),
+        cf_mode="data_plausible",
+        tabicl_joint_plausibility=scorer,
+        joint_shortlist_size=7,
+        max_extra_actions=1,
+        n_counterfactuals=5,
+    )
+
+    diverse = np.asarray(info["diverse_counterfactuals"])
+    np.testing.assert_array_equal(diverse[0], counterfactual)
+    assert diverse.shape == (5, 8)
+    assert len({tuple(row) for row in diverse}) == 5
+    assert np.all(np.count_nonzero(diverse, axis=1) <= 2)
+    assert np.all(info["diverse_joint_log_densities"] >= 1.0)
+    assert scorer.batch_count == 1
+    assert scorer.row_count == 8
+    assert info["joint_scoring_batch_count"] == 1
+    assert info["n_counterfactuals_requested"] == 5
+
+
 def test_global_mixed_search_chooses_categorical_action_over_numerical() -> None:
     """A category swap goes first when it has the largest classifier effect."""
     group = OneHotActionGroup("job", (1, 2))

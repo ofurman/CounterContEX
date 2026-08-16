@@ -8,10 +8,11 @@ scheduled independently on Athena. Adult is intentionally excluded: its very
 wide categorical representation is not a good fit for the current iterative
 conditional-imputation search. HELOC is included as the established reference.
 
-The benchmark uses one fixed 64/16/20 train/validation/test split, selects up
-to 1,000 held-out factuals with a fixed stratified sample, and generates one
-counterfactual per factual. It reports the method-independent subset of the
-DiCoFlex metrics alongside the existing project diagnostics.
+The benchmark uses one fixed 64/16/20 train/validation/test split and selects
+up to 1,000 held-out factuals with a fixed stratified sample. It can return one
+counterfactual or a quality-constrained diverse set per factual. It reports the
+method-independent subset of the DiCoFlex metrics alongside project-specific
+plausibility, diversity, and runtime diagnostics.
 """
 
 from __future__ import annotations
@@ -23,6 +24,10 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from experiments.zeroshot_cf.diverse_counterfactuals import (
+    action_unit_signatures,
+    summarize_counterfactual_set,
+)
 from experiments.zeroshot_cf.exp4_greedy_cf import TAU
 from experiments.zeroshot_cf.exp8_tabicl_cf import (
     ATHENA_CONTEXT_SIZE,
@@ -51,6 +56,7 @@ DEFAULT_JOINT_SHORTLIST_SIZE = 16
 DEFAULT_MAX_EXTRA_ACTIONS = 1
 DEFAULT_MIN_JOINT_LOG_GAIN = 0.0
 DEFAULT_TABICL_JOINT_PERMUTATIONS = 1
+DEFAULT_N_COUNTERFACTUALS = 1
 DEFAULT_CANDIDATE_QUANTILES = tuple(i / 10 for i in range(1, 10))
 DEFAULT_CONFIDENCE_QUANTILES = (0.10, 0.25, 0.50, 0.75, 0.90)
 RESULTS_DIR = Path(__file__).parent / "results" / "athena" / "exp9_dicoflex"
@@ -92,6 +98,7 @@ def run_dataset(  # noqa: PLR0913
     joint_shortlist_size: int = DEFAULT_JOINT_SHORTLIST_SIZE,
     max_extra_actions: int = DEFAULT_MAX_EXTRA_ACTIONS,
     min_joint_log_gain: float = DEFAULT_MIN_JOINT_LOG_GAIN,
+    n_counterfactuals: int = DEFAULT_N_COUNTERFACTUALS,
     _legacy_lof_refinement: bool = False,
     validation_fraction: float = DEFAULT_VALIDATION_FRACTION,
     drop_heloc_all_minus9: bool = True,
@@ -123,6 +130,7 @@ def run_dataset(  # noqa: PLR0913
         joint_shortlist_size=joint_shortlist_size,
         max_extra_actions=max_extra_actions,
         min_joint_log_gain=min_joint_log_gain,
+        n_counterfactuals=n_counterfactuals,
         _legacy_lof_refinement=_legacy_lof_refinement,
         validation_fraction=validation_fraction,
         test_selection="stratified",
@@ -145,11 +153,34 @@ def run_dataset(  # noqa: PLR0913
     )
     print_metrics(common_metrics, prefix=f"{dataset_name}/DiCoFlex-common")
 
+    X_cf_set = np.asarray(info["X_cf_set"], dtype=np.float64)
+    cf_set_available = np.asarray(info["cf_set_available"], dtype=bool)
+    cf_set_counts = cf_set_available.sum(axis=1)
+    factual_indices, cf_ranks = np.nonzero(cf_set_available)
+    flat_cf_set = X_cf_set[factual_indices, cf_ranks]
+    flat_targets = np.asarray(info["y_target"], dtype=int)[factual_indices]
+    flat_set_predictions = np.asarray(
+        info["disc_model"].predict(flat_cf_set),
+        dtype=int,
+    )
+    flat_set_valid = flat_set_predictions == flat_targets
+    if not np.all(flat_set_valid):
+        raise RuntimeError("the diverse counterfactual set contains an invalid row")
+
+    posthoc_lof = LocalOutlierFactor(n_neighbors=20, novelty=True).fit(
+        bundle.X_train
+    )
+    flat_set_lof = -np.asarray(
+        posthoc_lof.score_samples(flat_cf_set),
+        dtype=float,
+    )
+    cf_set_predictions = np.full(cf_set_available.shape, -1, dtype=int)
+    cf_set_predictions[factual_indices, cf_ranks] = flat_set_predictions
+    cf_set_lof = np.full(cf_set_available.shape, np.nan, dtype=float)
+    cf_set_lof[factual_indices, cf_ranks] = flat_set_lof
+
     lof_per_point = info["lof_per_point"]
     if lof_per_point is None:
-        posthoc_lof = LocalOutlierFactor(n_neighbors=20, novelty=True).fit(
-            bundle.X_train
-        )
         lof_per_point = -np.asarray(posthoc_lof.score_samples(X_cf), dtype=float)
 
     y_cf_pred = np.asarray(info["disc_model"].predict(X_cf), dtype=int)
@@ -179,6 +210,69 @@ def run_dataset(  # noqa: PLR0913
     def finite_mean(values: np.ndarray) -> float:
         finite = values[np.isfinite(values)]
         return float(finite.mean()) if len(finite) else float("nan")
+
+    numerical_actionable = tuple(info["numerical_actionable_idx"])
+    grouped_actionable = tuple(info["grouped_actionable_objects"])
+    diversity_summaries: dict[int, list[Any]] = {}
+    diverse_metrics: dict[str, Any] = {}
+    for requested_k in (k for k in (5, 10) if k <= n_counterfactuals):
+        prefix_available = cf_set_available[:, :requested_k]
+        prefix_factual_indices, prefix_ranks = np.nonzero(prefix_available)
+        prefix_rows = X_cf_set[prefix_factual_indices, prefix_ranks]
+        prefix_factuals = X_test[prefix_factual_indices]
+        prefix_targets = np.asarray(info["y_target"], dtype=int)[
+            prefix_factual_indices
+        ]
+        prefix_common = compute_dicoflex_common_metrics(
+            info["disc_model"],
+            prefix_rows,
+            prefix_factuals,
+            bundle.X_train,
+            prefix_targets,
+            bundle.numerical_features_indices,
+            info["immutable_idx"],
+            sparsity_eps=0.05,
+        )
+        summaries = [
+            summarize_counterfactual_set(
+                X_cf_set[i, : min(requested_k, int(cf_set_counts[i]))],
+                X_test[i],
+                numerical_actionable,
+                grouped_actionable,
+            )
+            for i in range(len(X_test))
+        ]
+        diversity_summaries[requested_k] = summaries
+        returned_count = int(prefix_available.sum())
+        diverse_metrics.update(
+            {
+                f"set_coverage_at_{requested_k}": float(
+                    (cf_set_counts >= requested_k).mean()
+                ),
+                f"set_size_at_{requested_k}_mean": float(
+                    np.minimum(cf_set_counts, requested_k).mean()
+                ),
+                f"set_action_jaccard_at_{requested_k}_mean": float(
+                    np.mean([s.mean_action_set_jaccard for s in summaries])
+                ),
+                f"set_action_jaccard_at_{requested_k}_minimum_mean": float(
+                    np.mean([s.minimum_action_set_jaccard for s in summaries])
+                ),
+                f"set_action_value_distance_at_{requested_k}_mean": float(
+                    np.mean([s.mean_action_value_distance for s in summaries])
+                ),
+                f"set_distinct_action_sets_at_{requested_k}_mean": float(
+                    np.mean([s.distinct_action_sets for s in summaries])
+                ),
+                f"runtime_amortized_per_cf_at_{requested_k}_s": (
+                    float(info["runtime_s"]) / returned_count
+                ),
+                **{
+                    f"set_{requested_k}_{key}": value
+                    for key, value in prefix_common.items()
+                },
+            }
+        )
 
     initial_valid_sparsity = np.asarray(
         [history_value(record, "action_sparsity") for record in initial_valid_records],
@@ -257,7 +351,11 @@ def run_dataset(  # noqa: PLR0913
         "method": (
             "tabicl_v2_legacy_lof"
             if _legacy_lof_refinement
-            else f"tabicl_v2_{cf_mode}"
+            else (
+                "tabicl_v2_data_plausible_diverse"
+                if n_counterfactuals > 1
+                else f"tabicl_v2_{cf_mode}"
+            )
         ),
         "cf_mode": cf_mode,
         "split_variant": bundle.split_variant,
@@ -267,7 +365,10 @@ def run_dataset(  # noqa: PLR0913
         "n_validation": 0 if bundle.X_val is None else len(bundle.X_val),
         "n_test_pool": len(bundle.X_test),
         "n_test": len(X_test),
-        "cf_per_factual": 1,
+        "cf_per_factual": n_counterfactuals,
+        "cf_per_factual_requested": n_counterfactuals,
+        "cf_per_factual_returned_mean": float(cf_set_counts.mean()),
+        "cf_per_factual_returned_min": int(cf_set_counts.min()),
         "target_classifier_validation_accuracy": validation_accuracy,
         "target_classifier_test_accuracy": float((info["y_pred"] == y_test).mean()),
         "context_strategy": ATHENA_CONTEXT_STRATEGY,
@@ -289,11 +390,22 @@ def run_dataset(  # noqa: PLR0913
         "joint_shortlist_size": joint_shortlist_size,
         "max_extra_actions": max_extra_actions,
         "min_joint_log_gain": min_joint_log_gain,
+        "diversity_selection": (
+            "quality_constrained_farthest_first"
+            if n_counterfactuals > 1
+            else "none"
+        ),
         "search_schedule": (
             "legacy_probability_ascent_then_lof_refinement"
             if _legacy_lof_refinement
             else (
-                "probability_ascent_until_valid_then_one_shot_joint_reranking"
+                (
+                    "probability_ascent_until_valid_then_one_shot_joint_"
+                    "reranking_then_diverse_set_selection"
+                    if n_counterfactuals > 1
+                    else "probability_ascent_until_valid_then_one_shot_joint_"
+                    "reranking"
+                )
                 if cf_mode == "data_plausible"
                 else "probability_ascent_until_first_sparse_valid"
             )
@@ -304,6 +416,16 @@ def run_dataset(  # noqa: PLR0913
         "preprocessing_variant": info["preprocessing_variant"],
         "n_dropped_rows": info["n_dropped_rows"],
         "runtime_generation_s": round(float(info["runtime_s"]), 3),
+        "runtime_generation_per_factual_s": float(info["runtime_s"]) / len(X_test),
+        "runtime_generation_per_returned_cf_s": float(info["runtime_s"])
+        / int(cf_set_available.sum()),
+        "joint_scoring_runtime_s": float(
+            np.asarray(info["joint_scoring_runtime_s_per_point"]).sum()
+        ),
+        "diversity_selection_runtime_s": float(
+            np.asarray(info["diversity_selection_runtime_s_per_point"]).sum()
+        ),
+        "point_runtime_s_mean": float(np.asarray(info["point_runtime_s"]).mean()),
         **common_metrics,
         "sparsity_exact": float((X_test != X_cf).mean()),
         "true_actionability": common_metrics["actionability"],
@@ -339,6 +461,7 @@ def run_dataset(  # noqa: PLR0913
             (((X_test < 0.0) | (X_test > 1.0)).any(axis=1)).mean()
         ),
         "cf_oob_fraction": float((((X_cf < 0.0) | (X_cf > 1.0)).any(axis=1)).mean()),
+        **diverse_metrics,
     }
     row["runtime_total_s"] = round(time.perf_counter() - total_started, 3)
 
@@ -387,10 +510,88 @@ def run_dataset(  # noqa: PLR0913
             "initial_valid_proximity_l2": float(initial_valid_proximity[i]),
             "final_action_sparsity": float(final_action_sparsity[i]),
             "first_action_type": first_action_types[i],
+            "diverse_cf_count": int(cf_set_counts[i]),
+            "point_runtime_s": float(info["point_runtime_s"][i]),
+            "joint_scoring_runtime_s": float(
+                info["joint_scoring_runtime_s_per_point"][i]
+            ),
+            "diversity_selection_runtime_s": float(
+                info["diversity_selection_runtime_s_per_point"][i]
+            ),
+            **{
+                f"set_coverage_at_{k}": bool(cf_set_counts[i] >= k)
+                for k in diversity_summaries
+            },
+            **{
+                f"set_action_jaccard_at_{k}": (
+                    diversity_summaries[k][i].mean_action_set_jaccard
+                )
+                for k in diversity_summaries
+            },
+            **{
+                f"set_distinct_action_sets_at_{k}": (
+                    diversity_summaries[k][i].distinct_action_sets
+                )
+                for k in diversity_summaries
+            },
         }
         for i in range(len(X_test))
     ]
     _write_csv(prefix.with_name(f"{prefix.name}_points.csv"), point_rows)
+    if n_counterfactuals > 1:
+        action_unit_names = [
+            *(f"numerical:{column}" for column in numerical_actionable),
+            *(f"categorical:{group.name}" for group in grouped_actionable),
+        ]
+        diverse_point_rows: list[dict[str, Any]] = []
+        for i in range(len(X_test)):
+            count = int(cf_set_counts[i])
+            signatures = action_unit_signatures(
+                X_cf_set[i, :count],
+                X_test[i],
+                numerical_actionable,
+                grouped_actionable,
+            )
+            baseline_joint = float(
+                info["initial_tabicl_joint_log_density_per_point"][i]
+            )
+            for rank in range(count):
+                changed_units = [
+                    name
+                    for name, changed in zip(
+                        action_unit_names,
+                        signatures[rank],
+                        strict=True,
+                    )
+                    if changed
+                ]
+                joint_score = float(info["cf_set_joint_log_density"][i, rank])
+                diverse_point_rows.append(
+                    {
+                        "point": i,
+                        "rank": rank + 1,
+                        "target": int(info["y_target"][i]),
+                        "cf_prediction": int(cf_set_predictions[i, rank]),
+                        "valid": bool(
+                            cf_set_predictions[i, rank] == info["y_target"][i]
+                        ),
+                        "target_probability": float(
+                            info["cf_set_target_probability"][i, rank]
+                        ),
+                        "tabicl_joint_log_density": joint_score,
+                        "joint_log_gain_over_sparse": joint_score - baseline_joint,
+                        "action_count": int(signatures[rank].sum()),
+                        "changed_action_units": ";".join(changed_units),
+                        "proximity_l2": float(
+                            np.linalg.norm(X_cf_set[i, rank] - X_test[i])
+                        ),
+                        "lof_score": float(cf_set_lof[i, rank]),
+                    }
+                )
+        _write_csv(
+            prefix.with_name(f"{prefix.name}_diverse_counterfactuals.csv"),
+            diverse_point_rows,
+        )
     arrays_path = prefix.with_name(f"{prefix.name}_arrays.npz")
     np.savez_compressed(
         arrays_path,
@@ -401,6 +602,11 @@ def run_dataset(  # noqa: PLR0913
         y_pred=info["y_pred"],
         y_target=info["y_target"],
         y_cf_pred=y_cf_pred,
+        X_cf_set=X_cf_set,
+        cf_set_available=cf_set_available,
+        cf_set_joint_log_density=info["cf_set_joint_log_density"],
+        cf_set_target_probability=info["cf_set_target_probability"],
+        cf_set_predictions=cf_set_predictions,
     )
     print(f"Wrote {arrays_path}")
     return row
@@ -499,6 +705,15 @@ def main() -> None:
         help="Minimum raw joint-log-density gain over the sparse CFE.",
     )
     parser.add_argument(
+        "--n-counterfactuals",
+        type=int,
+        default=DEFAULT_N_COUNTERFACTUALS,
+        help=(
+            "Number of quality-constrained CFEs requested per factual. Values "
+            "above one require --cf-mode data-plausible."
+        ),
+    )
+    parser.add_argument(
         "--drop-heloc-all-minus9",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -525,6 +740,7 @@ def main() -> None:
         joint_shortlist_size=args.joint_shortlist_size,
         max_extra_actions=args.max_extra_actions,
         min_joint_log_gain=args.min_joint_log_gain,
+        n_counterfactuals=args.n_counterfactuals,
         validation_fraction=args.validation_fraction,
         drop_heloc_all_minus9=args.drop_heloc_all_minus9,
         tabicl_cache_dir=args.tabicl_cache_dir,
