@@ -85,6 +85,7 @@ def run_dataset(  # noqa: PLR0913
     candidate_quantiles: tuple[float, ...] = DEFAULT_CANDIDATE_QUANTILES,
     confidence_quantiles: tuple[float, ...] = DEFAULT_CONFIDENCE_QUANTILES,
     use_lof_refinement: bool = True,
+    use_tabicl_local_plausibility: bool = False,
     max_validity_steps: int = DEFAULT_MAX_VALIDITY_STEPS,
     allow_revisits: bool = True,
     max_refinement_steps: int = DEFAULT_MAX_REFINEMENT_STEPS,
@@ -114,6 +115,7 @@ def run_dataset(  # noqa: PLR0913
         candidate_quantiles=candidate_quantiles,
         confidence_quantiles=confidence_quantiles,
         use_lof_refinement=use_lof_refinement,
+        use_tabicl_local_plausibility=use_tabicl_local_plausibility,
         max_validity_steps=max_validity_steps,
         allow_revisits=allow_revisits,
         max_refinement_steps=max_refinement_steps,
@@ -180,6 +182,13 @@ def run_dataset(  # noqa: PLR0913
         [history_value(record, "lof") for record in initial_valid_records],
         dtype=float,
     )
+    initial_valid_tabicl_local_score = np.asarray(
+        [
+            history_value(record, "tabicl_local_log_score")
+            for record in initial_valid_records
+        ],
+        dtype=float,
+    )
     initial_valid_sparsity = np.asarray(
         [history_value(record, "action_sparsity") for record in initial_valid_records],
         dtype=float,
@@ -222,7 +231,11 @@ def run_dataset(  # noqa: PLR0913
 
     row: dict[str, Any] = {
         "dataset": dataset_name,
-        "method": "tabicl_v2_greedy_icl_validity_gate_lof",
+        "method": (
+            "tabicl_v2_greedy_icl_validity_gate_tabicl_local"
+            if use_tabicl_local_plausibility
+            else "tabicl_v2_greedy_icl_validity_gate_lof"
+        ),
         "split_variant": bundle.split_variant,
         "split_seed": 42,
         "test_selection": "stratified",
@@ -240,6 +253,8 @@ def run_dataset(  # noqa: PLR0913
         "candidate_quantiles": _levels_text(candidate_quantiles),
         "confidence_quantiles": _levels_text(confidence_quantiles),
         "use_lof_refinement": use_lof_refinement,
+        "use_tabicl_local_plausibility": use_tabicl_local_plausibility,
+        "plausibility_backend": info["plausibility_backend"],
         "max_validity_steps": max_validity_steps,
         "allow_revisits": allow_revisits,
         "categorical_proposal_count": info["categorical_proposal_count"],
@@ -253,7 +268,11 @@ def run_dataset(  # noqa: PLR0913
         "refinement_lof_quantile": refinement_lof_quantile,
         "refinement_lof_threshold": info["refinement_lof_threshold"],
         "refinement_lof_threshold_source": info["refinement_lof_threshold_source"],
-        "search_schedule": "probability_ascent_until_valid_then_lof_gate",
+        "search_schedule": (
+            "probability_ascent_until_valid_then_tabicl_local_gate"
+            if use_tabicl_local_plausibility
+            else "probability_ascent_until_valid_then_lof_gate"
+        ),
         "n_estimators": n_estimators,
         "temperature": temperature,
         "tau": tau,
@@ -272,6 +291,9 @@ def run_dataset(  # noqa: PLR0913
         "refinement_steps_mean": float(refinement_steps.mean()),
         "refined_fraction": float((refinement_steps > 0).mean()),
         "initial_valid_lof_mean": finite_mean(initial_valid_lof),
+        "initial_valid_tabicl_local_log_score_mean": finite_mean(
+            initial_valid_tabicl_local_score
+        ),
         "initial_valid_action_sparsity_mean": finite_mean(initial_valid_sparsity),
         "initial_valid_proximity_l2_mean": finite_mean(initial_valid_proximity),
         "final_action_sparsity_mean": finite_mean(final_action_sparsity),
@@ -306,6 +328,9 @@ def run_dataset(  # noqa: PLR0913
             "initial_valid_step": info["initial_valid_step_per_point"][i],
             "refinement_steps": int(info["refinement_steps_per_point"][i]),
             "initial_valid_lof": float(initial_valid_lof[i]),
+            "initial_valid_tabicl_local_log_score": float(
+                initial_valid_tabicl_local_score[i]
+            ),
             "initial_valid_action_sparsity": float(initial_valid_sparsity[i]),
             "initial_valid_proximity_l2": float(initial_valid_proximity[i]),
             "final_action_sparsity": float(final_action_sparsity[i]),
@@ -383,6 +408,16 @@ def main() -> None:
         help="Enable validity-preserving LOF refinement after the class flip.",
     )
     parser.add_argument(
+        "--tabicl-local-plausibility",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Use the already-generated TabICL conditional density/probability "
+            "to rank valid proposals instead of LOF. This disables LOF search "
+            "and post-valid refinement but retains post-hoc LOF evaluation."
+        ),
+    )
+    parser.add_argument(
         "--max-validity-steps",
         type=int,
         default=DEFAULT_MAX_VALIDITY_STEPS,
@@ -432,7 +467,10 @@ def main() -> None:
         tau=args.tau,
         candidate_quantiles=tuple(args.candidate_quantiles),
         confidence_quantiles=tuple(args.confidence_quantiles),
-        use_lof_refinement=args.use_lof_refinement,
+        use_lof_refinement=(
+            args.use_lof_refinement and not args.tabicl_local_plausibility
+        ),
+        use_tabicl_local_plausibility=args.tabicl_local_plausibility,
         max_validity_steps=args.max_validity_steps,
         allow_revisits=args.allow_revisits,
         max_refinement_steps=args.max_refinement_steps,

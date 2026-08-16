@@ -121,6 +121,7 @@ def generate_tabicl_counterfactuals(
     candidate_quantiles: tuple[float, ...] | None = None,
     confidence_quantiles: tuple[float, ...] | None = None,
     use_lof_refinement: bool = False,
+    use_tabicl_local_plausibility: bool = False,
     max_validity_steps: int | None = None,
     allow_revisits: bool = True,
     max_refinement_steps: int = 2,
@@ -150,6 +151,14 @@ def generate_tabicl_counterfactuals(
             raise ValueError("confidence_quantiles require candidate_quantiles")
     if use_lof_refinement and candidate_quantiles is None:
         raise ValueError("use_lof_refinement requires candidate_quantiles")
+    if use_tabicl_local_plausibility and candidate_quantiles is None:
+        raise ValueError(
+            "use_tabicl_local_plausibility requires candidate_quantiles"
+        )
+    if use_lof_refinement and use_tabicl_local_plausibility:
+        raise ValueError(
+            "LOF refinement and TabICL local plausibility are mutually exclusive"
+        )
     if max_validity_steps is not None and max_validity_steps < 1:
         raise ValueError("max_validity_steps must be at least 1")
     if max_refinement_steps < 0:
@@ -264,6 +273,7 @@ def generate_tabicl_counterfactuals(
         f"candidate_quantiles={candidate_quantiles}, "
         f"confidence_quantiles={confidence_quantiles}, "
         f"lof_refinement={use_lof_refinement}, "
+        f"tabicl_local_plausibility={use_tabicl_local_plausibility}, "
         f"max_validity_steps={effective_max_validity_steps}, "
         f"allow_revisits={allow_revisits}, "
         f"split={bundle.split_variant}, test_selection={test_selection}, "
@@ -423,6 +433,7 @@ def generate_tabicl_counterfactuals(
             candidate_confidences=point_confidence_grid,
             feature_domains=feature_domains,
             plausibility_model=plausibility_model,
+            use_tabicl_local_plausibility=use_tabicl_local_plausibility,
             max_validity_steps=effective_max_validity_steps,
             allow_revisits=allow_revisits,
             max_refinement_steps=max_refinement_steps,
@@ -484,6 +495,12 @@ def generate_tabicl_counterfactuals(
         "candidate_quantiles": candidate_quantiles,
         "confidence_quantiles": confidence_quantiles,
         "use_lof_refinement": use_lof_refinement,
+        "use_tabicl_local_plausibility": use_tabicl_local_plausibility,
+        "plausibility_backend": (
+            "tabicl_local"
+            if use_tabicl_local_plausibility
+            else ("lof" if use_lof_refinement else "none")
+        ),
         "max_validity_steps": effective_max_validity_steps,
         "allow_revisits": allow_revisits,
         "categorical_proposal_count": CATEGORICAL_PROPOSAL_COUNT,
@@ -552,6 +569,10 @@ def run_and_report(
         "candidate_quantiles": info["candidate_quantiles"],
         "confidence_quantiles": info["confidence_quantiles"],
         "use_lof_refinement": info["use_lof_refinement"],
+        "use_tabicl_local_plausibility": info[
+            "use_tabicl_local_plausibility"
+        ],
+        "plausibility_backend": info["plausibility_backend"],
         "max_validity_steps": info["max_validity_steps"],
         "allow_revisits": info["allow_revisits"],
         "categorical_proposal_count": info["categorical_proposal_count"],
@@ -686,6 +707,15 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--tabicl-local-plausibility",
+        action="store_true",
+        help=(
+            "Rank valid proposals by the conditional density/probability "
+            "already returned by TabICL. This replaces LOF selection and "
+            "does not perform post-valid refinement."
+        ),
+    )
+    parser.add_argument(
         "--max-validity-steps",
         type=int,
         default=None,
@@ -776,7 +806,10 @@ def main() -> None:
                 if args.confidence_quantiles is None
                 else tuple(args.confidence_quantiles)
             ),
-            use_lof_refinement=args.use_lof_refinement,
+            use_lof_refinement=(
+                args.use_lof_refinement and not args.tabicl_local_plausibility
+            ),
+            use_tabicl_local_plausibility=args.tabicl_local_plausibility,
             max_validity_steps=args.max_validity_steps,
             allow_revisits=args.allow_revisits,
             max_refinement_steps=args.max_refinement_steps,

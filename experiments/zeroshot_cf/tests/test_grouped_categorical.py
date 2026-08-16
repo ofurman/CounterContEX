@@ -10,6 +10,7 @@ from experiments.zeroshot_cf.grouped_categorical import (
     GroupedCategoricalCodec,
     greedy_mixed_counterfactual,
     grouped_categorical_fallback,
+    quantile_grid_log_density,
 )
 
 
@@ -213,6 +214,42 @@ class _ProximityTradeoffLOF:
         # Both scalar values improve plausibility by at least 5%, but the more
         # distant value has the lowest absolute LOF.
         return -(2.0 - X[:, 0])
+
+
+def test_quantile_grid_log_density_reuses_local_quantile_spacing() -> None:
+    values = np.array([[[0.0, 0.1, 1.0], [0.0, 0.5, 1.0]]])
+
+    scores = quantile_grid_log_density(values, (0.25, 0.5, 0.75))
+
+    assert scores.shape == values.shape
+    assert scores[0, 0, 0] > scores[0, 0, 1] > scores[0, 0, 2]
+    np.testing.assert_allclose(scores[0, 1], -np.log(2.0))
+
+
+def test_tabicl_local_density_selects_plausible_valid_quantile() -> None:
+    class ScalarDisc:
+        def predict_proba(self, X):
+            p1 = np.clip(0.1 + 0.7 * X[:, 0], 0.0, 0.99)
+            return np.column_stack([1.0 - p1, p1])
+
+    counterfactual, _, info = greedy_mixed_counterfactual(
+        _MixedGridSampler([[0.7, 0.8, 1.0]]),
+        ScalarDisc(),
+        np.array([0.0]),
+        y_target=1,
+        numerical_columns=[0],
+        categorical_groups=[],
+        candidate_quantiles=(0.25, 0.5, 0.75),
+        use_tabicl_local_plausibility=True,
+    )
+
+    # All three proposals are valid and target probability prefers 1.0. The
+    # more tightly spaced lower quantiles have greater TabICL local density.
+    np.testing.assert_allclose(counterfactual, [0.7])
+    assert info["flipped"] is True
+    assert info["steps"] == 1
+    assert info["refinement_steps"] == 0
+    assert info["history"][0]["tabicl_local_log_score"] > 0.0
 
 
 def test_global_mixed_search_chooses_categorical_action_over_numerical() -> None:

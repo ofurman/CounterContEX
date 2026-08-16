@@ -142,6 +142,43 @@ ConditionedCategoryDistribution = Callable[
 ]
 
 
+def quantile_grid_log_density(
+    values: np.ndarray,
+    quantiles: Sequence[float],
+    *,
+    min_slope: float = 1e-6,
+    max_slope: float = 1e6,
+) -> np.ndarray:
+    """Approximate TabICL log-density from an already evaluated quantile grid.
+
+    TabICL represents a numerical conditional through a monotone quantile
+    function ``Q(alpha)``. Its density satisfies
+    ``log p(Q(alpha)) = -log(dQ / d alpha)``. Central finite differences use
+    the returned counterfactual grid directly, so this score requires no
+    additional TabICL prediction. The last axis of ``values`` must correspond
+    to ``quantiles``; any leading feature/confidence dimensions are preserved.
+    """
+    grid = np.asarray(values, dtype=np.float64)
+    levels = np.asarray(quantiles, dtype=np.float64)
+    if grid.ndim == 0 or grid.shape[-1] != len(levels):
+        raise ValueError(
+            "values must have one trailing entry per quantile; "
+            f"got shape {grid.shape} and {len(levels)} levels"
+        )
+    if levels.ndim != 1 or len(levels) == 0:
+        raise ValueError("quantiles must be a non-empty 1D sequence")
+    if not np.all(np.isfinite(levels)) or np.any(np.diff(levels) <= 0):
+        raise ValueError("quantiles must be finite, strictly increasing values")
+    if min_slope <= 0 or max_slope < min_slope:
+        raise ValueError("density slope bounds are invalid")
+    if len(levels) == 1:
+        return np.zeros_like(grid, dtype=np.float64)
+
+    slopes = np.gradient(grid, levels, axis=-1, edge_order=1)
+    slopes = np.clip(slopes, min_slope, max_slope)
+    return -np.log(slopes)
+
+
 def greedy_mixed_counterfactual(  # noqa: PLR0913
     sampler,
     disc,
@@ -154,6 +191,7 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     candidate_confidences: Sequence[float] | None = None,
     feature_domains=None,
     plausibility_model=None,
+    use_tabicl_local_plausibility: bool = False,
     max_validity_steps: int | None = None,
     allow_revisits: bool = True,
     max_refinement_steps: int = 2,
@@ -170,9 +208,11 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     category swaps compete in one discriminator batch. Before a valid proposal
     exists, the proposal with the highest target-class probability wins,
     provided it strictly improves on the incumbent. As soon as one or more
-    proposals are valid, validity becomes a hard gate and the valid proposal
-    with the lowest LOF wins. Once validity is reached, search continues and
-    commits only candidates that remain valid and strictly improve LOF.
+    proposals are valid, validity becomes a hard gate. The valid proposal is
+    then selected either by LOF or by the local conditional score already
+    produced by TabICL. LOF supports post-valid refinement; the local TabICL
+    score deliberately stops at the validity boundary because it describes
+    only the proposed feature, not the joint plausibility of the completed row.
 
     TabICL ranks categorical alternatives within each group before the target
     classifier compares the resulting rows globally. Each action unit is used
@@ -189,6 +229,10 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         raise ValueError("min_relative_lof_gain must be in [0, 1)")
     if refinement_lof_threshold is not None and refinement_lof_threshold <= 0:
         raise ValueError("refinement_lof_threshold must be positive")
+    if use_tabicl_local_plausibility and plausibility_model is not None:
+        raise ValueError("TabICL local plausibility and LOF are mutually exclusive")
+    if use_tabicl_local_plausibility and candidate_quantiles is None:
+        raise ValueError("TabICL local plausibility requires candidate_quantiles")
     if categorical_proposal_count < 1:
         raise ValueError("categorical_proposal_count must be at least 1")
     numerical = [int(column) for column in numerical_columns]
@@ -198,6 +242,10 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         if candidate_quantiles is None
         else np.asarray(candidate_quantiles, dtype=np.float64)
     )
+    if use_tabicl_local_plausibility and len(quantiles) < 2:
+        raise ValueError(
+            "TabICL local plausibility requires at least two candidate quantiles"
+        )
     confidences = (
         None
         if candidate_confidences is None
@@ -263,6 +311,26 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
             dtype=np.float64,
         )
         return scores
+
+    def select_valid_candidate(
+        eligible: np.ndarray,
+        probabilities: np.ndarray,
+        lof_scores: np.ndarray | None,
+        tabicl_local_scores: np.ndarray,
+    ) -> int:
+        """Apply the configured plausibility rule within the validity gate."""
+        if use_tabicl_local_plausibility and np.any(
+            np.isfinite(tabicl_local_scores[eligible])
+        ):
+            eligible_scores = tabicl_local_scores[eligible]
+            best_score = np.max(eligible_scores)
+            tied = eligible[
+                np.isclose(eligible_scores, best_score, rtol=1e-9, atol=1e-12)
+            ]
+            return int(tied[np.argmax(probabilities[tied])])
+        if lof_scores is not None:
+            return int(eligible[np.argmin(lof_scores[eligible])])
+        return int(eligible[np.argmax(probabilities[eligible])])
 
     flipped, current_probability = flip_state(current)
     current_lof = (
@@ -376,6 +444,10 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                             "sample_candidate_grid returned an unexpected shape; "
                             f"expected {expected}, got {numerical_values.shape}"
                         )
+                    numerical_log_density = quantile_grid_log_density(
+                        numerical_values,
+                        quantiles,
+                    )
                     expanded_columns = np.repeat(
                         np.asarray(available_numerical, dtype=int),
                         n_confidences * len(quantiles),
@@ -407,6 +479,10 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                                 if expanded_confidences is None
                                 else float(expanded_confidences[position])
                             ),
+                            "tabicl_local_log_score": float(
+                                numerical_log_density.reshape(-1)[position]
+                            ),
+                            "tabicl_local_score_kind": "log_density",
                         }
                         for position, column in enumerate(expanded_columns)
                     ]
@@ -495,6 +571,10 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                             "from_category": previous_category,
                             "to_category": category,
                             "tabicl_conditional_probability": (conditional_probability),
+                            "tabicl_local_log_score": float(
+                                np.log(max(conditional_probability, 1e-12))
+                            ),
+                            "tabicl_local_score_kind": "log_probability",
                             "tabicl_confidence_anchor": confidence_anchor,
                             "tabicl_proposal_rank": proposal_rank,
                             "in_tabicl_support": category in category_scores,
@@ -507,6 +587,13 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
             probabilities, predictions = classifier_outputs(trials)
             valid = (predictions == y_target) & (probabilities >= tau)
             lof_scores = valid_lof_scores(trials, valid)
+            tabicl_local_scores = np.asarray(
+                [
+                    float(item.get("tabicl_local_log_score", -np.inf))
+                    for item in metadata
+                ],
+                dtype=np.float64,
+            )
 
             if flipped:
                 if (
@@ -540,10 +627,11 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                 best = int(eligible[ranked[0]])
             elif valid.any():
                 eligible = np.flatnonzero(valid)
-                best = (
-                    int(eligible[np.argmax(probabilities[eligible])])
-                    if lof_scores is None
-                    else int(eligible[np.argmin(lof_scores[eligible])])
+                best = select_valid_candidate(
+                    eligible,
+                    probabilities,
+                    lof_scores,
+                    tabicl_local_scores,
                 )
             else:
                 best = int(np.argmax(probabilities))
@@ -591,6 +679,10 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                                 "tabicl_conditional_probability": (
                                     conditional_probability
                                 ),
+                                "tabicl_local_log_score": float(
+                                    np.log(max(conditional_probability, 1e-12))
+                                ),
+                                "tabicl_local_score_kind": "log_probability",
                                 "tabicl_confidence_anchor": confidence_anchor,
                                 "tabicl_proposal_rank": None,
                                 "in_tabicl_support": category in fallback_scores,
@@ -601,12 +693,20 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                 probabilities, predictions = classifier_outputs(trials)
                 valid = (predictions == y_target) & (probabilities >= tau)
                 lof_scores = valid_lof_scores(trials, valid)
+                tabicl_local_scores = np.asarray(
+                    [
+                        float(item.get("tabicl_local_log_score", -np.inf))
+                        for item in metadata
+                    ],
+                    dtype=np.float64,
+                )
                 if valid.any():
                     eligible = np.flatnonzero(valid)
-                    best = (
-                        int(eligible[np.argmax(probabilities[eligible])])
-                        if lof_scores is None
-                        else int(eligible[np.argmin(lof_scores[eligible])])
+                    best = select_valid_candidate(
+                        eligible,
+                        probabilities,
+                        lof_scores,
+                        tabicl_local_scores,
                     )
                 else:
                     best = int(np.argmax(probabilities))
@@ -627,6 +727,11 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                     ),
                     "target_probability": selected_probability,
                     "lof": (None if lof_scores is None else float(lof_scores[best])),
+                    "tabicl_local_log_score": (
+                        None
+                        if not np.isfinite(tabicl_local_scores[best])
+                        else float(tabicl_local_scores[best])
+                    ),
                     "immediate_valid": bool(valid[best]),
                     "n_candidates": len(trials),
                     "n_valid_candidates": int(valid.sum()),
