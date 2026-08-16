@@ -56,6 +56,7 @@ class _FakeTabICLUnsupervised:
         self.fit_calls = 0
         self.impute_calls = 0
         self.conditional_fit_calls = 0
+        self.log_score_calls = 0
 
     def fit(self, X):
         self.fit_calls += 1
@@ -105,6 +106,12 @@ class _FakeTabICLUnsupervised:
         return _FakeCategoricalEstimator(y_train), (
             col_idx in self.kwargs["categorical_features"]
         )
+
+    def log_score_samples(self, X, n_permutations=1):
+        self.log_score_calls += 1
+        self.last_scored_rows = np.asarray(X).copy()
+        self.last_n_permutations = n_permutations
+        return np.asarray(X).sum(axis=1)
 
 
 def _factory(**kwargs):
@@ -320,6 +327,29 @@ def test_confidence_conditioning_uses_empirical_grid_in_one_call():
         sampler.selected_confidences_,
     )
     assert sampler.model.kwargs["categorical_features"] == [X.shape[1]]
+
+
+def test_joint_score_augments_complete_rows_with_target_and_confidence():
+    X, y = _context()
+    confidence = np.linspace(0.1, 0.9, len(X))
+    sampler = _sampler().set_context(
+        X,
+        y_context=y,
+        confidence_context=confidence,
+    )
+
+    scores = sampler.score_joint_rows(
+        X[:2],
+        fixed_target=1,
+        fixed_confidence=[0.7, 0.8],
+        n_permutations=2,
+    )
+
+    expected_rows = np.column_stack([X[:2], np.ones(2), [0.7, 0.8]])
+    np.testing.assert_allclose(sampler.model.last_scored_rows, expected_rows)
+    np.testing.assert_allclose(scores, expected_rows.sum(axis=1))
+    assert sampler.model.last_n_permutations == 2
+    assert sampler.model.log_score_calls == 1
 
 
 def test_empirical_confidence_grid_uses_target_class_context_distribution():

@@ -32,6 +32,12 @@ from experiments.zeroshot_cf.exp4_greedy_cf import (
     TAU,
     evaluate_and_report,
 )
+from experiments.zeroshot_cf.tabicl_joint_plausibility import (
+    ValidationCalibratedTabICLJointScorer,
+)
+from experiments.zeroshot_cf.tabicl_row_plausibility import (
+    ValidationCalibratedTabICLRowScorer,
+)
 
 RESULTS_DIR = Path(__file__).parent / "results"
 ATHENA_CONTEXT_SIZE = 512
@@ -122,6 +128,12 @@ def generate_tabicl_counterfactuals(
     confidence_quantiles: tuple[float, ...] | None = None,
     use_lof_refinement: bool = False,
     use_tabicl_local_plausibility: bool = False,
+    use_tabicl_joint_plausibility: bool = False,
+    use_tabicl_classifier_margin: bool = True,
+    tabicl_plausibility_quantile: float = 0.10,
+    tabicl_joint_validation_size: int = 128,
+    tabicl_joint_permutations: int = 1,
+    tabicl_row_context_size: int = ATHENA_CONTEXT_SIZE,
     max_validity_steps: int | None = None,
     allow_revisits: bool = True,
     max_refinement_steps: int = 2,
@@ -155,10 +167,24 @@ def generate_tabicl_counterfactuals(
         raise ValueError(
             "use_tabicl_local_plausibility requires candidate_quantiles"
         )
-    if use_lof_refinement and use_tabicl_local_plausibility:
-        raise ValueError(
-            "LOF refinement and TabICL local plausibility are mutually exclusive"
+    if sum(
+        (
+            use_lof_refinement,
+            use_tabicl_local_plausibility,
+            use_tabicl_joint_plausibility,
         )
+    ) > 1:
+        raise ValueError("LOF, TabICL local, and TabICL joint modes are exclusive")
+    if use_tabicl_classifier_margin and not use_tabicl_joint_plausibility:
+        use_tabicl_classifier_margin = False
+    if not 0.0 < tabicl_plausibility_quantile < 1.0:
+        raise ValueError("tabicl_plausibility_quantile must be in (0, 1)")
+    if tabicl_joint_validation_size < 1:
+        raise ValueError("tabicl_joint_validation_size must be positive")
+    if tabicl_joint_permutations < 1:
+        raise ValueError("tabicl_joint_permutations must be positive")
+    if tabicl_row_context_size < 2:
+        raise ValueError("tabicl_row_context_size must be at least 2")
     if max_validity_steps is not None and max_validity_steps < 1:
         raise ValueError("max_validity_steps must be at least 1")
     if max_refinement_steps < 0:
@@ -246,6 +272,40 @@ def generate_tabicl_counterfactuals(
         else None
     )
 
+    tabicl_classifier_margin_scorer = None
+    validation_context_labels = None
+    validation_target_probabilities = None
+    if use_tabicl_joint_plausibility:
+        if bundle.X_val is None or bundle.y_val is None:
+            raise ValueError(
+                "TabICL joint plausibility requires validation data; "
+                "set validation_fraction > 0"
+            )
+        validation_context_labels = (
+            np.asarray(disc_model.predict(bundle.X_val))
+            if context_labels == "disc"
+            else np.asarray(bundle.y_val)
+        )
+        validation_target_probabilities = np.asarray(
+            disc_model.predict_proba(bundle.X_val),
+            dtype=np.float64,
+        )
+        if use_tabicl_classifier_margin:
+            tabicl_classifier_margin_scorer = (
+                ValidationCalibratedTabICLRowScorer.fit(
+                    X_train,
+                    y_context,
+                    bundle.X_val,
+                    validation_context_labels,
+                    cache_dir=cache_dir,
+                    device=TABICL_DEVICE,
+                    n_estimators=n_estimators,
+                    context_size=tabicl_row_context_size,
+                    threshold_quantile=tabicl_plausibility_quantile,
+                    random_state=42,
+                )
+            )
+
     plausibility_model = None
     refinement_lof_threshold = None
     if use_lof_refinement:
@@ -274,6 +334,8 @@ def generate_tabicl_counterfactuals(
         f"confidence_quantiles={confidence_quantiles}, "
         f"lof_refinement={use_lof_refinement}, "
         f"tabicl_local_plausibility={use_tabicl_local_plausibility}, "
+        f"tabicl_joint_plausibility={use_tabicl_joint_plausibility}, "
+        f"tabicl_classifier_margin={use_tabicl_classifier_margin}, "
         f"max_validity_steps={effective_max_validity_steps}, "
         f"allow_revisits={allow_revisits}, "
         f"split={bundle.split_variant}, test_selection={test_selection}, "
@@ -303,9 +365,15 @@ def generate_tabicl_counterfactuals(
     )
     if categorical_codec is None:
         X_sampler_train = X_train
+        X_sampler_validation = bundle.X_val
         sampler = sampler_context
     else:
         X_sampler_train = categorical_codec.encode(X_train)
+        X_sampler_validation = (
+            None
+            if bundle.X_val is None
+            else categorical_codec.encode(bundle.X_val)
+        )
         sampler = CompactMixedSampler(sampler_context, categorical_codec)
     feature_domains = infer_feature_domains(X_train) if project_to_domain else None
 
@@ -323,6 +391,9 @@ def generate_tabicl_counterfactuals(
     validity_steps_per_point = [0] * len(X_test)
     initial_valid_step_per_point: list[int | None] = [None for _ in range(len(X_test))]
     refinement_steps_per_point = [0] * len(X_test)
+    final_tabicl_joint_score_per_point = np.full(len(X_test), np.nan)
+    tabicl_joint_threshold_reached_per_point = np.zeros(len(X_test), dtype=bool)
+    tabicl_joint_calibration_count_per_point = np.zeros(len(X_test), dtype=int)
 
     started = time.perf_counter()
     for i, (x, target) in enumerate(zip(X_test, y_target, strict=True)):
@@ -353,6 +424,57 @@ def generate_tabicl_counterfactuals(
             )
         target_class = int(target)
         point_confidence_grid = confidence_grid
+
+        tabicl_joint_plausibility = None
+        if use_tabicl_joint_plausibility:
+            if (
+                X_sampler_validation is None
+                or validation_context_labels is None
+                or validation_target_probabilities is None
+                or bundle.X_val is None
+            ):
+                raise RuntimeError("TabICL joint validation state is unavailable")
+            target_validation_indices = np.flatnonzero(
+                validation_context_labels == target_class
+            )
+            if not len(target_validation_indices):
+                raise ValueError(
+                    f"validation data contain no rows for target class {target_class}"
+                )
+            target_validation_matrix = X_sampler_validation[
+                target_validation_indices
+            ]
+            squared_distance = np.einsum(
+                "ij,ij->i",
+                target_validation_matrix - sampler_query.reshape(1, -1),
+                target_validation_matrix - sampler_query.reshape(1, -1),
+            )
+            calibration_size = min(
+                tabicl_joint_validation_size,
+                len(target_validation_indices),
+            )
+            nearest_positions = np.argpartition(
+                squared_distance,
+                calibration_size - 1,
+            )[:calibration_size]
+            calibration_indices = target_validation_indices[nearest_positions]
+            calibration_indices.sort()
+            tabicl_joint_plausibility = (
+                ValidationCalibratedTabICLJointScorer.calibrate(
+                    sampler,
+                    bundle.X_val[calibration_indices],
+                    validation_target_probabilities[
+                        calibration_indices,
+                        target_class,
+                    ],
+                    target_class=target_class,
+                    threshold_quantile=tabicl_plausibility_quantile,
+                    n_permutations=tabicl_joint_permutations,
+                    classifier_margin_scorer=(
+                        tabicl_classifier_margin_scorer
+                    ),
+                )
+            )
 
         category_distribution = None
         if categorical_codec is not None and grouped_actionable:
@@ -434,6 +556,7 @@ def generate_tabicl_counterfactuals(
             feature_domains=feature_domains,
             plausibility_model=plausibility_model,
             use_tabicl_local_plausibility=use_tabicl_local_plausibility,
+            tabicl_joint_plausibility=tabicl_joint_plausibility,
             max_validity_steps=effective_max_validity_steps,
             allow_revisits=allow_revisits,
             max_refinement_steps=max_refinement_steps,
@@ -456,6 +579,16 @@ def generate_tabicl_counterfactuals(
         validity_steps_per_point[i] = greedy_info["validity_steps"]
         initial_valid_step_per_point[i] = greedy_info.get("initial_valid_step")
         refinement_steps_per_point[i] = greedy_info.get("refinement_steps", 0)
+        final_joint_score = greedy_info.get("final_tabicl_joint_score")
+        if final_joint_score is not None:
+            final_tabicl_joint_score_per_point[i] = float(final_joint_score)
+        tabicl_joint_threshold_reached_per_point[i] = bool(
+            greedy_info.get("tabicl_joint_threshold_reached", False)
+        )
+        if tabicl_joint_plausibility is not None:
+            tabicl_joint_calibration_count_per_point[i] = (
+                tabicl_joint_plausibility.calibration_count
+            )
 
         if i == 0:
             first_s = time.perf_counter() - started
@@ -496,11 +629,25 @@ def generate_tabicl_counterfactuals(
         "confidence_quantiles": confidence_quantiles,
         "use_lof_refinement": use_lof_refinement,
         "use_tabicl_local_plausibility": use_tabicl_local_plausibility,
+        "use_tabicl_joint_plausibility": use_tabicl_joint_plausibility,
+        "use_tabicl_classifier_margin": use_tabicl_classifier_margin,
         "plausibility_backend": (
-            "tabicl_local"
-            if use_tabicl_local_plausibility
-            else ("lof" if use_lof_refinement else "none")
+            "tabicl_joint_with_classifier_margin"
+            if use_tabicl_joint_plausibility and use_tabicl_classifier_margin
+            else (
+                "tabicl_joint"
+                if use_tabicl_joint_plausibility
+                else (
+                    "tabicl_local"
+                    if use_tabicl_local_plausibility
+                    else ("lof" if use_lof_refinement else "none")
+                )
+            )
         ),
+        "tabicl_plausibility_quantile": tabicl_plausibility_quantile,
+        "tabicl_joint_validation_size": tabicl_joint_validation_size,
+        "tabicl_joint_permutations": tabicl_joint_permutations,
+        "tabicl_row_context_size": tabicl_row_context_size,
         "max_validity_steps": effective_max_validity_steps,
         "allow_revisits": allow_revisits,
         "categorical_proposal_count": CATEGORICAL_PROPOSAL_COUNT,
@@ -534,6 +681,13 @@ def generate_tabicl_counterfactuals(
         "validity_steps_per_point": validity_steps_per_point,
         "initial_valid_step_per_point": initial_valid_step_per_point,
         "refinement_steps_per_point": refinement_steps_per_point,
+        "final_tabicl_joint_score_per_point": final_tabicl_joint_score_per_point,
+        "tabicl_joint_threshold_reached_per_point": (
+            tabicl_joint_threshold_reached_per_point
+        ),
+        "tabicl_joint_calibration_count_per_point": (
+            tabicl_joint_calibration_count_per_point
+        ),
         "lof_per_point": lof_per_point,
         "target_probability_per_point": target_probability_per_point,
     }
@@ -571,6 +725,12 @@ def run_and_report(
         "use_lof_refinement": info["use_lof_refinement"],
         "use_tabicl_local_plausibility": info[
             "use_tabicl_local_plausibility"
+        ],
+        "use_tabicl_joint_plausibility": info[
+            "use_tabicl_joint_plausibility"
+        ],
+        "use_tabicl_classifier_margin": info[
+            "use_tabicl_classifier_margin"
         ],
         "plausibility_backend": info["plausibility_backend"],
         "max_validity_steps": info["max_validity_steps"],
@@ -716,6 +876,34 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--tabicl-joint-plausibility",
+        action="store_true",
+        help=(
+            "Use TabICL's complete-row chain-rule density with a validation "
+            "threshold and validity-preserving refinement."
+        ),
+    )
+    parser.add_argument(
+        "--no-tabicl-classifier-margin",
+        action="store_true",
+        help="Disable the additional validation-calibrated TabICL class margin.",
+    )
+    parser.add_argument(
+        "--tabicl-plausibility-quantile",
+        type=float,
+        default=0.10,
+    )
+    parser.add_argument(
+        "--tabicl-joint-validation-size",
+        type=int,
+        default=128,
+    )
+    parser.add_argument(
+        "--tabicl-joint-permutations",
+        type=int,
+        default=1,
+    )
+    parser.add_argument(
         "--max-validity-steps",
         type=int,
         default=None,
@@ -807,9 +995,18 @@ def main() -> None:
                 else tuple(args.confidence_quantiles)
             ),
             use_lof_refinement=(
-                args.use_lof_refinement and not args.tabicl_local_plausibility
+                args.use_lof_refinement
+                and not args.tabicl_local_plausibility
+                and not args.tabicl_joint_plausibility
             ),
             use_tabicl_local_plausibility=args.tabicl_local_plausibility,
+            use_tabicl_joint_plausibility=args.tabicl_joint_plausibility,
+            use_tabicl_classifier_margin=(
+                not args.no_tabicl_classifier_margin
+            ),
+            tabicl_plausibility_quantile=args.tabicl_plausibility_quantile,
+            tabicl_joint_validation_size=args.tabicl_joint_validation_size,
+            tabicl_joint_permutations=args.tabicl_joint_permutations,
             max_validity_steps=args.max_validity_steps,
             allow_revisits=args.allow_revisits,
             max_refinement_steps=args.max_refinement_steps,

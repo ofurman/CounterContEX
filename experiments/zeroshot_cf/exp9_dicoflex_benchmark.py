@@ -50,6 +50,9 @@ DEFAULT_MAX_VALIDITY_STEPS = 100
 DEFAULT_MAX_REFINEMENT_STEPS = 2
 DEFAULT_MIN_RELATIVE_LOF_GAIN = 0.05
 DEFAULT_REFINEMENT_LOF_QUANTILE = 0.90
+DEFAULT_TABICL_PLAUSIBILITY_QUANTILE = 0.10
+DEFAULT_TABICL_JOINT_VALIDATION_SIZE = 128
+DEFAULT_TABICL_JOINT_PERMUTATIONS = 1
 DEFAULT_CANDIDATE_QUANTILES = tuple(i / 20 for i in range(1, 20))
 DEFAULT_CONFIDENCE_QUANTILES = (0.10, 0.25, 0.50, 0.75, 0.90)
 RESULTS_DIR = Path(__file__).parent / "results" / "athena" / "exp9_dicoflex"
@@ -86,6 +89,11 @@ def run_dataset(  # noqa: PLR0913
     confidence_quantiles: tuple[float, ...] = DEFAULT_CONFIDENCE_QUANTILES,
     use_lof_refinement: bool = True,
     use_tabicl_local_plausibility: bool = False,
+    use_tabicl_joint_plausibility: bool = False,
+    use_tabicl_classifier_margin: bool = True,
+    tabicl_plausibility_quantile: float = DEFAULT_TABICL_PLAUSIBILITY_QUANTILE,
+    tabicl_joint_validation_size: int = DEFAULT_TABICL_JOINT_VALIDATION_SIZE,
+    tabicl_joint_permutations: int = DEFAULT_TABICL_JOINT_PERMUTATIONS,
     max_validity_steps: int = DEFAULT_MAX_VALIDITY_STEPS,
     allow_revisits: bool = True,
     max_refinement_steps: int = DEFAULT_MAX_REFINEMENT_STEPS,
@@ -116,6 +124,11 @@ def run_dataset(  # noqa: PLR0913
         confidence_quantiles=confidence_quantiles,
         use_lof_refinement=use_lof_refinement,
         use_tabicl_local_plausibility=use_tabicl_local_plausibility,
+        use_tabicl_joint_plausibility=use_tabicl_joint_plausibility,
+        use_tabicl_classifier_margin=use_tabicl_classifier_margin,
+        tabicl_plausibility_quantile=tabicl_plausibility_quantile,
+        tabicl_joint_validation_size=tabicl_joint_validation_size,
+        tabicl_joint_permutations=tabicl_joint_permutations,
         max_validity_steps=max_validity_steps,
         allow_revisits=allow_revisits,
         max_refinement_steps=max_refinement_steps,
@@ -189,6 +202,20 @@ def run_dataset(  # noqa: PLR0913
         ],
         dtype=float,
     )
+    initial_valid_tabicl_joint_score = np.asarray(
+        [
+            history_value(record, "tabicl_joint_score")
+            for record in initial_valid_records
+        ],
+        dtype=float,
+    )
+    initial_valid_tabicl_joint_percentile = np.asarray(
+        [
+            history_value(record, "tabicl_joint_percentile")
+            for record in initial_valid_records
+        ],
+        dtype=float,
+    )
     initial_valid_sparsity = np.asarray(
         [history_value(record, "action_sparsity") for record in initial_valid_records],
         dtype=float,
@@ -232,9 +259,18 @@ def run_dataset(  # noqa: PLR0913
     row: dict[str, Any] = {
         "dataset": dataset_name,
         "method": (
-            "tabicl_v2_greedy_icl_validity_gate_tabicl_local"
-            if use_tabicl_local_plausibility
-            else "tabicl_v2_greedy_icl_validity_gate_lof"
+            "tabicl_v2_greedy_icl_validity_gate_tabicl_joint_margin"
+            if use_tabicl_joint_plausibility
+            and info["use_tabicl_classifier_margin"]
+            else (
+                "tabicl_v2_greedy_icl_validity_gate_tabicl_joint"
+                if use_tabicl_joint_plausibility
+                else (
+                    "tabicl_v2_greedy_icl_validity_gate_tabicl_local"
+                    if use_tabicl_local_plausibility
+                    else "tabicl_v2_greedy_icl_validity_gate_lof"
+                )
+            )
         ),
         "split_variant": bundle.split_variant,
         "split_seed": 42,
@@ -254,7 +290,12 @@ def run_dataset(  # noqa: PLR0913
         "confidence_quantiles": _levels_text(confidence_quantiles),
         "use_lof_refinement": use_lof_refinement,
         "use_tabicl_local_plausibility": use_tabicl_local_plausibility,
+        "use_tabicl_joint_plausibility": use_tabicl_joint_plausibility,
+        "use_tabicl_classifier_margin": info["use_tabicl_classifier_margin"],
         "plausibility_backend": info["plausibility_backend"],
+        "tabicl_plausibility_quantile": tabicl_plausibility_quantile,
+        "tabicl_joint_validation_size": tabicl_joint_validation_size,
+        "tabicl_joint_permutations": tabicl_joint_permutations,
         "max_validity_steps": max_validity_steps,
         "allow_revisits": allow_revisits,
         "categorical_proposal_count": info["categorical_proposal_count"],
@@ -269,9 +310,13 @@ def run_dataset(  # noqa: PLR0913
         "refinement_lof_threshold": info["refinement_lof_threshold"],
         "refinement_lof_threshold_source": info["refinement_lof_threshold_source"],
         "search_schedule": (
-            "probability_ascent_until_valid_then_tabicl_local_gate"
-            if use_tabicl_local_plausibility
-            else "probability_ascent_until_valid_then_lof_gate"
+            "probability_ascent_until_valid_then_tabicl_joint_gate"
+            if use_tabicl_joint_plausibility
+            else (
+                "probability_ascent_until_valid_then_tabicl_local_gate"
+                if use_tabicl_local_plausibility
+                else "probability_ascent_until_valid_then_lof_gate"
+            )
         ),
         "n_estimators": n_estimators,
         "temperature": temperature,
@@ -287,12 +332,28 @@ def run_dataset(  # noqa: PLR0913
         "l0_count_mean": l0_count_mean,
         "steps_mean": steps_mean,
         "validity_steps_mean": validity_steps_mean,
-        "post_valid_refinement": use_lof_refinement,
+        "post_valid_refinement": (
+            use_lof_refinement or use_tabicl_joint_plausibility
+        ),
         "refinement_steps_mean": float(refinement_steps.mean()),
         "refined_fraction": float((refinement_steps > 0).mean()),
         "initial_valid_lof_mean": finite_mean(initial_valid_lof),
         "initial_valid_tabicl_local_log_score_mean": finite_mean(
             initial_valid_tabicl_local_score
+        ),
+        "initial_valid_tabicl_joint_score_mean": finite_mean(
+            initial_valid_tabicl_joint_score
+        ),
+        "initial_valid_tabicl_joint_percentile_mean": finite_mean(
+            initial_valid_tabicl_joint_percentile
+        ),
+        "final_tabicl_joint_score_mean": finite_mean(
+            np.asarray(info["final_tabicl_joint_score_per_point"], dtype=float)
+        ),
+        "tabicl_joint_threshold_reached_fraction": (
+            float(np.mean(info["tabicl_joint_threshold_reached_per_point"]))
+            if use_tabicl_joint_plausibility
+            else float("nan")
         ),
         "initial_valid_action_sparsity_mean": finite_mean(initial_valid_sparsity),
         "initial_valid_proximity_l2_mean": finite_mean(initial_valid_proximity),
@@ -330,6 +391,21 @@ def run_dataset(  # noqa: PLR0913
             "initial_valid_lof": float(initial_valid_lof[i]),
             "initial_valid_tabicl_local_log_score": float(
                 initial_valid_tabicl_local_score[i]
+            ),
+            "initial_valid_tabicl_joint_score": float(
+                initial_valid_tabicl_joint_score[i]
+            ),
+            "initial_valid_tabicl_joint_percentile": float(
+                initial_valid_tabicl_joint_percentile[i]
+            ),
+            "final_tabicl_joint_score": float(
+                info["final_tabicl_joint_score_per_point"][i]
+            ),
+            "tabicl_joint_threshold_reached": bool(
+                info["tabicl_joint_threshold_reached_per_point"][i]
+            ),
+            "tabicl_joint_calibration_count": int(
+                info["tabicl_joint_calibration_count_per_point"][i]
             ),
             "initial_valid_action_sparsity": float(initial_valid_sparsity[i]),
             "initial_valid_proximity_l2": float(initial_valid_proximity[i]),
@@ -418,6 +494,42 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--tabicl-joint-plausibility",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Rank complete valid rows by TabICL's validation-calibrated "
+            "chain-rule joint density and refine until the threshold is met."
+        ),
+    )
+    parser.add_argument(
+        "--tabicl-classifier-margin",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "When joint plausibility is enabled, also require the "
+            "validation-calibrated TabICL target-class margin."
+        ),
+    )
+    parser.add_argument(
+        "--tabicl-plausibility-quantile",
+        type=float,
+        default=DEFAULT_TABICL_PLAUSIBILITY_QUANTILE,
+        help="Lower validation percentile accepted as plausible (default: 0.10).",
+    )
+    parser.add_argument(
+        "--tabicl-joint-validation-size",
+        type=int,
+        default=DEFAULT_TABICL_JOINT_VALIDATION_SIZE,
+        help="Nearest target-class validation rows used per factual.",
+    )
+    parser.add_argument(
+        "--tabicl-joint-permutations",
+        type=int,
+        default=DEFAULT_TABICL_JOINT_PERMUTATIONS,
+        help="Feature-order permutations in TabICL joint-density scoring.",
+    )
+    parser.add_argument(
         "--max-validity-steps",
         type=int,
         default=DEFAULT_MAX_VALIDITY_STEPS,
@@ -468,9 +580,16 @@ def main() -> None:
         candidate_quantiles=tuple(args.candidate_quantiles),
         confidence_quantiles=tuple(args.confidence_quantiles),
         use_lof_refinement=(
-            args.use_lof_refinement and not args.tabicl_local_plausibility
+            args.use_lof_refinement
+            and not args.tabicl_local_plausibility
+            and not args.tabicl_joint_plausibility
         ),
         use_tabicl_local_plausibility=args.tabicl_local_plausibility,
+        use_tabicl_joint_plausibility=args.tabicl_joint_plausibility,
+        use_tabicl_classifier_margin=args.tabicl_classifier_margin,
+        tabicl_plausibility_quantile=args.tabicl_plausibility_quantile,
+        tabicl_joint_validation_size=args.tabicl_joint_validation_size,
+        tabicl_joint_permutations=args.tabicl_joint_permutations,
         max_validity_steps=args.max_validity_steps,
         allow_revisits=args.allow_revisits,
         max_refinement_steps=args.max_refinement_steps,

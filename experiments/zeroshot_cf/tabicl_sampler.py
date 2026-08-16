@@ -25,6 +25,7 @@ import torch
 from experiments.zeroshot_cf.tabicl_checkpoints import require_checkpoints
 from tabicl import TabICLClassifier
 from tabicl._unsupervised.unsupervised import TabICLUnsupervised
+from tabicl._sklearn.preprocessing import Shuffler
 
 ModelFactory = Callable[..., Any]
 
@@ -206,6 +207,30 @@ def _local_tabicl_model_factory(
                     y_train,
                 )
             return cache[key]
+
+        def log_score_samples(
+            self,
+            X: np.ndarray,
+            n_permutations: int = 1,
+        ) -> np.ndarray:
+            """Return TabICL's chain-rule joint log-density without exponentiating."""
+            rows = np.asarray(X, dtype=np.float32)
+            if rows.ndim != 2 or rows.shape[1] != self.n_features_in_:
+                raise ValueError(
+                    "rows must be a 2D matrix with the fitted feature count"
+                )
+            if n_permutations < 1:
+                raise ValueError("n_permutations must be positive")
+            rng = np.random.default_rng(self.random_state)
+            permutations = Shuffler(
+                self.n_features_in_,
+                random_state=self.random_state,
+            ).shuffle(n_permutations)
+            log_densities = [
+                self._compute_log_density(rows, permutation, rng)
+                for permutation in permutations
+            ]
+            return np.mean(log_densities, axis=0)
 
     return _LocalCheckpointTabICLUnsupervised(**kwargs)
 
@@ -436,14 +461,16 @@ class TabICLConditionalDensitySampler:
         if self._uses_confidence:
             if fixed_confidence is None:
                 raise ValueError(
-                    "fixed_confidence is required when confidence conditioning is enabled"
+                    "fixed_confidence is required when confidence conditioning "
+                    "is enabled"
                 )
             confidence = np.asarray(fixed_confidence, dtype=np.float32)
             if confidence.ndim == 0:
                 confidence = np.full(len(rows), float(confidence), dtype=np.float32)
             if confidence.shape != (len(rows),):
                 raise ValueError(
-                    "fixed_confidence must be scalar or contain one value per candidate row"
+                    "fixed_confidence must be scalar or contain one value per "
+                    "candidate row"
                 )
             augmented.append(confidence.reshape(-1, 1))
         elif fixed_confidence is not None:
@@ -451,6 +478,56 @@ class TabICLConditionalDensitySampler:
                 "fixed_confidence requires confidence_context in set_context()"
             )
         return np.concatenate(augmented, axis=1)
+
+    def score_joint_rows(
+        self,
+        X_rows: np.ndarray,
+        *,
+        fixed_target: int,
+        fixed_confidence: float | Sequence[float] | np.ndarray | None = None,
+        n_permutations: int = 1,
+    ) -> np.ndarray:
+        """Score complete rows with TabICL's augmented joint log-density.
+
+        The fitted context contains ``[X, Y]`` and, when enabled, the target
+        classifier confidence. Candidate rows are augmented with the requested
+        target class and their actual target-class confidence before TabICL's
+        built-in chain-rule density is evaluated.
+        """
+        if not self._fitted or self._n_original_features is None or self.model is None:
+            raise RuntimeError("Call set_context() before scoring rows.")
+        rows = np.asarray(X_rows, dtype=np.float32)
+        if rows.ndim == 1:
+            rows = rows.reshape(1, -1)
+        if rows.ndim != 2 or rows.shape[1] != self._n_original_features:
+            raise ValueError(
+                "row scoring expects a 2D matrix with shape "
+                f"(n, {self._n_original_features}), got {rows.shape}"
+            )
+        target = np.full((len(rows), 1), float(fixed_target), dtype=np.float32)
+        augmented = [rows, target]
+        if self._uses_confidence:
+            if fixed_confidence is None:
+                raise ValueError(
+                    "fixed_confidence is required when confidence conditioning "
+                    "is enabled"
+                )
+            confidence = np.asarray(fixed_confidence, dtype=np.float32)
+            if confidence.ndim == 0:
+                confidence = np.full(len(rows), float(confidence), dtype=np.float32)
+            if confidence.shape != (len(rows),):
+                raise ValueError(
+                    "fixed_confidence must be scalar or contain one value per row"
+                )
+            augmented.append(confidence.reshape(-1, 1))
+        complete_rows = np.concatenate(augmented, axis=1)
+        return np.asarray(
+            self.model.log_score_samples(
+                complete_rows,
+                n_permutations=n_permutations,
+            ),
+            dtype=np.float64,
+        )
 
     def sample_candidates(
         self,
@@ -711,7 +788,8 @@ class TabICLConditionalDensitySampler:
         if self._uses_confidence:
             if fixed_confidence is None:
                 raise ValueError(
-                    "fixed_confidence is required when confidence conditioning is enabled"
+                    "fixed_confidence is required when confidence conditioning "
+                    "is enabled"
                 )
             confidence = np.full(
                 (len(X), 1),
