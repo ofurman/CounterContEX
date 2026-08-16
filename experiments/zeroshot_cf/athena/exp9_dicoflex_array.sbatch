@@ -18,7 +18,7 @@ PROJECT_DIR="${PROJECT_DIR:-$SLURM_SUBMIT_DIR}"
 CASE_FILE="${CASE_FILE:-$PROJECT_DIR/experiments/zeroshot_cf/athena/exp9_dicoflex_cases.tsv}"
 RESULTS_DIR="${RESULTS_DIR:-$PROJECT_DIR/experiments/zeroshot_cf/results/athena/exp9_dicoflex}"
 TABICL_CACHE_DIR="${TABICL_CACHE_DIR:-$PROJECT_DIR/experiments/zeroshot_cf/models/tabicl}"
-MAX_ROUNDS="${MAX_ROUNDS:-1}"
+MAX_VALIDITY_STEPS="${MAX_VALIDITY_STEPS:-100}"
 
 cd "$PROJECT_DIR"
 
@@ -65,7 +65,7 @@ fi
 
 echo "[$(date --iso-8601=seconds)] Starting Exp9 TabICL benchmark"
 echo "project=$PROJECT_DIR"
-echo "dataset=$DATASET max_test=$MAX_TEST n_estimators=$N_ESTIMATORS max_rounds=$MAX_ROUNDS"
+echo "dataset=$DATASET max_test=$MAX_TEST n_estimators=$N_ESTIMATORS max_validity_steps=$MAX_VALIDITY_STEPS"
 echo "split=64/16/20 seed=42 test_selection=stratified"
 echo "tag=$TAG results_dir=$RESULTS_DIR"
 echo "python=${PYTHON_CMD[*]}"
@@ -76,7 +76,7 @@ nvidia-smi
     --dataset "$DATASET" \
     --max-test "$MAX_TEST" \
     --n-estimators "$N_ESTIMATORS" \
-    --max-rounds "$MAX_ROUNDS" \
+    --max-validity-steps "$MAX_VALIDITY_STEPS" \
     --tabicl-cache-dir "$TABICL_CACHE_DIR" \
     --results-dir "$RESULTS_DIR"
 

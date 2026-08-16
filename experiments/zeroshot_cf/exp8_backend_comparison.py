@@ -152,10 +152,9 @@ def run_tabicl_v2(
     tabicl_cache_dir: Path | None,
     candidate_quantiles: tuple[float, ...] | None = None,
     confidence_quantiles: tuple[float, ...] | None = None,
-    lof_first: bool = False,
-    probability_slack: float = 0.0,
-    max_rounds: int = 1,
-    categorical_fallback: bool = False,
+    use_lof_refinement: bool = False,
+    max_validity_steps: int | None = None,
+    allow_revisits: bool = True,
     drop_heloc_all_minus9: bool = False,
 ) -> dict[str, Any]:
     """Run TabICLv2 with candidate expansion at ``knn_both@512``."""
@@ -169,10 +168,10 @@ def run_tabicl_v2(
         candidate_mode="batched",
         candidate_quantiles=candidate_quantiles,
         confidence_quantiles=confidence_quantiles,
-        lof_first=lof_first,
-        probability_slack=probability_slack,
-        max_rounds=max_rounds,
-        categorical_fallback=categorical_fallback,
+        use_lof_refinement=use_lof_refinement,
+        max_validity_steps=max_validity_steps,
+        allow_revisits=allow_revisits,
+        validation_fraction=0.2 if use_lof_refinement else 0.0,
         drop_heloc_all_minus9=drop_heloc_all_minus9,
         cache_dir=tabicl_cache_dir,
     )
@@ -203,9 +202,7 @@ def run_tabicl_v2(
             "attempt_history_per_point": info["attempt_history_per_point"],
             "selection_history_per_point": info["selection_history_per_point"],
             "confidence_grid_per_point": info["confidence_grid_per_point"],
-            "categorical_history_per_point": info[
-                "categorical_history_per_point"
-            ],
+            "categorical_history_per_point": info["categorical_history_per_point"],
             "X_test": X_test.tolist(),
             "X_cf": X_cf.tolist(),
         }
@@ -222,13 +219,12 @@ def run_tabicl_v2(
         "context_update": info["context_update"],
         "point_estimate": info["point_estimate"],
         "project_to_domain": info["project_to_domain"],
-        "retain_best": info["retain_best"],
         "candidate_quantiles": info["candidate_quantiles"],
         "confidence_quantiles": info["confidence_quantiles"],
-        "lof_first": info["lof_first"],
-        "probability_slack": info["probability_slack"],
-        "max_rounds": info["max_rounds"],
-        "categorical_fallback": info["categorical_fallback"],
+        "use_lof_refinement": info["use_lof_refinement"],
+        "max_validity_steps": info["max_validity_steps"],
+        "allow_revisits": info["allow_revisits"],
+        "categorical_proposal_count": info["categorical_proposal_count"],
         "preprocessing_variant": info["preprocessing_variant"],
         "n_dropped_rows": info["n_dropped_rows"],
         "context_labels": "disc",
@@ -303,28 +299,21 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--tabicl-lof-first",
+        "--tabicl-lof-refinement",
         action="store_true",
-        help="Use classifier validity as a gate and minimum LOF among valid candidates.",
+        help="Refine valid TabICL counterfactuals using validation-calibrated LOF.",
     )
     parser.add_argument(
-        "--tabicl-probability-slack",
-        type=float,
-        default=0.0,
-    )
-    parser.add_argument(
-        "--tabicl-max-rounds",
+        "--tabicl-max-validity-steps",
         type=int,
-        default=1,
-        help="TabICL greedy coordinate passes (default: 1).",
+        default=None,
+        help="Maximum committed probability-ascent actions before validity.",
     )
     parser.add_argument(
-        "--tabicl-categorical-fallback",
-        action="store_true",
-        help=(
-            "Use TabICL conditional category distributions and atomic one-hot "
-            "swaps after numerical TabICL search fails."
-        ),
+        "--tabicl-allow-revisits",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Allow TabICL action units to be revisited.",
     )
     parser.add_argument(
         "--drop-heloc-all-minus9",
@@ -373,10 +362,9 @@ def main() -> None:
                         if args.tabicl_confidence_quantiles is None
                         else tuple(args.tabicl_confidence_quantiles)
                     ),
-                    lof_first=args.tabicl_lof_first,
-                    probability_slack=args.tabicl_probability_slack,
-                    max_rounds=args.tabicl_max_rounds,
-                    categorical_fallback=args.tabicl_categorical_fallback,
+                    use_lof_refinement=args.tabicl_lof_refinement,
+                    max_validity_steps=args.tabicl_max_validity_steps,
+                    allow_revisits=args.tabicl_allow_revisits,
                     **common,
                 )
             _write_row(row, args.results_dir)

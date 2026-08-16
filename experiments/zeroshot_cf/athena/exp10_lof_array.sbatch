@@ -45,7 +45,7 @@ nvidia-smi
     --variant "$VARIANT" \
     --max-test "$MAX_TEST" \
     --n-estimators "$N_ESTIMATORS" \
-    --max-rounds 3 \
+    --max-validity-steps 100 \
     --tabicl-cache-dir "$TABICL_CACHE_DIR" \
     --results-dir "$RESULTS_DIR"
 echo "[$(date --iso-8601=seconds)] Finished variant=$VARIANT"

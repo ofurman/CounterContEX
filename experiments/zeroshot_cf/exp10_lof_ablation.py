@@ -24,7 +24,7 @@ def run_variant(
     *,
     max_test: int = 50,
     n_estimators: int = 1,
-    max_rounds: int = 3,
+    max_validity_steps: int = 100,
     tabicl_cache_dir: Path | None = None,
     results_dir: Path = RESULTS_DIR,
 ) -> dict:
@@ -35,8 +35,9 @@ def run_variant(
         "heloc",
         max_test=max_test,
         n_estimators=n_estimators,
-        lof_first=VARIANTS[variant],
-        max_rounds=max_rounds,
+        use_lof_refinement=VARIANTS[variant],
+        max_validity_steps=max_validity_steps,
+        allow_revisits=True,
         tabicl_cache_dir=tabicl_cache_dir,
         results_dir=results_dir / variant,
     )
@@ -175,7 +176,7 @@ def main() -> None:
     )
     parser.add_argument("--max-test", type=int, default=50)
     parser.add_argument("--n-estimators", type=int, default=1)
-    parser.add_argument("--max-rounds", type=int, default=3)
+    parser.add_argument("--max-validity-steps", type=int, default=100)
     parser.add_argument("--tabicl-cache-dir", type=Path, default=None)
     parser.add_argument("--results-dir", type=Path, default=RESULTS_DIR)
     args = parser.parse_args()
@@ -189,7 +190,7 @@ def main() -> None:
         args.variant,
         max_test=args.max_test,
         n_estimators=args.n_estimators,
-        max_rounds=args.max_rounds,
+        max_validity_steps=args.max_validity_steps,
         tabicl_cache_dir=args.tabicl_cache_dir,
         results_dir=args.results_dir,
     )

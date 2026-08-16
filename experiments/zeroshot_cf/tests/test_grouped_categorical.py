@@ -228,7 +228,6 @@ def test_global_mixed_search_chooses_categorical_action_over_numerical() -> None
         numerical_columns=[0],
         categorical_groups=[group],
         candidate_quantiles=(0.25, 0.75),
-        validity_first=True,
     )
 
     np.testing.assert_array_equal(counterfactual, [0.0, 0.0, 1.0])
@@ -250,7 +249,6 @@ def test_global_mixed_search_chooses_numerical_action_over_categorical() -> None
         numerical_columns=[0],
         categorical_groups=[group],
         candidate_quantiles=(0.25, 0.75),
-        validity_first=True,
     )
 
     np.testing.assert_array_equal(counterfactual, [0.8, 1.0, 0.0])
@@ -259,8 +257,97 @@ def test_global_mixed_search_chooses_numerical_action_over_categorical() -> None
     assert info["flipped"] is True
 
 
-def test_global_mixed_validity_gate_compares_lof_across_action_types() -> None:
-    """LOF chooses across all globally valid numerical and category trials."""
+def test_validity_search_requires_progress_from_first_step() -> None:
+    factual = np.array([0.0])
+
+    class ScalarDisc:
+        def predict_proba(self, X):
+            p1 = np.clip(0.1 + 0.3 * X[:, 0], 0.0, 0.99)
+            return np.column_stack([1.0 - p1, p1])
+
+        def predict(self, X):
+            return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
+
+    counterfactual, changed, info = greedy_mixed_counterfactual(
+        _MixedGridSampler([[-0.2]]),
+        ScalarDisc(),
+        factual,
+        y_target=1,
+        numerical_columns=[0],
+        categorical_groups=[],
+        candidate_quantiles=(0.5,),
+    )
+
+    np.testing.assert_array_equal(counterfactual, factual)
+    assert changed == []
+    assert info["validity_steps"] == 0
+
+
+def test_tabicl_probability_ranks_categorical_proposals() -> None:
+    group = OneHotActionGroup("job", (0, 1, 2))
+    factual = np.array([1.0, 0.0, 0.0])
+
+    class CategoryDisc:
+        def predict_proba(self, X):
+            p1 = 0.1 + 0.3 * X[:, 1] + 0.7 * X[:, 2]
+            return np.column_stack([1.0 - p1, p1])
+
+        def predict(self, X):
+            return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
+
+    def distribution(row, action_group, confidence):
+        del row, action_group, confidence
+        return np.array([0, 1, 2]), np.array([0.1, 0.2, 0.7])
+
+    counterfactual, _, info = greedy_mixed_counterfactual(
+        _MixedGridSampler([]),
+        CategoryDisc(),
+        factual,
+        y_target=1,
+        numerical_columns=[],
+        categorical_groups=[group],
+        category_distribution=distribution,
+    )
+
+    np.testing.assert_array_equal(counterfactual, [0.0, 0.0, 1.0])
+    assert info["history"][0]["tabicl_proposal_rank"] == 1
+    assert info["history"][0]["tabicl_conditional_probability"] == 0.7
+
+
+def test_categorical_proposal_expands_for_coverage_when_top_rank_stalls() -> None:
+    group = OneHotActionGroup("job", (0, 1, 2))
+    factual = np.array([1.0, 0.0, 0.0])
+
+    class CategoryDisc:
+        def predict_proba(self, X):
+            p1 = 0.1 - 0.05 * X[:, 1] + 0.7 * X[:, 2]
+            return np.column_stack([1.0 - p1, p1])
+
+        def predict(self, X):
+            return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
+
+    def distribution(row, action_group, confidence):
+        del row, action_group, confidence
+        # TabICL prefers category 1, but it cannot improve classifier confidence.
+        return np.array([0, 1, 2]), np.array([0.1, 0.8, 0.1])
+
+    counterfactual, _, info = greedy_mixed_counterfactual(
+        _MixedGridSampler([]),
+        CategoryDisc(),
+        factual,
+        y_target=1,
+        numerical_columns=[],
+        categorical_groups=[group],
+        category_distribution=distribution,
+    )
+
+    np.testing.assert_array_equal(counterfactual, [0.0, 0.0, 1.0])
+    assert info["history"][0]["coverage_fallback"] is True
+    assert info["history"][0]["tabicl_conditional_probability"] == 0.1
+
+
+def test_probability_ascent_precedes_cross_type_lof_refinement() -> None:
+    """Validity search maximizes confidence before LOF refines the valid row."""
     group = OneHotActionGroup("job", (1, 2))
     factual = np.array([0.0, 1.0, 0.0])
 
@@ -273,13 +360,13 @@ def test_global_mixed_validity_gate_compares_lof_across_action_types() -> None:
         categorical_groups=[group],
         candidate_quantiles=(0.5,),
         plausibility_model=_PreferCategoricalLOF(),
-        validity_first=True,
     )
 
-    # Both trials flip; numerical has higher confidence, but categorical has
-    # lower LOF and therefore wins inside the global valid-candidate set.
-    np.testing.assert_array_equal(counterfactual, [0.0, 0.0, 1.0])
-    assert info["history"][0]["action_type"] == "categorical"
+    # Both first-step trials flip. The numerical action wins on classifier
+    # confidence; only the following validity-preserving phase considers LOF.
+    np.testing.assert_array_equal(counterfactual, [1.0, 0.0, 1.0])
+    assert info["history"][0]["action_type"] == "numerical"
+    assert info["history"][1]["selection_phase"] == "plausibility_refinement"
     assert info["history"][0]["n_valid_candidates"] == 2
 
 
@@ -297,7 +384,6 @@ def test_global_mixed_search_refines_lof_after_reaching_validity() -> None:
         categorical_groups=[group],
         candidate_quantiles=(0.5,),
         plausibility_model=_NumericalRefinementLOF(),
-        validity_first=True,
     )
 
     np.testing.assert_array_equal(counterfactual, [0.8, 0.0, 1.0])
@@ -325,7 +411,6 @@ def test_global_mixed_search_rejects_valid_but_less_plausible_refinement() -> No
         categorical_groups=[group],
         candidate_quantiles=(0.5,),
         plausibility_model=_RejectNumericalRefinementLOF(),
-        validity_first=True,
     )
 
     np.testing.assert_array_equal(counterfactual, [0.0, 0.0, 1.0])
@@ -350,7 +435,6 @@ def test_global_mixed_search_does_not_refine_below_lof_threshold() -> None:
         categorical_groups=[group],
         candidate_quantiles=(0.5,),
         plausibility_model=_NumericalRefinementLOF(),
-        validity_first=True,
         refinement_lof_threshold=3.1,
     )
 
@@ -373,7 +457,6 @@ def test_global_mixed_refinement_prefers_proximity_after_lof_gain_gate() -> None
         categorical_groups=[group],
         candidate_quantiles=(0.25, 0.75),
         plausibility_model=_ProximityTradeoffLOF(),
-        validity_first=True,
     )
 
     # x=0.8 has lower LOF, but x=0.2 already clears the relative-gain gate and

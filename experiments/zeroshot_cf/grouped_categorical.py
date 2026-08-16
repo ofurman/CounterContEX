@@ -137,6 +137,9 @@ class CompactMixedSampler:
 CategoryDistribution = Callable[
     [np.ndarray, OneHotActionGroup], tuple[np.ndarray, np.ndarray]
 ]
+ConditionedCategoryDistribution = Callable[
+    [np.ndarray, OneHotActionGroup, float | None], tuple[np.ndarray, np.ndarray]
+]
 
 
 def greedy_mixed_counterfactual(  # noqa: PLR0913
@@ -151,40 +154,42 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     candidate_confidences: Sequence[float] | None = None,
     feature_domains=None,
     plausibility_model=None,
-    validity_first: bool = False,
-    probability_slack: float = 0.0,
-    max_rounds: int = 1,
+    max_validity_steps: int | None = None,
+    allow_revisits: bool = True,
     max_refinement_steps: int = 2,
     min_relative_lof_gain: float = 0.05,
     refinement_lof_threshold: float | None = None,
     tau: float = 0.5,
     temperature: float = 1e-9,
-    category_distribution: CategoryDistribution | None = None,
+    category_distribution: ConditionedCategoryDistribution | None = None,
+    categorical_proposal_count: int = 1,
 ) -> tuple[np.ndarray, list[int], dict]:
     """Greedily select the best action across numerical and categorical types.
 
     At every step, all remaining scalar feature proposals and all legal atomic
     category swaps compete in one discriminator batch. If any candidate is
-    valid, validity is a hard gate and the lowest-LOF valid candidate wins.
-    Once validity is reached, search continues and commits only candidates that
-    remain valid and strictly improve LOF. Otherwise the candidate with the
-    highest target-class probability wins (with optional LOF tie-breaking
-    inside ``probability_slack``).
+    valid or not, the proposal with the highest target-class probability wins,
+    provided it strictly improves on the incumbent. Once validity is reached,
+    search continues and commits only candidates that remain valid and strictly
+    improve LOF.
 
-    Each scalar feature or categorical group may be changed once per round.
-    Later rounds revisit all action units, but only strict target-probability
-    improvements are committed.
+    TabICL ranks categorical alternatives within each group before the target
+    classifier compares the resulting rows globally. Each action unit is used
+    once unless ``allow_revisits`` is enabled.
     """
-    if max_rounds < 1:
-        raise ValueError("max_rounds must be at least 1")
-    if probability_slack < 0:
-        raise ValueError("probability_slack must be non-negative")
+    n_action_units = len(numerical_columns) + len(categorical_groups)
+    if max_validity_steps is None:
+        max_validity_steps = n_action_units
+    if max_validity_steps < 1:
+        raise ValueError("max_validity_steps must be at least 1")
     if max_refinement_steps < 0:
         raise ValueError("max_refinement_steps must be non-negative")
     if not 0.0 <= min_relative_lof_gain < 1.0:
         raise ValueError("min_relative_lof_gain must be in [0, 1)")
     if refinement_lof_threshold is not None and refinement_lof_threshold <= 0:
         raise ValueError("refinement_lof_threshold must be positive")
+    if categorical_proposal_count < 1:
+        raise ValueError("categorical_proposal_count must be at least 1")
     numerical = [int(column) for column in numerical_columns]
     groups = list(categorical_groups)
     quantiles = (
@@ -205,7 +210,7 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     changed_order: list[int] = []
     history: list[dict] = []
     categorical_history: list[dict] = []
-    rounds_used = 0
+    search_passes_used = 0
     flipped = False
 
     def flip_state(row: np.ndarray) -> tuple[bool, float]:
@@ -241,11 +246,15 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     best_history_length = 0
     initial_valid_step = 0 if flipped else None
     refinement_steps = 0
+    validity_steps = 0
+    visited_rows: set[bytes] = {current.tobytes()}
+    refined_numerical: set[int] = set()
+    refined_groups: set[str] = set()
 
-    for round_index in range(max_rounds):
+    round_limit = max_validity_steps if allow_revisits else 1
+    for round_index in range(round_limit):
         if flipped and (
-            not validity_first
-            or plausibility_model is None
+            plausibility_model is None
             or refinement_steps >= max_refinement_steps
             or (
                 refinement_lof_threshold is not None
@@ -254,15 +263,16 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
             )
         ):
             break
-        rounds_used = round_index + 1
+        search_passes_used = round_index + 1
         used_numerical: set[int] = set()
         used_groups: set[str] = set()
         committed_this_round = 0
 
         while True:
+            if not flipped and validity_steps >= max_validity_steps:
+                break
             if flipped and (
-                not validity_first
-                or plausibility_model is None
+                plausibility_model is None
                 or refinement_steps >= max_refinement_steps
                 or (
                     refinement_lof_threshold is not None
@@ -274,7 +284,10 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
             trial_rows: list[np.ndarray] = []
             metadata: list[dict] = []
             available_numerical = [
-                column for column in numerical if column not in used_numerical
+                column
+                for column in numerical
+                if column not in used_numerical
+                and (not flipped or column not in refined_numerical)
             ]
             if available_numerical:
                 if quantiles is None:
@@ -381,17 +394,66 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                 trial_rows.extend(numerical_trials)
                 metadata.extend(numerical_metadata)
 
+            category_scores_by_group: dict[
+                str, dict[int, tuple[float, float | None]]
+            ] = {}
             for group in groups:
-                if group.name in used_groups:
+                if group.name in used_groups or (
+                    flipped and group.name in refined_groups
+                ):
                     continue
                 columns = list(group.columns)
                 group_values = current[columns]
                 if not np.isclose(group_values.sum(), 1.0):
                     raise ValueError(f"one-hot group {group.name!r} is invalid")
                 previous_category = int(np.argmax(group_values))
-                for category in range(len(columns)):
+                category_scores: dict[int, tuple[float, float | None]] = {}
+                if category_distribution is not None:
+                    anchors = [None] if confidences is None else confidences.tolist()
+                    for anchor in anchors:
+                        categories, conditional_probabilities = category_distribution(
+                            current,
+                            group,
+                            anchor,
+                        )
+                        for category, probability in zip(
+                            np.asarray(categories, dtype=int),
+                            np.asarray(conditional_probabilities, dtype=np.float64),
+                            strict=True,
+                        ):
+                            previous_score = category_scores.get(int(category))
+                            if (
+                                previous_score is None
+                                or probability > previous_score[0]
+                            ):
+                                category_scores[int(category)] = (
+                                    float(probability),
+                                    None if anchor is None else float(anchor),
+                                )
+                else:
+                    category_scores = {
+                        category: (1.0, None) for category in range(len(columns))
+                    }
+                category_scores_by_group[group.name] = category_scores
+                alternatives = [
+                    category
+                    for category in range(len(columns))
+                    if category != previous_category
+                ]
+                alternatives.sort(
+                    key=lambda category: category_scores.get(category, (0.0, None))[0],
+                    reverse=True,
+                )
+                # TabICL ranks proposals within a categorical action unit. The
+                # target classifier subsequently compares their complete rows
+                # against all numerical proposals.
+                alternatives = alternatives[:categorical_proposal_count]
+                for proposal_rank, category in enumerate(alternatives, start=1):
                     if category == previous_category:
                         continue
+                    conditional_probability, confidence_anchor = category_scores.get(
+                        category, (0.0, None)
+                    )
                     trial = current.copy()
                     trial[columns] = 0.0
                     trial[group.columns[category]] = 1.0
@@ -403,6 +465,10 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                             "group_object": group,
                             "from_category": previous_category,
                             "to_category": category,
+                            "tabicl_conditional_probability": (conditional_probability),
+                            "tabicl_confidence_anchor": confidence_anchor,
+                            "tabicl_proposal_rank": proposal_rank,
+                            "in_tabicl_support": category in category_scores,
                         }
                     )
 
@@ -433,7 +499,9 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                     abs(current_lof), 1e-12
                 )
                 eligible = np.flatnonzero(
-                    valid & (relative_lof_gain >= min_relative_lof_gain)
+                    valid
+                    & (relative_lof_gain >= min_relative_lof_gain)
+                    & np.asarray([row.tobytes() not in visited_rows for row in trials])
                 )
                 if not len(eligible):
                     break
@@ -446,35 +514,80 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                     )
                 )
                 best = int(eligible[ranked[0]])
-            elif validity_first and valid.any():
-                eligible = np.flatnonzero(valid)
-                best = (
-                    int(eligible[np.argmax(probabilities[eligible])])
-                    if lof_scores is None
-                    else int(eligible[np.argmin(lof_scores[eligible])])
-                )
-            elif validity_first and lof_scores is not None:
-                maximum = float(np.max(probabilities))
-                eligible = np.flatnonzero(probabilities >= maximum - probability_slack)
-                best = int(eligible[np.argmin(lof_scores[eligible])])
             else:
                 best = int(np.argmax(probabilities))
 
             selected_probability = float(probabilities[best])
             if (
                 not flipped
-                and round_index > 0
-                and selected_probability <= current_probability
+                and selected_probability <= current_probability + 1e-12
+                and category_distribution is not None
             ):
+                # The ranked shortlist is the normal path. If it cannot make
+                # progress, expose every remaining legal category once so
+                # local TabICL support gaps cannot reduce coverage.
+                existing = {
+                    (item.get("group"), item.get("to_category")) for item in metadata
+                }
+                for fallback_group in groups:
+                    if fallback_group.name in used_groups:
+                        continue
+                    columns = list(fallback_group.columns)
+                    previous_category = int(np.argmax(current[columns]))
+                    for category in range(len(columns)):
+                        if (
+                            category == previous_category
+                            or (fallback_group.name, category) in existing
+                        ):
+                            continue
+                        trial = current.copy()
+                        trial[columns] = 0.0
+                        trial[fallback_group.columns[category]] = 1.0
+                        fallback_scores = category_scores_by_group.get(
+                            fallback_group.name, {}
+                        )
+                        conditional_probability, confidence_anchor = (
+                            fallback_scores.get(category, (0.0, None))
+                        )
+                        trial_rows.append(trial)
+                        metadata.append(
+                            {
+                                "action_type": "categorical",
+                                "group": fallback_group.name,
+                                "group_object": fallback_group,
+                                "from_category": previous_category,
+                                "to_category": category,
+                                "tabicl_conditional_probability": (
+                                    conditional_probability
+                                ),
+                                "tabicl_confidence_anchor": confidence_anchor,
+                                "tabicl_proposal_rank": None,
+                                "in_tabicl_support": category in fallback_scores,
+                                "coverage_fallback": True,
+                            }
+                        )
+                trials = np.stack(trial_rows)
+                probabilities = np.asarray(disc.predict_proba(trials))[:, y_target]
+                predictions = np.asarray(disc.predict(trials))
+                valid = (predictions == y_target) & (probabilities >= tau)
+                lof_scores = (
+                    None
+                    if plausibility_model is None
+                    else -np.asarray(plausibility_model.score_samples(trials))
+                )
+                best = int(np.argmax(probabilities))
+                selected_probability = float(probabilities[best])
+            if not flipped and selected_probability <= current_probability + 1e-12:
+                break
+            if trials[best].tobytes() in visited_rows:
                 break
 
-            previous = current.copy()
             was_flipped = flipped
             selected = dict(metadata[best])
             selected.pop("group_object", None)
             selected.update(
                 {
-                    "round": rounds_used,
+                    "search_pass": search_passes_used,
                     "selection_phase": (
                         "plausibility_refinement" if was_flipped else "validity_search"
                     ),
@@ -493,6 +606,7 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                     (current_lof - lof_scores[best]) / max(abs(current_lof), 1e-12)
                 )
             current = trials[best]
+            visited_rows.add(current.tobytes())
             current_probability = selected_probability
             if lof_scores is not None:
                 current_lof = float(lof_scores[best])
@@ -500,27 +614,15 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
 
             raw_selected = metadata[best]
             if raw_selected["action_type"] == "numerical":
-                used_numerical.add(int(raw_selected["feature"]))
+                feature = int(raw_selected["feature"])
+                used_numerical.add(feature)
+                if was_flipped:
+                    refined_numerical.add(feature)
             else:
                 group = raw_selected["group_object"]
                 used_groups.add(group.name)
-                if category_distribution is not None:
-                    categories, conditional_probabilities = category_distribution(
-                        previous,
-                        group,
-                    )
-                    conditional = dict(
-                        zip(
-                            np.asarray(categories, dtype=int).tolist(),
-                            np.asarray(
-                                conditional_probabilities,
-                                dtype=np.float64,
-                            ).tolist(),
-                        )
-                    )
-                    selected["tabicl_conditional_probability"] = float(
-                        conditional.get(int(raw_selected["to_category"]), 0.0)
-                    )
+                if was_flipped:
+                    refined_groups.add(group.name)
                 categorical_history.append(selected.copy())
 
             history.append(selected)
@@ -529,6 +631,8 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                 refinement_steps += 1
             elif flipped and initial_valid_step is None:
                 initial_valid_step = len(history)
+            if not was_flipped:
+                validity_steps += 1
             if current_probability > best_probability:
                 best_row = current.copy()
                 best_probability = current_probability
@@ -553,13 +657,15 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         {
             "flipped": bool(flipped),
             "steps": len(history),
-            "rounds": rounds_used,
+            "search_passes": search_passes_used,
+            "validity_steps": validity_steps,
+            "max_validity_steps": max_validity_steps,
+            "allow_revisits": allow_revisits,
             "history": history,
             "attempt_history": attempt_history,
             "selection_history": history,
             "attempt_selection_history": attempt_history,
             "categorical_history": categorical_history,
-            "round_history": [],
             "best_target_probability": float(best_probability),
             "initial_valid_step": initial_valid_step,
             "refinement_steps": refinement_steps,

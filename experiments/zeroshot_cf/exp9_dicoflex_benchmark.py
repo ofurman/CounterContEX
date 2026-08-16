@@ -5,8 +5,8 @@
 
 Each invocation evaluates exactly one dataset so the five runs can be
 scheduled independently on Athena. Adult is intentionally excluded: its very
-wide categorical representation is not a good fit for the current one-shot
-conditional-imputation method. HELOC is included as the established reference.
+wide categorical representation is not a good fit for the current iterative
+conditional-imputation search. HELOC is included as the established reference.
 
 The benchmark uses one fixed 64/16/20 train/validation/test split, selects up
 to 1,000 held-out factuals with a fixed stratified sample, and generates one
@@ -46,6 +46,7 @@ DATASETS = (
 DEFAULT_MAX_TEST = 1000
 DEFAULT_VALIDATION_FRACTION = 0.2
 DEFAULT_N_ESTIMATORS = 1
+DEFAULT_MAX_VALIDITY_STEPS = 100
 DEFAULT_MAX_REFINEMENT_STEPS = 2
 DEFAULT_MIN_RELATIVE_LOF_GAIN = 0.05
 DEFAULT_REFINEMENT_LOF_QUANTILE = 0.90
@@ -83,8 +84,9 @@ def run_dataset(  # noqa: PLR0913
     tau: float = TAU,
     candidate_quantiles: tuple[float, ...] = DEFAULT_CANDIDATE_QUANTILES,
     confidence_quantiles: tuple[float, ...] = DEFAULT_CONFIDENCE_QUANTILES,
-    lof_first: bool = True,
-    max_rounds: int = 1,
+    use_lof_refinement: bool = True,
+    max_validity_steps: int = DEFAULT_MAX_VALIDITY_STEPS,
+    allow_revisits: bool = True,
     max_refinement_steps: int = DEFAULT_MAX_REFINEMENT_STEPS,
     min_relative_lof_gain: float = DEFAULT_MIN_RELATIVE_LOF_GAIN,
     refinement_lof_quantile: float = DEFAULT_REFINEMENT_LOF_QUANTILE,
@@ -109,16 +111,14 @@ def run_dataset(  # noqa: PLR0913
         context_update="replace",
         point_estimate="mode",
         project_to_domain=True,
-        retain_best=True,
         candidate_quantiles=candidate_quantiles,
         confidence_quantiles=confidence_quantiles,
-        lof_first=lof_first,
-        probability_slack=0.0,
-        max_rounds=max_rounds,
+        use_lof_refinement=use_lof_refinement,
+        max_validity_steps=max_validity_steps,
+        allow_revisits=allow_revisits,
         max_refinement_steps=max_refinement_steps,
         min_relative_lof_gain=min_relative_lof_gain,
         refinement_lof_quantile=refinement_lof_quantile,
-        categorical_fallback=True,
         validation_fraction=validation_fraction,
         test_selection="stratified",
         drop_heloc_all_minus9=(
@@ -154,7 +154,7 @@ def run_dataset(  # noqa: PLR0913
         dtype=float,
     )
     steps = np.asarray(info["steps_per_point"], dtype=float)
-    rounds = np.asarray(info["rounds_per_point"], dtype=float)
+    validity_steps = np.asarray(info["validity_steps_per_point"], dtype=float)
     refinement_steps = np.asarray(info["refinement_steps_per_point"], dtype=float)
     initial_valid_records = [
         next(
@@ -212,7 +212,7 @@ def run_dataset(  # noqa: PLR0913
     )
     l0_count_mean = float(changed_counts[valid].mean()) if valid.any() else float("nan")
     steps_mean = float(steps[valid].mean()) if valid.any() else float("nan")
-    rounds_mean = float(rounds.mean())
+    validity_steps_mean = float(validity_steps.mean())
 
     validation_accuracy = float("nan")
     if bundle.X_val is not None and bundle.y_val is not None:
@@ -239,18 +239,16 @@ def run_dataset(  # noqa: PLR0913
         "candidate_mode": "batched",
         "candidate_quantiles": _levels_text(candidate_quantiles),
         "confidence_quantiles": _levels_text(confidence_quantiles),
-        "lof_first": lof_first,
-        "max_rounds": max_rounds,
+        "use_lof_refinement": use_lof_refinement,
+        "max_validity_steps": max_validity_steps,
+        "allow_revisits": allow_revisits,
+        "categorical_proposal_count": info["categorical_proposal_count"],
         "max_refinement_steps": max_refinement_steps,
         "min_relative_lof_gain": min_relative_lof_gain,
         "refinement_lof_quantile": refinement_lof_quantile,
         "refinement_lof_threshold": info["refinement_lof_threshold"],
-        "round_schedule": (
-            "global_mixed_action_competition_post_valid_lof"
-            if info["grouped_actionable"]
-            else "numerical_only"
-        ),
-        "categorical_fallback": True,
+        "refinement_lof_threshold_source": info["refinement_lof_threshold_source"],
+        "search_schedule": "probability_ascent_then_validity_preserving_lof",
         "n_estimators": n_estimators,
         "temperature": temperature,
         "tau": tau,
@@ -264,8 +262,8 @@ def run_dataset(  # noqa: PLR0913
         "failure_rate": float((~valid).mean()),
         "l0_count_mean": l0_count_mean,
         "steps_mean": steps_mean,
-        "rounds_mean": rounds_mean,
-        "post_valid_refinement": bool(info["grouped_actionable"] and lof_first),
+        "validity_steps_mean": validity_steps_mean,
+        "post_valid_refinement": use_lof_refinement,
         "refinement_steps_mean": float(refinement_steps.mean()),
         "refined_fraction": float((refinement_steps > 0).mean()),
         "initial_valid_lof_mean": finite_mean(initial_valid_lof),
@@ -298,7 +296,7 @@ def run_dataset(  # noqa: PLR0913
             "lof_score": float(lof_per_point[i]),
             "changed_columns": len(info["changed_per_point"][i]),
             "steps": int(info["steps_per_point"][i]),
-            "rounds": int(info["rounds_per_point"][i]),
+            "validity_steps": int(info["validity_steps_per_point"][i]),
             "attempt_steps": len(info["attempt_history_per_point"][i]),
             "initial_valid_step": info["initial_valid_step_per_point"][i],
             "refinement_steps": int(info["refinement_steps_per_point"][i]),
@@ -373,22 +371,23 @@ def main() -> None:
         help="Fraction of the provisional 80%% train set used for validation.",
     )
     parser.add_argument(
-        "--lof-first",
+        "--lof-refinement",
+        dest="use_lof_refinement",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help=(
-            "Rank valid candidates by LOF; disable to rank every candidate by "
-            "target-class probability only."
-        ),
+        help="Enable validity-preserving LOF refinement after the class flip.",
     )
     parser.add_argument(
-        "--max-rounds",
+        "--max-validity-steps",
         type=int,
-        default=1,
-        help=(
-            "Maximum complete numerical-plus-categorical passes for mixed "
-            "data, or numerical passes for continuous data (default: 1)."
-        ),
+        default=DEFAULT_MAX_VALIDITY_STEPS,
+        help="Maximum committed probability-ascent actions before validity.",
+    )
+    parser.add_argument(
+        "--allow-revisits",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Allow action units to be proposed again after intervening edits.",
     )
     parser.add_argument(
         "--max-refinement-steps",
@@ -406,7 +405,7 @@ def main() -> None:
         "--refinement-lof-quantile",
         type=float,
         default=DEFAULT_REFINEMENT_LOF_QUANTILE,
-        help="Training-LOF quantile above which valid CFs are refined.",
+        help="Validation-LOF quantile above which valid CFs are refined.",
     )
     parser.add_argument(
         "--drop-heloc-all-minus9",
@@ -428,8 +427,9 @@ def main() -> None:
         tau=args.tau,
         candidate_quantiles=tuple(args.candidate_quantiles),
         confidence_quantiles=tuple(args.confidence_quantiles),
-        lof_first=args.lof_first,
-        max_rounds=args.max_rounds,
+        use_lof_refinement=args.use_lof_refinement,
+        max_validity_steps=args.max_validity_steps,
+        allow_revisits=args.allow_revisits,
         max_refinement_steps=args.max_refinement_steps,
         min_relative_lof_gain=args.min_relative_lof_gain,
         refinement_lof_quantile=args.refinement_lof_quantile,

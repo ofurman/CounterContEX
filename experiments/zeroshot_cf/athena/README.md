@@ -196,10 +196,13 @@ gets one A100, 8 CPUs, 64 GB RAM, and a six-hour wall-time on the
 bash experiments/zeroshot_cf/athena/submit_exp9_dicoflex.sh
 ```
 
-The fixed search uses 19 numerical quantiles from 0.05 to 0.95, five empirical
-target-confidence levels, LOF-first valid-candidate selection, and atomic
-categorical changes. Each task writes aggregate metrics, per-point diagnostics,
-and compressed factual/CF arrays under:
+The fixed search uses 19 numerical quantiles from 0.05 to 0.95 and five
+empirical target-confidence levels. Before validity, it commits only strict
+target-probability improvements. After validity, it preserves the target class
+while refining LOF. TabICL probabilities rank atomic categorical proposals,
+and the target classifier compares their complete rows against the numerical
+proposals. Each task writes aggregate metrics, per-point diagnostics, and
+compressed factual/CF arrays under:
 
 ```text
 experiments/zeroshot_cf/results/athena/exp9_dicoflex/

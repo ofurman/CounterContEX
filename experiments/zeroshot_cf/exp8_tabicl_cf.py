@@ -36,6 +36,7 @@ from experiments.zeroshot_cf.exp4_greedy_cf import (
 RESULTS_DIR = Path(__file__).parent / "results"
 ATHENA_CONTEXT_SIZE = 512
 ATHENA_CONTEXT_STRATEGY = "knn_both"
+CATEGORICAL_PROPOSAL_COUNT = 1
 DEFAULT_TEMPERATURE = 1e-9  # deterministic point estimate / categorical mode
 DEFAULT_N_ESTIMATORS = 4
 DEFAULT_POINT_ESTIMATE = "mode"
@@ -117,16 +118,14 @@ def generate_tabicl_counterfactuals(
     context_update: str = "replace",
     point_estimate: str = DEFAULT_POINT_ESTIMATE,
     project_to_domain: bool = True,
-    retain_best: bool = True,
     candidate_quantiles: tuple[float, ...] | None = None,
     confidence_quantiles: tuple[float, ...] | None = None,
-    lof_first: bool = False,
-    probability_slack: float = 0.0,
-    max_rounds: int = 1,
+    use_lof_refinement: bool = False,
+    max_validity_steps: int | None = None,
+    allow_revisits: bool = True,
     max_refinement_steps: int = 2,
     min_relative_lof_gain: float = 0.05,
     refinement_lof_quantile: float = 0.90,
-    categorical_fallback: bool = False,
     validation_fraction: float = 0.0,
     test_selection: str = "first",
     drop_heloc_all_minus9: bool = False,
@@ -149,12 +148,10 @@ def generate_tabicl_counterfactuals(
         confidence_quantiles = tuple(float(q) for q in confidence_quantiles)
         if candidate_quantiles is None:
             raise ValueError("confidence_quantiles require candidate_quantiles")
-    if lof_first and candidate_quantiles is None:
-        raise ValueError("lof_first requires candidate_quantiles")
-    if probability_slack < 0:
-        raise ValueError("probability_slack must be non-negative")
-    if max_rounds < 1:
-        raise ValueError("max_rounds must be at least 1")
+    if use_lof_refinement and candidate_quantiles is None:
+        raise ValueError("use_lof_refinement requires candidate_quantiles")
+    if max_validity_steps is not None and max_validity_steps < 1:
+        raise ValueError("max_validity_steps must be at least 1")
     if max_refinement_steps < 0:
         raise ValueError("max_refinement_steps must be non-negative")
     if not 0.0 <= min_relative_lof_gain < 1.0:
@@ -165,16 +162,12 @@ def generate_tabicl_counterfactuals(
         raise ValueError("test_selection must be 'first' or 'stratified'")
 
     from experiments.zeroshot_cf.data import (
-        get_actionable_immutable,
         get_grouped_categorical_action_space,
         get_one_hot_groups,
         load_dataset,
     )
     from experiments.zeroshot_cf.discriminator import train_discriminator
-    from experiments.zeroshot_cf.greedy import (
-        greedy_counterfactual,
-        infer_feature_domains,
-    )
+    from experiments.zeroshot_cf.greedy import infer_feature_domains
     from experiments.zeroshot_cf.grouped_categorical import (
         CompactMixedSampler,
         GroupedCategoricalCodec,
@@ -198,29 +191,26 @@ def generate_tabicl_counterfactuals(
         limit,
         test_selection,
     )
-    grouped_actionable = []
-    all_one_hot_groups = []
+    (
+        numerical_actionable_idx,
+        grouped_actionable,
+        immutable_idx,
+    ) = get_grouped_categorical_action_space(bundle)
+    all_one_hot_groups = get_one_hot_groups(bundle)
     categorical_codec = None
-    if categorical_fallback:
-        (
-            numerical_actionable_idx,
-            grouped_actionable,
-            immutable_idx,
-        ) = get_grouped_categorical_action_space(bundle)
-        all_one_hot_groups = get_one_hot_groups(bundle)
-        if all_one_hot_groups:
-            categorical_codec = GroupedCategoricalCodec.from_matrix(
-                X_train,
-                all_one_hot_groups,
-            )
-    else:
-        numerical_actionable_idx, immutable_idx = get_actionable_immutable(
-            dataset_name,
-            bundle,
+    if all_one_hot_groups:
+        categorical_codec = GroupedCategoricalCodec.from_matrix(
+            X_train,
+            all_one_hot_groups,
         )
     actionable_idx = list(numerical_actionable_idx)
     for group in grouped_actionable:
         actionable_idx.extend(group.columns)
+    effective_max_validity_steps = (
+        len(numerical_actionable_idx) + len(grouped_actionable)
+        if max_validity_steps is None
+        else max_validity_steps
+    )
 
     discriminator_cache_tag = (
         f"{dataset_name}_drop_all_minus9"
@@ -249,16 +239,20 @@ def generate_tabicl_counterfactuals(
 
     plausibility_model = None
     refinement_lof_threshold = None
-    if lof_first:
+    if use_lof_refinement:
         from sklearn.neighbors import LocalOutlierFactor
 
         plausibility_model = LocalOutlierFactor(n_neighbors=20, novelty=True)
         plausibility_model.fit(X_train)
-        train_lof_scores = -np.asarray(
-            plausibility_model.score_samples(X_train), dtype=np.float64
+        if bundle.X_val is None:
+            raise ValueError(
+                "LOF refinement requires validation data; set validation_fraction > 0"
+            )
+        validation_lof_scores = -np.asarray(
+            plausibility_model.score_samples(bundle.X_val), dtype=np.float64
         )
         refinement_lof_threshold = float(
-            np.quantile(train_lof_scores, refinement_lof_quantile)
+            np.quantile(validation_lof_scores, refinement_lof_quantile)
         )
 
     print(f"\n=== Experiment 8 (TabICL): {dataset_name.upper()} ===")
@@ -267,11 +261,11 @@ def generate_tabicl_counterfactuals(
         f"@{ATHENA_CONTEXT_SIZE}, labels={context_labels}, "
         f"candidate_mode={candidate_mode}, context_update={context_update}, "
         f"point_estimate={point_estimate}, project_to_domain={project_to_domain}, "
-        f"retain_best={retain_best}, candidate_quantiles={candidate_quantiles}, "
-        f"confidence_quantiles={confidence_quantiles}, lof_first={lof_first}, "
-        f"probability_slack={probability_slack}, "
-        f"max_rounds={max_rounds}, "
-        f"categorical_fallback={categorical_fallback}, "
+        f"candidate_quantiles={candidate_quantiles}, "
+        f"confidence_quantiles={confidence_quantiles}, "
+        f"lof_refinement={use_lof_refinement}, "
+        f"max_validity_steps={effective_max_validity_steps}, "
+        f"allow_revisits={allow_revisits}, "
         f"split={bundle.split_variant}, test_selection={test_selection}, "
         f"preprocessing={bundle.preprocessing_variant}, "
         f"n_dropped_rows={bundle.n_dropped_rows}, "
@@ -316,10 +310,9 @@ def generate_tabicl_counterfactuals(
         None for _ in range(len(X_test))
     ]
     categorical_history_per_point: list[list[dict]] = [[] for _ in range(len(X_test))]
-    rounds_per_point = [0] * len(X_test)
+    validity_steps_per_point = [0] * len(X_test)
     initial_valid_step_per_point: list[int | None] = [None for _ in range(len(X_test))]
     refinement_steps_per_point = [0] * len(X_test)
-    round_history_per_point: list[list[dict]] = [[] for _ in range(len(X_test))]
 
     started = time.perf_counter()
     for i, (x, target) in enumerate(zip(X_test, y_target, strict=True)):
@@ -351,82 +344,45 @@ def generate_tabicl_counterfactuals(
         target_class = int(target)
         point_confidence_grid = confidence_grid
 
-        def numerical_pass(
-            row: np.ndarray,
-            rounds: int,
-            *,
-            require_improvement: bool = False,
-        ) -> tuple[np.ndarray, list[int], dict[str, Any]]:
-            return greedy_counterfactual(
-                sampler,
-                disc_model,
-                row,
-                target_class,
-                numerical_actionable_idx,
-                "prob_ascent",
-                tau=tau,
-                budget=len(numerical_actionable_idx),
-                temperature=temperature,
-                batch_candidates=candidate_mode == "batched",
-                feature_domains=feature_domains,
-                retain_best=retain_best,
-                candidate_quantiles=candidate_quantiles,
-                candidate_confidences=point_confidence_grid,
-                plausibility_model=plausibility_model,
-                validity_first=lof_first,
-                probability_slack=probability_slack,
-                max_rounds=rounds,
-                require_improvement=require_improvement,
-            )
-
+        category_distribution = None
         if categorical_codec is not None and grouped_actionable:
 
             def category_distribution(
                 row: np.ndarray,
                 group: Any,
+                confidence: float | None,
+                _target_class: int = target_class,
             ) -> tuple[np.ndarray, np.ndarray]:
                 encoded_row = categorical_codec.encode_row(row)
                 encoded_col = categorical_codec.encoded_column_for_group(group)
-                fixed_confidence = (
-                    None
-                    if point_confidence_grid is None
-                    else point_confidence_grid[len(point_confidence_grid) // 2]
-                )
                 return sampler_context.categorical_distribution(
                     encoded_row.reshape(1, -1),
                     encoded_col,
-                    fixed_target=target_class,
-                    fixed_confidence=fixed_confidence,
+                    fixed_target=_target_class,
+                    fixed_confidence=confidence,
                 )
 
-            x_cf, changed, greedy_info = greedy_mixed_counterfactual(
-                sampler,
-                disc_model,
-                x,
-                target_class,
-                numerical_actionable_idx,
-                grouped_actionable,
-                candidate_quantiles=candidate_quantiles,
-                candidate_confidences=point_confidence_grid,
-                feature_domains=feature_domains,
-                plausibility_model=plausibility_model,
-                validity_first=lof_first,
-                probability_slack=probability_slack,
-                max_rounds=max_rounds,
-                max_refinement_steps=max_refinement_steps,
-                min_relative_lof_gain=min_relative_lof_gain,
-                refinement_lof_threshold=refinement_lof_threshold,
-                tau=tau,
-                temperature=temperature,
-                category_distribution=category_distribution,
-            )
-        else:
-            x_cf, changed, greedy_info = numerical_pass(
-                x,
-                max_rounds,
-            )
-            greedy_info["categorical_history"] = []
-            greedy_info["round_history"] = []
+        x_cf, changed, greedy_info = greedy_mixed_counterfactual(
+            sampler,
+            disc_model,
+            x,
+            target_class,
+            numerical_actionable_idx,
+            grouped_actionable,
+            candidate_quantiles=candidate_quantiles,
+            candidate_confidences=point_confidence_grid,
+            feature_domains=feature_domains,
+            plausibility_model=plausibility_model,
+            max_validity_steps=effective_max_validity_steps,
+            allow_revisits=allow_revisits,
+            max_refinement_steps=max_refinement_steps,
+            min_relative_lof_gain=min_relative_lof_gain,
+            refinement_lof_threshold=refinement_lof_threshold,
+            tau=tau,
+            temperature=temperature,
+            category_distribution=category_distribution,
+            categorical_proposal_count=CATEGORICAL_PROPOSAL_COUNT,
+        )
         X_cf[i] = x_cf
         changed_per_point[i] = changed
         flipped_per_point[i] = greedy_info["flipped"]
@@ -436,10 +392,9 @@ def generate_tabicl_counterfactuals(
         selection_history_per_point[i] = greedy_info["selection_history"]
         confidence_grid_per_point[i] = confidence_grid
         categorical_history_per_point[i] = greedy_info["categorical_history"]
-        rounds_per_point[i] = greedy_info["rounds"]
+        validity_steps_per_point[i] = greedy_info["validity_steps"]
         initial_valid_step_per_point[i] = greedy_info.get("initial_valid_step")
         refinement_steps_per_point[i] = greedy_info.get("refinement_steps", 0)
-        round_history_per_point[i] = greedy_info["round_history"]
 
         if i == 0:
             first_s = time.perf_counter() - started
@@ -476,17 +431,19 @@ def generate_tabicl_counterfactuals(
         "context_update": context_update,
         "point_estimate": point_estimate,
         "project_to_domain": project_to_domain,
-        "retain_best": retain_best,
         "candidate_quantiles": candidate_quantiles,
         "confidence_quantiles": confidence_quantiles,
-        "lof_first": lof_first,
-        "probability_slack": probability_slack,
-        "max_rounds": max_rounds,
+        "use_lof_refinement": use_lof_refinement,
+        "max_validity_steps": effective_max_validity_steps,
+        "allow_revisits": allow_revisits,
+        "categorical_proposal_count": CATEGORICAL_PROPOSAL_COUNT,
         "max_refinement_steps": max_refinement_steps,
         "min_relative_lof_gain": min_relative_lof_gain,
         "refinement_lof_quantile": refinement_lof_quantile,
         "refinement_lof_threshold": refinement_lof_threshold,
-        "categorical_fallback": categorical_fallback,
+        "refinement_lof_threshold_source": (
+            "validation" if use_lof_refinement else None
+        ),
         "grouped_actionable": [group.name for group in grouped_actionable],
         "validation_fraction": validation_fraction,
         "test_selection": test_selection,
@@ -504,10 +461,9 @@ def generate_tabicl_counterfactuals(
         "selection_history_per_point": selection_history_per_point,
         "confidence_grid_per_point": confidence_grid_per_point,
         "categorical_history_per_point": categorical_history_per_point,
-        "rounds_per_point": rounds_per_point,
+        "validity_steps_per_point": validity_steps_per_point,
         "initial_valid_step_per_point": initial_valid_step_per_point,
         "refinement_steps_per_point": refinement_steps_per_point,
-        "round_history_per_point": round_history_per_point,
         "lof_per_point": lof_per_point,
         "target_probability_per_point": target_probability_per_point,
     }
@@ -540,12 +496,12 @@ def run_and_report(
         "context_update": info["context_update"],
         "point_estimate": info["point_estimate"],
         "project_to_domain": info["project_to_domain"],
-        "retain_best": info["retain_best"],
         "candidate_quantiles": info["candidate_quantiles"],
         "confidence_quantiles": info["confidence_quantiles"],
-        "lof_first": info["lof_first"],
-        "probability_slack": info["probability_slack"],
-        "categorical_fallback": info["categorical_fallback"],
+        "use_lof_refinement": info["use_lof_refinement"],
+        "max_validity_steps": info["max_validity_steps"],
+        "allow_revisits": info["allow_revisits"],
+        "categorical_proposal_count": info["categorical_proposal_count"],
         "split_variant": info["split_variant"],
         "test_selection": info["test_selection"],
         "n_estimators": info["n_estimators"],
@@ -663,28 +619,28 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--lof-first",
+        "--lof-refinement",
+        dest="use_lof_refinement",
         action="store_true",
         help=(
-            "Among immediately valid candidates choose minimum LOF; before a "
-            "flip, use LOF among candidates within --probability-slack of the "
-            "best target probability."
+            "After reaching validity, preserve validity while improving LOF. "
+            "The LOF stopping threshold is calibrated on validation rows."
         ),
     )
     parser.add_argument(
-        "--probability-slack",
-        type=float,
-        default=0.0,
-        help="Pre-flip probability window in which LOF decides (default: 0).",
-    )
-    parser.add_argument(
-        "--max-rounds",
+        "--max-validity-steps",
         type=int,
-        default=1,
+        default=None,
         help=(
-            "Greedy passes over actionable features. Values above 1 allow "
-            "earlier features to be revisited after later edits (default: 1)."
+            "Maximum committed probability-ascent actions before validity. "
+            "Defaults to the number of actionable feature units."
         ),
+    )
+    parser.add_argument(
+        "--allow-revisits",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Allow an action unit to be proposed again after another edit.",
     )
     parser.add_argument(
         "--max-refinement-steps",
@@ -703,15 +659,7 @@ def main() -> None:
         type=float,
         default=0.90,
         help=(
-            "Refine only valid CFs above this training-LOF quantile (default: 0.90)."
-        ),
-    )
-    parser.add_argument(
-        "--categorical-fallback",
-        action="store_true",
-        help=(
-            "After numerical search fails, use TabICL categorical conditionals "
-            "and atomic one-hot group swaps (mixed datasets only)."
+            "Refine only valid CFs above this validation-LOF quantile (default: 0.90)."
         ),
     )
     parser.add_argument(
@@ -742,11 +690,6 @@ def main() -> None:
         action="store_true",
         help="Disable training-range/support projection (diagnostic only).",
     )
-    parser.add_argument(
-        "--no-retain-best",
-        action="store_true",
-        help="Return the final failed state instead of its best probability state.",
-    )
     parser.add_argument("--cache-dir", type=Path, default=None)
     args = parser.parse_args()
 
@@ -765,7 +708,6 @@ def main() -> None:
             context_update=args.context_update,
             point_estimate=args.point_estimate,
             project_to_domain=not args.no_domain_projection,
-            retain_best=not args.no_retain_best,
             candidate_quantiles=(
                 None
                 if args.candidate_quantiles is None
@@ -776,13 +718,12 @@ def main() -> None:
                 if args.confidence_quantiles is None
                 else tuple(args.confidence_quantiles)
             ),
-            lof_first=args.lof_first,
-            probability_slack=args.probability_slack,
-            max_rounds=args.max_rounds,
+            use_lof_refinement=args.use_lof_refinement,
+            max_validity_steps=args.max_validity_steps,
+            allow_revisits=args.allow_revisits,
             max_refinement_steps=args.max_refinement_steps,
             min_relative_lof_gain=args.min_relative_lof_gain,
             refinement_lof_quantile=args.refinement_lof_quantile,
-            categorical_fallback=args.categorical_fallback,
             validation_fraction=args.validation_fraction,
             test_selection=args.test_selection,
             drop_heloc_all_minus9=args.drop_heloc_all_minus9,
