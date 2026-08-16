@@ -129,6 +129,7 @@ def generate_tabicl_counterfactuals(
     max_validity_steps: int | None = None,
     allow_revisits: bool = True,
     joint_shortlist_size: int = 16,
+    primary_shortlist_size: int | None = None,
     max_extra_actions: int = 1,
     min_joint_log_gain: float = 0.0,
     n_counterfactuals: int = 1,
@@ -170,6 +171,12 @@ def generate_tabicl_counterfactuals(
         raise ValueError("max_validity_steps must be at least 1")
     if joint_shortlist_size < 1:
         raise ValueError("joint_shortlist_size must be at least 1")
+    if primary_shortlist_size is not None and not (
+        1 <= primary_shortlist_size <= joint_shortlist_size
+    ):
+        raise ValueError(
+            "primary_shortlist_size must be between 1 and joint_shortlist_size"
+        )
     if max_extra_actions < 0:
         raise ValueError("max_extra_actions must be non-negative")
     if min_joint_log_gain < 0:
@@ -297,6 +304,7 @@ def generate_tabicl_counterfactuals(
         f"candidate_quantiles={candidate_quantiles}, "
         f"confidence_quantiles={confidence_quantiles}, "
         f"cf_mode={cf_mode}, joint_shortlist_size={joint_shortlist_size}, "
+        f"primary_shortlist_size={primary_shortlist_size}, "
         f"max_extra_actions={max_extra_actions}, "
         f"min_joint_log_gain={min_joint_log_gain}, "
         f"n_counterfactuals={n_counterfactuals}, "
@@ -544,6 +552,7 @@ def generate_tabicl_counterfactuals(
             max_validity_steps=effective_max_validity_steps,
             allow_revisits=allow_revisits,
             joint_shortlist_size=joint_shortlist_size,
+            primary_shortlist_size=primary_shortlist_size,
             max_extra_actions=max_extra_actions,
             min_joint_log_gain=min_joint_log_gain,
             n_counterfactuals=n_counterfactuals,
@@ -682,6 +691,7 @@ def generate_tabicl_counterfactuals(
         "max_validity_steps": effective_max_validity_steps,
         "allow_revisits": allow_revisits,
         "joint_shortlist_size": joint_shortlist_size,
+        "primary_shortlist_size": primary_shortlist_size,
         "max_extra_actions": max_extra_actions,
         "min_joint_log_gain": min_joint_log_gain,
         "n_counterfactuals_requested": n_counterfactuals,
@@ -969,6 +979,12 @@ def main() -> None:
         help="Maximum valid alternatives in the one-shot whole-row batch.",
     )
     parser.add_argument(
+        "--primary-shortlist-size",
+        type=int,
+        default=None,
+        help="Optional shortlist prefix used to choose the rank-1 CFE.",
+    )
+    parser.add_argument(
         "--max-extra-actions",
         type=int,
         default=1,
@@ -1047,6 +1063,7 @@ def main() -> None:
             max_validity_steps=args.max_validity_steps,
             allow_revisits=args.allow_revisits,
             joint_shortlist_size=args.joint_shortlist_size,
+            primary_shortlist_size=args.primary_shortlist_size,
             max_extra_actions=args.max_extra_actions,
             min_joint_log_gain=args.min_joint_log_gain,
             n_counterfactuals=args.n_counterfactuals,

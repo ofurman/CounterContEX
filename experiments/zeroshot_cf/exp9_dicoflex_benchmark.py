@@ -53,6 +53,7 @@ DEFAULT_VALIDATION_FRACTION = 0.2
 DEFAULT_N_ESTIMATORS = 1
 DEFAULT_MAX_VALIDITY_STEPS = 100
 DEFAULT_JOINT_SHORTLIST_SIZE = 16
+DEFAULT_PRIMARY_SHORTLIST_SIZE = 16
 DEFAULT_MAX_EXTRA_ACTIONS = 1
 DEFAULT_MIN_JOINT_LOG_GAIN = 0.0
 DEFAULT_TABICL_JOINT_PERMUTATIONS = 1
@@ -96,6 +97,7 @@ def run_dataset(  # noqa: PLR0913
     max_validity_steps: int = DEFAULT_MAX_VALIDITY_STEPS,
     allow_revisits: bool = True,
     joint_shortlist_size: int = DEFAULT_JOINT_SHORTLIST_SIZE,
+    primary_shortlist_size: int = DEFAULT_PRIMARY_SHORTLIST_SIZE,
     max_extra_actions: int = DEFAULT_MAX_EXTRA_ACTIONS,
     min_joint_log_gain: float = DEFAULT_MIN_JOINT_LOG_GAIN,
     n_counterfactuals: int = DEFAULT_N_COUNTERFACTUALS,
@@ -128,6 +130,7 @@ def run_dataset(  # noqa: PLR0913
         max_validity_steps=max_validity_steps,
         allow_revisits=allow_revisits,
         joint_shortlist_size=joint_shortlist_size,
+        primary_shortlist_size=primary_shortlist_size,
         max_extra_actions=max_extra_actions,
         min_joint_log_gain=min_joint_log_gain,
         n_counterfactuals=n_counterfactuals,
@@ -388,6 +391,7 @@ def run_dataset(  # noqa: PLR0913
         "conditional_estimator_cache": info["conditional_estimator_cache"],
         "tabicl_kv_cache": info["tabicl_kv_cache"],
         "joint_shortlist_size": joint_shortlist_size,
+        "primary_shortlist_size": primary_shortlist_size,
         "max_extra_actions": max_extra_actions,
         "min_joint_log_gain": min_joint_log_gain,
         "diversity_selection": (
@@ -693,6 +697,12 @@ def main() -> None:
         help="Maximum alternatives in the one-shot whole-row scoring batch.",
     )
     parser.add_argument(
+        "--primary-shortlist-size",
+        type=int,
+        default=DEFAULT_PRIMARY_SHORTLIST_SIZE,
+        help="Shortlist prefix used to choose the rank-1 CFE.",
+    )
+    parser.add_argument(
         "--max-extra-actions",
         type=int,
         default=DEFAULT_MAX_EXTRA_ACTIONS,
@@ -738,6 +748,7 @@ def main() -> None:
         max_validity_steps=args.max_validity_steps,
         allow_revisits=args.allow_revisits,
         joint_shortlist_size=args.joint_shortlist_size,
+        primary_shortlist_size=args.primary_shortlist_size,
         max_extra_actions=args.max_extra_actions,
         min_joint_log_gain=args.min_joint_log_gain,
         n_counterfactuals=args.n_counterfactuals,

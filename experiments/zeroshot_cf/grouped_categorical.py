@@ -166,6 +166,7 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     max_validity_steps: int | None = None,
     allow_revisits: bool = True,
     joint_shortlist_size: int = 16,
+    primary_shortlist_size: int | None = None,
     max_extra_actions: int = 1,
     min_joint_log_gain: float = 0.0,
     n_counterfactuals: int = 1,
@@ -189,8 +190,9 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     scores the sparse incumbent plus that shortlist in one whole-row TabICL
     batch. The incumbent remains the fallback unless raw joint log density
     improves. When multiple counterfactuals are requested, the same scored
-    batch supplies a quality-constrained pool. The existing single-CFE winner
-    remains first, and later rows are selected by changed-action-set diversity.
+    batch supplies a quality-constrained pool. ``primary_shortlist_size`` can
+    freeze the first CFE to a smaller prefix while later rows use the full
+    diversity pool. Later rows are selected by changed-action-set diversity.
 
     TabICL ranks categorical alternatives within each group before the target
     classifier compares the resulting rows globally. Each action unit is used
@@ -205,6 +207,12 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         raise ValueError("cf_mode must be 'sparse' or 'data_plausible'")
     if joint_shortlist_size < 1:
         raise ValueError("joint_shortlist_size must be at least 1")
+    if primary_shortlist_size is not None and not (
+        1 <= primary_shortlist_size <= joint_shortlist_size
+    ):
+        raise ValueError(
+            "primary_shortlist_size must be between 1 and joint_shortlist_size"
+        )
     if max_extra_actions < 0:
         raise ValueError("max_extra_actions must be non-negative")
     if min_joint_log_gain < 0:
@@ -753,7 +761,14 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                         joint_batch.joint_log_density[1:]
                         > current_joint_log_density + min_joint_log_gain
                     )
-                    eligible = shortlist[improving]
+                    primary_limit = (
+                        len(shortlist)
+                        if primary_shortlist_size is None
+                        else min(primary_shortlist_size, len(shortlist))
+                    )
+                    primary_improving = improving.copy()
+                    primary_improving[primary_limit:] = False
+                    eligible = shortlist[primary_improving]
                     if len(eligible):
                         ranked = np.lexsort(
                             (
@@ -1078,6 +1093,7 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                 else int(getattr(tabicl_joint_plausibility, "row_count", 0))
             ),
             "joint_shortlist_size": joint_shortlist_size,
+            "primary_shortlist_size": primary_shortlist_size,
             "max_extra_actions": max_extra_actions,
             "min_joint_log_gain": min_joint_log_gain,
             "n_counterfactuals_requested": n_counterfactuals,

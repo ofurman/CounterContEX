@@ -486,6 +486,53 @@ def test_data_plausible_reuses_one_joint_batch_for_multiple_counterfactuals() ->
     assert info["n_counterfactuals_requested"] == 5
 
 
+def test_diversity_pool_does_not_change_frozen_primary_shortlist() -> None:
+    class UniformSampler:
+        def sample_candidate_grid(
+            self,
+            _query,
+            columns,
+            *,
+            quantiles,
+            fixed_target,
+            confidences=None,
+        ):
+            del quantiles, fixed_target, confidences
+            return np.ones((len(columns), 1))
+
+    class AnyActionDisc:
+        def predict_proba(self, X):
+            p1 = 0.1 + 0.6 * np.max(X, axis=1)
+            return np.column_stack([1.0 - p1, p1])
+
+    class PreferLateCandidateScorer:
+        def score_rows(self, rows, target_class):
+            assert target_class == 1
+            scores = rows[:, 1] + 2.0 * rows[:, 2] + 3.0 * rows[:, 3]
+            return TabICLJointScoreBatch(scores)
+
+    counterfactual, _, info = greedy_mixed_counterfactual(
+        UniformSampler(),
+        AnyActionDisc(),
+        np.zeros(4),
+        y_target=1,
+        numerical_columns=list(range(4)),
+        categorical_groups=[],
+        candidate_quantiles=(0.5,),
+        cf_mode="data_plausible",
+        tabicl_joint_plausibility=PreferLateCandidateScorer(),
+        joint_shortlist_size=3,
+        primary_shortlist_size=1,
+        max_extra_actions=1,
+        n_counterfactuals=4,
+    )
+
+    np.testing.assert_array_equal(counterfactual, [1.0, 1.0, 0.0, 0.0])
+    diverse = np.asarray(info["diverse_counterfactuals"])
+    np.testing.assert_array_equal(diverse[0], counterfactual)
+    assert any(np.array_equal(row, [1.0, 0.0, 0.0, 1.0]) for row in diverse)
+
+
 def test_global_mixed_search_chooses_categorical_action_over_numerical() -> None:
     """A category swap goes first when it has the largest classifier effect."""
     group = OneHotActionGroup("job", (1, 2))
