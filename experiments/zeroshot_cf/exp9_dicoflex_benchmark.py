@@ -79,7 +79,9 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     print(f"Wrote {path}")
 
 
-def _levels_text(values: tuple[float, ...]) -> str:
+def _levels_text(values: tuple[float, ...] | None) -> str:
+    if values is None:
+        return "none"
     return ";".join(f"{value:g}" for value in values)
 
 
@@ -91,7 +93,7 @@ def run_dataset(  # noqa: PLR0913
     temperature: float = DEFAULT_TEMPERATURE,
     tau: float = TAU,
     candidate_quantiles: tuple[float, ...] = DEFAULT_CANDIDATE_QUANTILES,
-    confidence_quantiles: tuple[float, ...] = DEFAULT_CONFIDENCE_QUANTILES,
+    confidence_quantiles: tuple[float, ...] | None = DEFAULT_CONFIDENCE_QUANTILES,
     cf_mode: str = "sparse",
     tabicl_joint_permutations: int = DEFAULT_TABICL_JOINT_PERMUTATIONS,
     max_validity_steps: int = DEFAULT_MAX_VALIDITY_STEPS,
@@ -667,6 +669,15 @@ def main() -> None:
         default=DEFAULT_CONFIDENCE_QUANTILES,
     )
     parser.add_argument(
+        "--confidence-conditioning",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Append target-class confidence to the TabICL proposal context "
+            "(default: enabled)."
+        ),
+    )
+    parser.add_argument(
         "--validation-fraction",
         type=float,
         default=DEFAULT_VALIDATION_FRACTION,
@@ -748,7 +759,11 @@ def main() -> None:
         temperature=args.temperature,
         tau=args.tau,
         candidate_quantiles=tuple(args.candidate_quantiles),
-        confidence_quantiles=tuple(args.confidence_quantiles),
+        confidence_quantiles=(
+            tuple(args.confidence_quantiles)
+            if args.confidence_conditioning
+            else None
+        ),
         cf_mode=args.cf_mode.replace("-", "_"),
         tabicl_joint_permutations=args.tabicl_joint_permutations,
         max_validity_steps=args.max_validity_steps,
