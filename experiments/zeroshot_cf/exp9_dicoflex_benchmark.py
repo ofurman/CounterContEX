@@ -101,7 +101,6 @@ def run_dataset(  # noqa: PLR0913
     max_extra_actions: int = DEFAULT_MAX_EXTRA_ACTIONS,
     min_joint_log_gain: float = DEFAULT_MIN_JOINT_LOG_GAIN,
     n_counterfactuals: int = DEFAULT_N_COUNTERFACTUALS,
-    _legacy_lof_refinement: bool = False,
     validation_fraction: float = DEFAULT_VALIDATION_FRACTION,
     drop_heloc_all_minus9: bool = True,
     tabicl_cache_dir: Path | None = None,
@@ -134,7 +133,6 @@ def run_dataset(  # noqa: PLR0913
         max_extra_actions=max_extra_actions,
         min_joint_log_gain=min_joint_log_gain,
         n_counterfactuals=n_counterfactuals,
-        _legacy_lof_refinement=_legacy_lof_refinement,
         validation_fraction=validation_fraction,
         test_selection="stratified",
         drop_heloc_all_minus9=(
@@ -360,13 +358,9 @@ def run_dataset(  # noqa: PLR0913
     row: dict[str, Any] = {
         "dataset": dataset_name,
         "method": (
-            "tabicl_v2_legacy_lof"
-            if _legacy_lof_refinement
-            else (
-                "tabicl_v2_data_plausible_diverse"
-                if n_counterfactuals > 1
-                else f"tabicl_v2_{cf_mode}"
-            )
+            "tabicl_v2_data_plausible_diverse"
+            if n_counterfactuals > 1
+            else f"tabicl_v2_{cf_mode}"
         ),
         "cf_mode": cf_mode,
         "split_variant": bundle.split_variant,
@@ -408,19 +402,15 @@ def run_dataset(  # noqa: PLR0913
             else "none"
         ),
         "search_schedule": (
-            "legacy_probability_ascent_then_lof_refinement"
-            if _legacy_lof_refinement
-            else (
-                (
-                    "probability_ascent_until_valid_then_one_shot_joint_"
-                    "reranking_then_diverse_set_selection"
-                    if n_counterfactuals > 1
-                    else "probability_ascent_until_valid_then_one_shot_joint_"
-                    "reranking"
-                )
-                if cf_mode == "data_plausible"
-                else "probability_ascent_until_first_sparse_valid"
+            (
+                "probability_ascent_until_valid_then_one_shot_joint_"
+                "reranking_then_diverse_set_selection"
+                if n_counterfactuals > 1
+                else "probability_ascent_until_valid_then_one_shot_joint_"
+                "reranking"
             )
+            if cf_mode == "data_plausible"
+            else "probability_ascent_until_first_sparse_valid"
         ),
         "n_estimators": n_estimators,
         "temperature": temperature,
@@ -446,9 +436,7 @@ def run_dataset(  # noqa: PLR0913
         "l0_count_mean": l0_count_mean,
         "steps_mean": steps_mean,
         "validity_steps_mean": validity_steps_mean,
-        "post_valid_refinement": (
-            _legacy_lof_refinement or cf_mode == "data_plausible"
-        ),
+        "post_valid_refinement": cf_mode == "data_plausible",
         "refinement_steps_mean": float(refinement_steps.mean()),
         "refined_fraction": float((refinement_steps > 0).mean()),
         "accepted_refinement_count_mean": float(accepted_refinements.mean()),

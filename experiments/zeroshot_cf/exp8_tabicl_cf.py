@@ -133,10 +133,6 @@ def generate_tabicl_counterfactuals(
     max_extra_actions: int = 1,
     min_joint_log_gain: float = 0.0,
     n_counterfactuals: int = 1,
-    _legacy_lof_refinement: bool = False,
-    _legacy_lof_max_refinement_steps: int = 2,
-    _legacy_min_relative_lof_gain: float = 0.05,
-    _legacy_refinement_lof_quantile: float = 0.90,
     validation_fraction: float = 0.0,
     test_selection: str = "first",
     drop_heloc_all_minus9: bool = False,
@@ -161,10 +157,6 @@ def generate_tabicl_counterfactuals(
             raise ValueError("confidence_quantiles require candidate_quantiles")
     if cf_mode not in CF_MODES:
         raise ValueError(f"cf_mode must be one of {CF_MODES}, got {cf_mode!r}")
-    if _legacy_lof_refinement and candidate_quantiles is None:
-        raise ValueError("legacy LOF refinement requires candidate_quantiles")
-    if _legacy_lof_refinement and cf_mode != "sparse":
-        raise ValueError("legacy LOF refinement cannot use data_plausible mode")
     if tabicl_joint_permutations < 1:
         raise ValueError("tabicl_joint_permutations must be positive")
     if max_validity_steps is not None and max_validity_steps < 1:
@@ -189,12 +181,6 @@ def generate_tabicl_counterfactuals(
         raise ValueError(
             "n_counterfactuals cannot exceed joint_shortlist_size + 1"
         )
-    if _legacy_lof_max_refinement_steps < 0:
-        raise ValueError("legacy LOF refinement steps must be non-negative")
-    if not 0.0 <= _legacy_min_relative_lof_gain < 1.0:
-        raise ValueError("legacy minimum relative LOF gain must be in [0, 1)")
-    if not 0.0 < _legacy_refinement_lof_quantile < 1.0:
-        raise ValueError("legacy refinement LOF quantile must be in (0, 1)")
     if test_selection not in {"first", "stratified"}:
         raise ValueError("test_selection must be 'first' or 'stratified'")
 
@@ -273,27 +259,6 @@ def generate_tabicl_counterfactuals(
         if confidence_quantiles is not None
         else None
     )
-
-    plausibility_model = None
-    refinement_lof_threshold = None
-    if _legacy_lof_refinement:
-        from sklearn.neighbors import LocalOutlierFactor
-
-        plausibility_model = LocalOutlierFactor(n_neighbors=20, novelty=True)
-        plausibility_model.fit(X_train)
-        if bundle.X_val is None:
-            raise ValueError(
-                "LOF refinement requires validation data; set validation_fraction > 0"
-            )
-        validation_lof_scores = -np.asarray(
-            plausibility_model.score_samples(bundle.X_val), dtype=np.float64
-        )
-        refinement_lof_threshold = float(
-            np.quantile(
-                validation_lof_scores,
-                _legacy_refinement_lof_quantile,
-            )
-        )
 
     print(f"\n=== Experiment 8 (TabICL): {dataset_name.upper()} ===")
     print(
@@ -548,7 +513,6 @@ def generate_tabicl_counterfactuals(
             candidate_confidences=point_confidence_grid,
             feature_domains=feature_domains,
             cf_mode=cf_mode,
-            plausibility_model=plausibility_model,
             tabicl_joint_plausibility=tabicl_joint_plausibility,
             max_validity_steps=effective_max_validity_steps,
             allow_revisits=allow_revisits,
@@ -557,9 +521,6 @@ def generate_tabicl_counterfactuals(
             max_extra_actions=max_extra_actions,
             min_joint_log_gain=min_joint_log_gain,
             n_counterfactuals=n_counterfactuals,
-            max_refinement_steps=_legacy_lof_max_refinement_steps,
-            min_relative_lof_gain=_legacy_min_relative_lof_gain,
-            refinement_lof_threshold=refinement_lof_threshold,
             tau=tau,
             temperature=temperature,
             category_distribution=category_distribution,
@@ -656,11 +617,7 @@ def generate_tabicl_counterfactuals(
             )
 
     runtime_s = time.perf_counter() - started
-    lof_per_point = (
-        None
-        if plausibility_model is None
-        else -np.asarray(plausibility_model.score_samples(X_cf), dtype=np.float64)
-    )
+    lof_per_point = None
     target_probability_per_point = np.asarray(disc_model.predict_proba(X_cf))[
         np.arange(len(X_cf)), y_target.astype(int)
     ]
@@ -687,13 +644,9 @@ def generate_tabicl_counterfactuals(
         "confidence_quantiles": confidence_quantiles,
         "cf_mode": cf_mode,
         "plausibility_backend": (
-            "legacy_lof"
-            if _legacy_lof_refinement
-            else (
-                "tabicl_joint_one_shot"
-                if cf_mode == "data_plausible"
-                else "proposal_support"
-            )
+            "tabicl_joint_one_shot"
+            if cf_mode == "data_plausible"
+            else "proposal_support"
         ),
         "tabicl_joint_permutations": tabicl_joint_permutations,
         "max_validity_steps": effective_max_validity_steps,

@@ -141,9 +141,6 @@ class CompactMixedSampler:
         return self.sampler.score_joint_rows(self.codec.encode(X_rows), **kwargs)
 
 
-CategoryDistribution = Callable[
-    [np.ndarray, OneHotActionGroup], tuple[np.ndarray, np.ndarray]
-]
 ConditionedCategoryDistribution = Callable[
     [np.ndarray, OneHotActionGroup, float | None], tuple[np.ndarray, np.ndarray]
 ]
@@ -161,7 +158,6 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     candidate_confidences: Sequence[float] | None = None,
     feature_domains=None,
     cf_mode: str = "sparse",
-    plausibility_model=None,
     tabicl_joint_plausibility=None,
     max_validity_steps: int | None = None,
     allow_revisits: bool = True,
@@ -170,9 +166,6 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     max_extra_actions: int = 1,
     min_joint_log_gain: float = 0.0,
     n_counterfactuals: int = 1,
-    max_refinement_steps: int = 2,
-    min_relative_lof_gain: float = 0.05,
-    refinement_lof_threshold: float | None = None,
     tau: float = 0.5,
     temperature: float = 1e-9,
     category_distribution: ConditionedCategoryDistribution | None = None,
@@ -225,14 +218,6 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         raise ValueError("data_plausible mode requires a TabICL joint scorer")
     if cf_mode == "sparse" and tabicl_joint_plausibility is not None:
         raise ValueError("sparse mode must not receive a TabICL joint scorer")
-    if max_refinement_steps < 0:
-        raise ValueError("max_refinement_steps must be non-negative")
-    if not 0.0 <= min_relative_lof_gain < 1.0:
-        raise ValueError("min_relative_lof_gain must be in [0, 1)")
-    if refinement_lof_threshold is not None and refinement_lof_threshold <= 0:
-        raise ValueError("refinement_lof_threshold must be positive")
-    if plausibility_model is not None and cf_mode != "sparse":
-        raise ValueError("legacy LOF refinement cannot be combined with cf_mode")
     if categorical_proposal_count < 1:
         raise ValueError("categorical_proposal_count must be at least 1")
     numerical = [int(column) for column in numerical_columns]
@@ -293,20 +278,6 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
             sparsity += np.argmax(matrix[:, columns], axis=1) != factual_category
         proximity = np.linalg.norm(matrix - factual, axis=1)
         return sparsity, proximity
-
-    def valid_lof_scores(
-        rows: np.ndarray,
-        valid_mask: np.ndarray,
-    ) -> np.ndarray | None:
-        """Score only valid candidates; invalid rows do not use plausibility."""
-        if plausibility_model is None or not np.any(valid_mask):
-            return None
-        scores = np.full(len(rows), np.inf, dtype=np.float64)
-        scores[valid_mask] = -np.asarray(
-            plausibility_model.score_samples(rows[valid_mask]),
-            dtype=np.float64,
-        )
-        return scores
 
     def proposal_supports(candidate_metadata: Sequence[dict]) -> np.ndarray:
         """Return comparable local-support ranks for cheap prescreening."""
@@ -379,13 +350,10 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     def select_valid_candidate(
         eligible: np.ndarray,
         probabilities: np.ndarray,
-        lof_scores: np.ndarray | None,
         rows: np.ndarray,
         candidate_metadata: Sequence[dict],
     ) -> int:
         """Choose a sparse valid candidate without querying joint TabICL."""
-        if lof_scores is not None:
-            return int(eligible[np.argmin(lof_scores[eligible])])
         candidate_sparsity, candidate_proximity = counterfactual_costs(rows)
         proposal_support = proposal_supports(candidate_metadata)
         support_penalty = -np.log(np.clip(proposal_support, 1e-12, 1.0))
@@ -400,11 +368,6 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         return int(eligible[ranked[0]])
 
     flipped, current_probability = flip_state(current)
-    current_lof = (
-        None
-        if plausibility_model is None or not flipped
-        else float(-plausibility_model.score_samples(current.reshape(1, -1))[0])
-    )
     current_joint_log_density: float | None = None
     initial_joint_log_density: float | None = None
     initial_sparse_action_count: int | None = (
@@ -421,9 +384,7 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     refined_numerical: set[int] = set()
     refined_groups: set[str] = set()
     joint_rerank_attempted = False
-    post_valid_refinement = (
-        plausibility_model is not None or tabicl_joint_plausibility is not None
-    )
+    post_valid_refinement = tabicl_joint_plausibility is not None
     refinement_stopping_reason = "not_started"
     diverse_counterfactuals: np.ndarray | None = None
     diverse_joint_log_densities: np.ndarray | None = None
@@ -432,24 +393,13 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     joint_scoring_runtime_s = 0.0
     diversity_selection_runtime_s = 0.0
 
-    def plausibility_threshold_reached() -> bool:
-        return bool(
-            plausibility_model is not None
-            and refinement_lof_threshold is not None
-            and current_lof is not None
-            and current_lof <= refinement_lof_threshold
-        )
-
     round_limit = max_validity_steps if allow_revisits else 1
     for round_index in range(round_limit):
-        refinement_limit = (
-            1 if tabicl_joint_plausibility is not None else max_refinement_steps
-        )
+        refinement_limit = 1
         if flipped and (
             not post_valid_refinement
             or refinement_steps >= refinement_limit
             or joint_rerank_attempted
-            or plausibility_threshold_reached()
         ):
             break
         search_passes_used = round_index + 1
@@ -464,7 +414,6 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                 not post_valid_refinement
                 or refinement_steps >= refinement_limit
                 or joint_rerank_attempted
-                or plausibility_threshold_reached()
             ):
                 break
             trial_rows: list[np.ndarray] = []
@@ -706,7 +655,6 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
             trials = np.stack(trial_rows)
             probabilities, predictions = classifier_outputs(trials)
             valid = (predictions == y_target) & (probabilities >= tau)
-            lof_scores = valid_lof_scores(trials, valid)
             tabicl_joint_scores = None
 
             if flipped:
@@ -858,35 +806,12 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                         break
                     refinement_stopping_reason = "one_shot_accepted"
                 else:
-                    if lof_scores is None or current_lof is None:
-                        break
-                    relative_lof_gain = (current_lof - lof_scores) / max(
-                        abs(current_lof), 1e-12
-                    )
-                    eligible = np.flatnonzero(
-                        valid
-                        & (relative_lof_gain >= min_relative_lof_gain)
-                        & unvisited
-                    )
-                    if not len(eligible):
-                        break
-                    candidate_sparsity, candidate_proximity = counterfactual_costs(
-                        trials
-                    )
-                    ranked = np.lexsort(
-                        (
-                            lof_scores[eligible],
-                            candidate_proximity[eligible],
-                            candidate_sparsity[eligible],
-                        )
-                    )
-                    best = int(eligible[ranked[0]])
+                    break
             elif valid.any():
                 eligible = np.flatnonzero(valid)
                 best = select_valid_candidate(
                     eligible,
                     probabilities,
-                    lof_scores,
                     trials,
                     metadata,
                 )
@@ -945,14 +870,12 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                 trials = np.stack(trial_rows)
                 probabilities, predictions = classifier_outputs(trials)
                 valid = (predictions == y_target) & (probabilities >= tau)
-                lof_scores = valid_lof_scores(trials, valid)
                 tabicl_joint_scores = None
                 if valid.any():
                     eligible = np.flatnonzero(valid)
                     best = select_valid_candidate(
                         eligible,
                         probabilities,
-                        lof_scores,
                         trials,
                         metadata,
                     )
@@ -974,7 +897,6 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                         "plausibility_refinement" if was_flipped else "validity_search"
                     ),
                     "target_probability": selected_probability,
-                    "lof": (None if lof_scores is None else float(lof_scores[best])),
                     "tabicl_joint_log_density": (
                         None
                         if tabicl_joint_scores is None
@@ -988,15 +910,9 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
             selected_sparsity, selected_proximity = counterfactual_costs(trials[best])
             selected["action_sparsity"] = int(selected_sparsity[0])
             selected["proximity_l2"] = float(selected_proximity[0])
-            if was_flipped and current_lof is not None and lof_scores is not None:
-                selected["relative_lof_gain"] = float(
-                    (current_lof - lof_scores[best]) / max(abs(current_lof), 1e-12)
-                )
             current = trials[best]
             visited_rows.add(current.tobytes())
             current_probability = selected_probability
-            if lof_scores is not None:
-                current_lof = float(lof_scores[best])
             if tabicl_joint_scores is not None:
                 current_joint_log_density = float(
                     tabicl_joint_scores["joint_log_density"][best]
@@ -1054,9 +970,7 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     if not flipped:
         refinement_stopping_reason = "validity_not_reached"
     elif tabicl_joint_plausibility is None:
-        refinement_stopping_reason = (
-            "legacy_lof_complete" if plausibility_model is not None else "sparse_valid"
-        )
+        refinement_stopping_reason = "sparse_valid"
     elif refinement_stopping_reason == "not_started":
         refinement_stopping_reason = "one_shot_not_attempted"
     joint_log_density_gain = (
@@ -1135,156 +1049,5 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                 else max(0, final_action_count - initial_sparse_action_count)
             ),
             "refinement_stopping_reason": refinement_stopping_reason,
-        },
-    )
-
-
-def grouped_categorical_fallback(
-    x_start: np.ndarray,
-    *,
-    disc,
-    y_target: int,
-    groups: Sequence[OneHotActionGroup],
-    category_distribution: CategoryDistribution,
-    plausibility_model=None,
-    tau: float = 0.5,
-) -> tuple[np.ndarray, list[int], dict]:
-    """Greedily apply valid whole-group category swaps.
-
-    Every category in the metadata-defined domain is considered. Before a flip,
-    the candidate with maximum target-class probability is committed. As soon
-    as any candidate is valid, validity becomes a hard gate and the lowest-LOF
-    valid candidate is selected. TabICL is queried only for the selected
-    group's conditional distribution; querying all groups cannot change this
-    selection rule and is needlessly expensive. A group is edited at most once.
-    """
-    x_cf = np.asarray(x_start, dtype=np.float64).copy()
-    groups = list(groups)
-    used_groups: set[str] = set()
-    changed_columns: list[int] = []
-    history: list[dict] = []
-
-    def classifier_outputs(rows: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        probability_matrix = np.asarray(disc.predict_proba(np.atleast_2d(rows)))
-        classes = np.asarray(
-            getattr(disc, "classes_", np.arange(probability_matrix.shape[1]))
-        )
-        target_positions = np.flatnonzero(classes == y_target)
-        if len(target_positions) != 1:
-            raise ValueError(
-                f"target class {y_target} is absent from classifier classes"
-            )
-        predictions = classes[np.argmax(probability_matrix, axis=1)]
-        return probability_matrix[:, int(target_positions[0])], predictions
-
-    def flip_state(row: np.ndarray) -> tuple[bool, float]:
-        probabilities, predictions = classifier_outputs(row.reshape(1, -1))
-        probability = float(probabilities[0])
-        prediction = int(predictions[0])
-        return prediction == y_target and probability >= tau, probability
-
-    flipped, current_probability = flip_state(x_cf)
-    while not flipped:
-        trials: list[np.ndarray] = []
-        trial_groups: list[OneHotActionGroup] = []
-        trial_categories: list[int] = []
-        for group in groups:
-            if group.name in used_groups:
-                continue
-            group_values = x_cf[list(group.columns)]
-            if not np.isclose(group_values.sum(), 1.0):
-                raise ValueError(f"one-hot group {group.name!r} is invalid")
-            current_category = int(np.argmax(group_values))
-            # Enumerate the complete metadata domain to protect coverage. A
-            # category missing from the local kNN context remains a valid action.
-            for category in range(len(group.columns)):
-                if category == current_category:
-                    continue
-                trial = x_cf.copy()
-                trial[list(group.columns)] = 0.0
-                trial[group.columns[category]] = 1.0
-                trials.append(trial)
-                trial_groups.append(group)
-                trial_categories.append(category)
-
-        if not trials:
-            break
-
-        trial_matrix = np.stack(trials)
-        target_probabilities, predictions = classifier_outputs(trial_matrix)
-        valid = (predictions == y_target) & (target_probabilities >= tau)
-        lof_scores = None
-        if plausibility_model is not None and valid.any():
-            lof_scores = np.full(len(trial_matrix), np.inf, dtype=np.float64)
-            lof_scores[valid] = -np.asarray(
-                plausibility_model.score_samples(trial_matrix[valid]),
-                dtype=np.float64,
-            )
-
-        if valid.any():
-            eligible = np.flatnonzero(valid)
-            if lof_scores is None:
-                best = int(eligible[np.argmax(target_probabilities[eligible])])
-            else:
-                best = int(eligible[np.argmin(lof_scores[eligible])])
-        else:
-            best = int(np.argmax(target_probabilities))
-            if float(target_probabilities[best]) <= current_probability:
-                break
-
-        selected_group = trial_groups[best]
-        categories, conditional_probabilities = category_distribution(
-            x_cf,
-            selected_group,
-        )
-        categories = np.asarray(categories, dtype=int)
-        conditional_probabilities = np.asarray(
-            conditional_probabilities,
-            dtype=np.float64,
-        )
-        if categories.ndim != 1 or conditional_probabilities.shape != categories.shape:
-            raise ValueError("category_distribution must return aligned 1D arrays")
-        if any(
-            category < 0 or category >= len(selected_group.columns)
-            for category in categories
-        ):
-            raise ValueError(
-                f"TabICL returned a category outside group {selected_group.name!r}"
-            )
-        conditional_probability = dict(
-            zip(categories.tolist(), conditional_probabilities.tolist())
-        ).get(trial_categories[best], 0.0)
-        previous_category = int(np.argmax(x_cf[list(selected_group.columns)]))
-        x_cf = trial_matrix[best]
-        used_groups.add(selected_group.name)
-        for column in (
-            selected_group.columns[previous_category],
-            selected_group.columns[trial_categories[best]],
-        ):
-            if column not in changed_columns:
-                changed_columns.append(column)
-        flipped, current_probability = flip_state(x_cf)
-        history.append(
-            {
-                "group": selected_group.name,
-                "from_category": previous_category,
-                "to_category": trial_categories[best],
-                "target_probability": current_probability,
-                "tabicl_conditional_probability": float(conditional_probability),
-                "lof": None if lof_scores is None else float(lof_scores[best]),
-                "immediate_valid": bool(valid[best]),
-                "n_candidates": len(trials),
-                "n_valid_candidates": int(valid.sum()),
-            }
-        )
-
-    return (
-        x_cf,
-        changed_columns,
-        {
-            "flipped": bool(flipped),
-            "steps": len(history),
-            "history": history,
-            "final_target_probability": float(current_probability),
         },
     )
