@@ -167,8 +167,12 @@ def run_dataset(  # noqa: PLR0913
         dtype=int,
     )
     flat_set_valid = flat_set_predictions == flat_targets
-    if not np.all(flat_set_valid):
-        raise RuntimeError("the diverse counterfactual set contains an invalid row")
+    invalid_set_rows = int((~flat_set_valid).sum())
+    if invalid_set_rows:
+        print(
+            f"[{dataset_name}] Retaining {invalid_set_rows} invalid rows in the "
+            "diverse set so validity and coverage reflect generation failures."
+        )
 
     posthoc_lof = LocalOutlierFactor(n_neighbors=20, novelty=True).fit(
         bundle.X_train
