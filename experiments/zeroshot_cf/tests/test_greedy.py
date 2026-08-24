@@ -310,7 +310,6 @@ def test_first_round_strict_guard_rejects_non_improving_revisit():
         y_target=1,
         actionable_idx=[0],
         selector="prob_ascent",
-        max_rounds=1,
         require_improvement=True,
     )
 

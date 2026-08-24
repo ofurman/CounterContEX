@@ -22,15 +22,20 @@ Metrics computed:
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
+from experiments.zeroshot_cf.data import OneHotActionGroup
+from experiments.zeroshot_cf.mixed_distance import (
+    action_unit_change_count,
+    grouped_gower_distance,
+)
 from sklearn.ensemble import IsolationForest
 from sklearn.neighbors import LocalOutlierFactor
 
 
 def compute_metrics(
-    disc_model,
+    disc_model: Any,
     X_cf: np.ndarray,
     X_test: np.ndarray,
     X_train: np.ndarray,
@@ -115,7 +120,7 @@ def compute_metrics(
 
 
 def compute_dicoflex_common_metrics(
-    disc_model,
+    disc_model: Any,
     X_cf: np.ndarray,
     X_test: np.ndarray,
     X_train: np.ndarray,
@@ -123,6 +128,7 @@ def compute_dicoflex_common_metrics(
     numerical_idx: List[int],
     immutable_idx: Optional[List[int]] = None,
     *,
+    categorical_groups: Sequence[OneHotActionGroup] = (),
     sparsity_eps: float = 0.05,
     lof_n_neighbors: int = 20,
     isolation_forest_estimators: int = 100,
@@ -132,7 +138,9 @@ def compute_dicoflex_common_metrics(
     DiCoFlex also reports generator likelihood metrics. Those are deliberately
     omitted because they are model-specific and TabICL does not expose a
     comparable joint counterfactual log density. Distances are evaluated only
-    on valid counterfactuals, matching ``CFMetrics.feature_distance``.
+    on valid counterfactuals, matching ``CFMetrics.feature_distance``. In
+    addition to DiCoFlex's continuous-only distances, the returned grouped
+    Gower metric assigns one contribution to each original categorical group.
     """
     X_cf = np.asarray(X_cf, dtype=np.float64)
     X_test = np.asarray(X_test, dtype=np.float64)
@@ -169,7 +177,20 @@ def compute_dicoflex_common_metrics(
         else float(np.all(X_test[:, immutable] == X_cf[:, immutable], axis=1).mean())
     )
 
-    numerical = np.asarray(numerical_idx, dtype=int)
+    numerical = [int(column) for column in numerical_idx]
+    mixed_gower = grouped_gower_distance(
+        X_cf,
+        X_test,
+        numerical,
+        categorical_groups,
+    )
+    action_counts = action_unit_change_count(
+        X_cf,
+        X_test,
+        numerical,
+        categorical_groups,
+        numerical_tolerance=sparsity_eps,
+    )
     if valid.any() and len(numerical) > 0:
         continuous_diff = X_cf[valid][:, numerical] - X_test[valid][:, numerical]
         proximity_manhattan = float(np.abs(continuous_diff).sum(axis=1).mean())
@@ -200,6 +221,10 @@ def compute_dicoflex_common_metrics(
         "validity": validity,
         "actionability": actionability,
         "sparsity": sparsity,
+        "action_unit_sparsity_mean": float(action_counts.mean()),
+        "proximity_grouped_gower": (
+            float(mixed_gower[valid].mean()) if valid.any() else float("nan")
+        ),
         "proximity_continuous_manhattan": proximity_manhattan,
         "proximity_continuous_euclidean": proximity_euclidean,
         "lof_scores_cf": lof_scores_cf,

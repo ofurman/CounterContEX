@@ -32,20 +32,18 @@ Outputs (under experiments/zeroshot_cf/results/):
 
 Usage:
   uv run python experiments/zeroshot_cf/exp6_context_ablation.py --dataset moons
-  uv run python experiments/zeroshot_cf/exp6_context_ablation.py \
-      --dataset heloc --selector prob_ascent --max-test 50
-  # The full [256,512,1024,2048] sizes are fixed; --max-test is identical.
+  uv run python experiments/zeroshot_cf/exp6_context_ablation.py --dataset heloc --selector prob_ascent --max-test 50
+  # The full [256,512,1024,2048] sizes are fixed; --max-test is held identical across cells.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
-import os
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -53,16 +51,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 from experiments.zeroshot_cf.exp4_greedy_cf import (  # noqa: E402
-    _DATASET_PARAMS,
+    MAX_CONTEXT,
     N_ESTIMATORS,
     N_PERMUTATIONS,
     TAU,
     TEMPERATURE,
+    _DATASET_PARAMS,
     evaluate_and_report,
 )
 
-DEFAULT_RESULTS_DIR = Path(__file__).parent / "results"
-RESULTS_DIR = Path(os.environ.get("ZEROSHOT_CF_RESULTS_DIR", DEFAULT_RESULTS_DIR))
+RESULTS_DIR = Path(__file__).parent / "results"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 SIZES = [256, 512, 1024, 2048]
@@ -103,16 +101,6 @@ CSV_COLUMNS = [
 ]
 
 
-def _parse_sizes(raw: str) -> List[int]:
-    """Parse a comma-separated context-size list for sweep runs."""
-    sizes = [int(part.strip()) for part in raw.split(",") if part.strip()]
-    if not sizes:
-        raise ValueError("--sizes must contain at least one integer")
-    if any(size <= 0 for size in sizes):
-        raise ValueError(f"--sizes must be positive integers, got {sizes}")
-    return sizes
-
-
 def _strategies_for_selector(selector: str) -> List[str]:
     """Strategies to run for a selector. ``class_divergence`` needs a
     both-classes pool, so the ``*_target`` strategies are skipped (Decision #6)."""
@@ -126,36 +114,6 @@ def _strategies_for_selector(selector: str) -> List[str]:
         )
         return kept
     return list(STRATEGIES)
-
-
-def _parse_strategies(raw: Optional[str], selector: str) -> List[str]:
-    """Parse an optional comma-separated strategy subset for sweep sharding."""
-    if raw is None or not raw.strip():
-        return _strategies_for_selector(selector)
-
-    requested: List[str] = []
-    for part in raw.split(","):
-        strategy = part.strip()
-        if strategy and strategy not in requested:
-            requested.append(strategy)
-
-    if not requested:
-        raise ValueError("--strategies must contain at least one strategy name")
-
-    unknown = [s for s in requested if s not in STRATEGY_SPEC]
-    if unknown:
-        supported = ", ".join(STRATEGIES)
-        raise ValueError(f"Unknown strategies {unknown}; supported: {supported}")
-
-    allowed = _strategies_for_selector(selector)
-    incompatible = [s for s in requested if s not in allowed]
-    if incompatible:
-        raise ValueError(
-            f"Strategies {incompatible} are incompatible with selector={selector!r}; "
-            f"allowed: {allowed}"
-        )
-
-    return requested
 
 
 def _resolve_max_test(dataset_name: str, max_test: Optional[int]) -> Optional[int]:
@@ -186,26 +144,16 @@ def _run_cell(
     tau: float,
     temperature: float,
     n_permutations: int,
-    context_y: np.ndarray | None = None,
-    project_to_domain: bool = False,
-    retain_best: bool = False,
 ) -> Dict[str, float]:
     """Run one (size, strategy) cell on a pre-loaded dataset. Returns a CSV row."""
-    from experiments.zeroshot_cf.greedy import (
-        greedy_counterfactual,
-        infer_feature_domains,
-    )
+    from experiments.zeroshot_cf.greedy import greedy_counterfactual
     from experiments.zeroshot_cf.sampler import ConditionalDensitySampler
 
     class_scope, selection = STRATEGY_SPEC[strategy]
     X_train = bundle.X_train
     y_train = bundle.y_train
-    y_context = y_train if context_y is None else np.asarray(context_y)
-    if len(y_context) != len(X_train):
-        raise ValueError("context_y must contain one label per training row")
     n = len(X_test)
     eff_budget = len(actionable_idx)
-    feature_domains = infer_feature_domains(X_train) if project_to_domain else None
 
     print(
         f"\n  --- cell: size={size} strategy={strategy} "
@@ -232,7 +180,7 @@ def _run_cell(
         ctx_target = target_cls if class_scope == "target" else None
         # Pool the selection draws from (for effective_size / pool_size logging).
         if ctx_target is not None:
-            pool_size = int((y_context == ctx_target).sum())
+            pool_size = int((y_train == ctx_target).sum())
         else:
             pool_size = int(len(X_train))
 
@@ -249,7 +197,7 @@ def _run_cell(
             # One fit per class batch (query-independent), reused for all points.
             sampler.set_context(
                 X_train,
-                y_context=y_context,
+                y_context=y_train,
                 target_class=ctx_target,
                 max_context=size,
                 selection="random",
@@ -258,17 +206,9 @@ def _run_cell(
             for i in test_idx:
                 effective_sizes.append(eff)
                 x_cf, changed, gi = greedy_counterfactual(
-                    sampler,
-                    disc_model,
-                    X_test[i],
-                    target_cls,
-                    actionable_idx,
-                    selector,
-                    tau=tau,
-                    budget=eff_budget,
-                    temperature=temperature,
-                    feature_domains=feature_domains,
-                    retain_best=retain_best,
+                    sampler, disc_model, X_test[i], target_cls,
+                    actionable_idx, selector,
+                    tau=tau, budget=eff_budget, temperature=temperature,
                 )
                 X_cf[i] = x_cf
                 changed_per_point[i] = changed
@@ -280,24 +220,16 @@ def _run_cell(
                 effective_sizes.append(eff)
                 sampler.set_context(
                     X_train,
-                    y_context=y_context,
+                    y_context=y_train,
                     target_class=ctx_target,
                     max_context=size,
                     selection="knn",
                     query=X_test[i],
                 )
                 x_cf, changed, gi = greedy_counterfactual(
-                    sampler,
-                    disc_model,
-                    X_test[i],
-                    target_cls,
-                    actionable_idx,
-                    selector,
-                    tau=tau,
-                    budget=eff_budget,
-                    temperature=temperature,
-                    feature_domains=feature_domains,
-                    retain_best=retain_best,
+                    sampler, disc_model, X_test[i], target_cls,
+                    actionable_idx, selector,
+                    tau=tau, budget=eff_budget, temperature=temperature,
                 )
                 X_cf[i] = x_cf
                 changed_per_point[i] = changed
@@ -326,8 +258,6 @@ def _run_cell(
         "temperature": temperature,
         "n_permutations": n_permutations,
         "max_context": size,
-        "project_to_domain": project_to_domain,
-        "retain_best": retain_best,
         "changed_per_point": changed_per_point,
         "flipped_per_point": flipped_per_point,
         "steps_per_point": steps_per_point,
@@ -361,27 +291,6 @@ def _run_cell(
     }
 
 
-def _write_context_csv(dataset_name: str, rows: List[Dict[str, float]]) -> Path:
-    """Persist completed Exp6 cells atomically.
-
-    Slurm can terminate long GPU runs at the wall-time limit. Writing after each
-    completed cell keeps completed metrics usable; writing to a temp file and
-    replacing the destination keeps the previous CSV intact if termination lands
-    during the write itself.
-    """
-    csv_path = RESULTS_DIR / f"exp6_context_{dataset_name}.csv"
-    tmp_path = csv_path.with_suffix(csv_path.suffix + ".tmp")
-    with open(tmp_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({k: row[k] for k in CSV_COLUMNS})
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp_path, csv_path)
-    return csv_path
-
-
 def run_dataset_ablation(
     dataset_name: str,
     selector: str = "prob_ascent",
@@ -389,7 +298,6 @@ def run_dataset_ablation(
     temperature: float = TEMPERATURE,
     n_permutations: int = N_PERMUTATIONS,
     max_test: Optional[int] = None,
-    strategies: Optional[List[str]] = None,
 ) -> List[Dict[str, float]]:
     """Run the full size×strategy grid for one dataset and write the per-dataset
     CSV. Loads the dataset / discriminator / TabPFN models ONCE and reuses them
@@ -427,39 +335,28 @@ def run_dataset_ablation(
     print("  Loading TabPFN models …")
     clf, reg = get_models(n_estimators=N_ESTIMATORS)
 
-    strategies = (
-        list(strategies)
-        if strategies is not None
-        else _strategies_for_selector(selector)
-    )
+    strategies = _strategies_for_selector(selector)
 
     rows: List[Dict[str, float]] = []
     for size in SIZES:
         for strategy in strategies:
             row = _run_cell(
-                dataset_name,
-                selector,
-                size,
-                strategy,
-                bundle=bundle,
-                disc_model=disc_model,
-                X_test=X_test,
-                y_test=y_test,
-                y_pred=y_pred,
-                y_target=y_target,
-                actionable_idx=actionable_idx,
-                immutable_idx=immutable_idx,
-                clf=clf,
-                reg=reg,
-                tau=tau,
-                temperature=temperature,
-                n_permutations=n_permutations,
+                dataset_name, selector, size, strategy,
+                bundle=bundle, disc_model=disc_model,
+                X_test=X_test, y_test=y_test, y_pred=y_pred, y_target=y_target,
+                actionable_idx=actionable_idx, immutable_idx=immutable_idx,
+                clf=clf, reg=reg,
+                tau=tau, temperature=temperature, n_permutations=n_permutations,
             )
             rows.append(row)
-            csv_path = _write_context_csv(dataset_name, rows)
-            print(f"  Wrote {csv_path}  ({len(rows)} completed cells)")
 
-    print(f"\n  Completed {len(rows)} cells for {dataset_name}")
+    csv_path = RESULTS_DIR / f"exp6_context_{dataset_name}.csv"
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row[k] for k in CSV_COLUMNS})
+    print(f"\n  Wrote {csv_path}  ({len(rows)} cells)")
 
     return rows
 
@@ -467,7 +364,6 @@ def run_dataset_ablation(
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
-
 
 def _fmt(v) -> str:
     try:
@@ -527,9 +423,7 @@ def _best_cells(rows: List[Dict[str, str]]) -> List[str]:
     out: List[str] = []
     valid_rows = [r for r in rows if _num(r, "validity") == _num(r, "validity")]
     if valid_rows:
-        best_val = max(
-            valid_rows, key=lambda r: (_num(r, "validity"), -_num(r, "frac_oob"))
-        )
+        best_val = max(valid_rows, key=lambda r: (_num(r, "validity"), -_num(r, "frac_oob")))
         out.append(
             f"- **Best validity cell**: size={best_val['size']}, "
             f"strategy={best_val['strategy']} "
@@ -539,9 +433,7 @@ def _best_cells(rows: List[Dict[str, str]]) -> List[str]:
         )
     oob_rows = [r for r in rows if _num(r, "frac_oob") == _num(r, "frac_oob")]
     if oob_rows:
-        best_oob = min(
-            oob_rows, key=lambda r: (_num(r, "frac_oob"), -_num(r, "validity"))
-        )
+        best_oob = min(oob_rows, key=lambda r: (_num(r, "frac_oob"), -_num(r, "validity")))
         out.append(
             f"- **Best frac_oob cell**: size={best_oob['size']}, "
             f"strategy={best_oob['strategy']} "
@@ -564,7 +456,7 @@ def write_summary() -> None:
     lines = [
         "# Experiment 6: Context Ablation — size × strategy",
         "",
-        f"Two-factor grid (size `{{{', '.join(map(str, SIZES))}}}` × strategy "
+        "Two-factor grid (size `{256, 512, 1024, 2048}` × strategy "
         "`{random_target, random_both, knn_target, knn_both}`) at the Stage-2 "
         "winning selector, on each dataset.",
         "Held identical across all cells **within a dataset**: selector, "
@@ -622,8 +514,6 @@ def write_summary() -> None:
 
 
 def main() -> None:
-    global RESULTS_DIR, SIZES
-
     parser = argparse.ArgumentParser(
         description="Experiment 6: context ablation (size × strategy grid)"
     )
@@ -633,58 +523,18 @@ def main() -> None:
         choices=["prob_ascent", "class_divergence"],
         default="prob_ascent",
         help="Stage-2 winning selector (default: prob_ascent → 16 cells; "
-        "class_divergence → 8 cells, *_target skipped).",
+             "class_divergence → 8 cells, *_target skipped).",
     )
-    parser.add_argument(
-        "--tau",
-        type=float,
-        default=TAU,
-        help=f"Flip probability threshold (default: {TAU}).",
-    )
-    parser.add_argument(
-        "--temperature",
-        type=float,
-        default=TEMPERATURE,
-        help=f"Committed-value temperature (default: {TEMPERATURE} ≈ MAP).",
-    )
-    parser.add_argument(
-        "--n-permutations",
-        type=int,
-        default=N_PERMUTATIONS,
-        help=f"Imputation permutations (default: {N_PERMUTATIONS}).",
-    )
-    parser.add_argument(
-        "--max-test",
-        type=int,
-        default=None,
-        help="Number of test points, identical across all cells "
-        "(default: moons=100, heloc=50; -1 for full split).",
-    )
-    parser.add_argument(
-        "--sizes",
-        default=",".join(map(str, SIZES)),
-        help="Comma-separated context sizes to sweep "
-        f"(default: {','.join(map(str, SIZES))}).",
-    )
-    parser.add_argument(
-        "--strategies",
-        default=None,
-        help="Comma-separated strategy subset to run "
-        f"(default: all compatible strategies: {','.join(STRATEGIES)}).",
-    )
-    parser.add_argument(
-        "--results-dir",
-        type=Path,
-        default=None,
-        help="Directory for exp6 CSV/summary outputs. Useful for Slurm arrays.",
-    )
+    parser.add_argument("--tau", type=float, default=TAU,
+                        help=f"Flip probability threshold (default: {TAU}).")
+    parser.add_argument("--temperature", type=float, default=TEMPERATURE,
+                        help=f"Committed-value temperature (default: {TEMPERATURE} ≈ MAP).")
+    parser.add_argument("--n-permutations", type=int, default=N_PERMUTATIONS,
+                        help=f"Imputation permutations (default: {N_PERMUTATIONS}).")
+    parser.add_argument("--max-test", type=int, default=None,
+                        help="Number of test points, identical across all cells "
+                             "(default: moons=100, heloc=50; -1 for full split).")
     args = parser.parse_args()
-
-    SIZES = _parse_sizes(args.sizes)
-    strategies = _parse_strategies(args.strategies, args.selector)
-    if args.results_dir is not None:
-        RESULTS_DIR = args.results_dir
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     datasets = ["moons", "heloc"] if args.dataset == "all" else [args.dataset]
     for ds in datasets:
@@ -695,7 +545,6 @@ def main() -> None:
             temperature=args.temperature,
             n_permutations=args.n_permutations,
             max_test=args.max_test,
-            strategies=strategies,
         )
 
     write_summary()

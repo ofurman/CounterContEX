@@ -185,5 +185,5 @@ data/
 logs/
 .plan_runner_done
 
-
+# Optional repo-root checkpoint cache (large local model files)
 models/

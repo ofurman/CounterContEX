@@ -29,16 +29,14 @@ HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/exp1_single_feature.py
 HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/exp2_counterfactuals.py
 ```
 
-### 4. Run the TabICL backend at the Athena-winning context
+### 4. Run the TabICL backend with the fixed context
 
-TabICL uses the fixed `prob_ascent + knn_both@512` configuration selected by
-the Athena v3 runs. It does not repeat the context grid. Candidate feature
+TabICL uses a fixed `prob_ascent + knn_both@512` configuration. It does not
+repeat the context grid. Candidate feature
 interventions are batched into one TabICL imputation call per greedy step.
 Numerical imputations default to the densest interior quantile interval
-(`--point-estimate mode`), candidates are projected to the training range and
-small empirical supports, and a failed search returns its best intermediate
-state. The historical behavior remains available with `--point-estimate
-median --no-domain-projection --no-retain-best` for paired diagnostics.
+(mode), candidates are projected to the training range and small empirical
+supports, and a failed search returns its best intermediate state.
 
 Stage the two TabICLv2 checkpoints once with network access:
 
@@ -48,7 +46,7 @@ uv run python -m experiments.zeroshot_cf.tabicl_checkpoints
 
 This writes ordinary checkpoint files under
 `experiments/zeroshot_cf/models/tabicl/`. Copy that directory to the same path
-on Athena, or pass its transferred location with `--tabicl-cache-dir`.
+on Athena, or pass its transferred location with `--cache-dir`.
 
 Verify the transferred weights and one minimal real-model imputation offline:
 
@@ -66,11 +64,8 @@ HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.exp8_tabicl_cf \
     --dataset heloc --max-test 50
 ```
 
-The default context labels are predictions from the discriminator being
-explained, matching the Athena Exp7 follow-up. Use `--context-labels data` only
-to reproduce the earlier Exp6 ground-truth-label setup. For a small timing and
-equivalence baseline, use `--candidate-mode sequential`; production runs use
-the default `batched` mode.
+Context labels are predictions from the discriminator being explained. TabICL
+candidate evaluation uses the batched path.
 
 To replace the single conditional point estimate with classifier-guided
 multi-quantile candidates, pass a fixed probability grid:
@@ -86,51 +81,12 @@ regression task and predicts a quantile distribution. The duplicated query rows
 extract all requested quantiles in the same batched prediction; the external
 discriminator then chooses the best feature/value pair.
 
-### Two-dataset backend comparison (run on Athena)
-
-The comparison fixes the already-selected `prob_ascent + knn_both@512`
-configuration and runs only TabPFNv3 versus TabICLv2 on MOONS and HELOC.
-Each backend/dataset writes a separate result file, so they can be
-submitted as independent jobs:
-
-```bash
-HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.exp8_backend_comparison \
-    --dataset moons --backend tabicl \
-    --tabicl-cache-dir experiments/zeroshot_cf/models/tabicl
-
-HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.exp8_backend_comparison \
-    --dataset heloc --backend tabicl --max-test 10 \
-    --tabicl-quantiles 0.05 0.20 0.50 0.80 0.95 \
-    --tabicl-cache-dir experiments/zeroshot_cf/models/tabicl
-
-HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.exp8_backend_comparison \
-    --dataset heloc --backend tabpfn --tabpfn-cache-dir models
-```
-
-Use `--dataset all --backend all` only on an appropriately provisioned compute
-node. For a smoke test, add `--max-test 1 --n-estimators 1`.
-
-To check the two TabICL speed optimizations with the real checkpoint, run the
-small paired diagnostic on a GPU node:
-
-```bash
-HF_HUB_OFFLINE=1 TABICL_DEVICE=cuda \
-  .venv/bin/python -m experiments.zeroshot_cf.exp8_tabicl_diagnostics \
-  --dataset heloc --max-test 2 --n-estimators 4 \
-  --tabicl-cache-dir experiments/zeroshot_cf/models/tabicl \
-  --results-dir experiments/zeroshot_cf/results/athena/tabicl_diagnostics
-```
-
-It compares batched versus sequential candidates and direct context replacement
-versus upstream `fit()`, writing a verdict CSV plus detailed JSON/NPZ artifacts.
-
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TABPFN_DEVICE` | `auto` | Device for TabPFN inference (`auto`/`cpu`/`mps`) |
 | `TABPFN_LOCAL_CACHE` | `experiments/zeroshot_cf/models/` | Path to staged checkpoints |
-| `TABPFN_V3_LOCAL_CACHE` | `models/` | Path to the Athena TabPFNv3 weight pair |
 | `TABICL_DEVICE` | `auto` | Device for TabICL inference (`auto`/`cpu`/`mps`/`cuda`) |
 | `TABICL_LOCAL_CACHE` | `experiments/zeroshot_cf/models/tabicl/` | Path to staged TabICLv2 checkpoints |
 | `HF_HUB_OFFLINE` | unset | Set to `1` to enforce no network access |

@@ -49,18 +49,6 @@ def test_class_divergence_skips_target_strategies():
     assert len(exp6.SIZES) * len(strategies) == 8
 
 
-def test_parse_strategies_supports_subset():
-    """Strategy subset parsing preserves order and removes duplicates."""
-    strategies = exp6._parse_strategies("knn_both,random_target,knn_both", "prob_ascent")
-    assert strategies == ["knn_both", "random_target"]
-
-
-def test_parse_strategies_rejects_class_divergence_target_scope():
-    """class_divergence still cannot run target-only strategy shards."""
-    with pytest.raises(ValueError, match="incompatible"):
-        exp6._parse_strategies("random_target", "class_divergence")
-
-
 def test_csv_columns_cover_metric_spec():
     """The CSV column list includes every grids.md metric + run identifier."""
     required = {

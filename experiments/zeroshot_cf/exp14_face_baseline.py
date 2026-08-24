@@ -24,6 +24,7 @@ import numpy as np
 from experiments.zeroshot_cf.data import (
     OneHotActionGroup,
     get_grouped_categorical_action_space,
+    get_one_hot_groups,
     load_dataset,
 )
 from experiments.zeroshot_cf.discriminator import train_discriminator
@@ -346,6 +347,7 @@ def run_dataset(
         y_target,
         bundle.numerical_features_indices,
         immutable_idx,
+        categorical_groups=get_one_hot_groups(bundle),
         sparsity_eps=0.05,
     )
     print_metrics(common_metrics, prefix=f"{dataset_name}/FACE-kNN")

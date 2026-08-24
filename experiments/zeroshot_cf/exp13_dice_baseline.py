@@ -17,7 +17,7 @@ import random
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import dice_ml
 import numpy as np
@@ -104,9 +104,15 @@ class DiceMixedAdapter:
         )
         matrix = np.zeros((len(compact), self.n_features), dtype=np.float64)
         for name, column in zip(self.scalar_names, self.scalar_columns, strict=True):
-            matrix[:, column] = pd.to_numeric(compact[name]).to_numpy(dtype=float)
+            matrix[:, column] = np.asarray(
+                pd.to_numeric(compact[name]),
+                dtype=np.float64,
+            )
         for group in self.groups:
-            categories = pd.to_numeric(compact[group.name]).to_numpy(dtype=int)
+            categories = np.asarray(
+                pd.to_numeric(compact[group.name]),
+                dtype=np.int64,
+            )
             if np.any((categories < 0) | (categories >= len(group.columns))):
                 raise ValueError(f"category outside group {group.name!r}")
             matrix[np.arange(len(matrix)), np.asarray(group.columns)[categories]] = 1.0
@@ -117,6 +123,7 @@ class DiceClassifierAdapter:
     """Sklearn-like classifier accepting compact DiCE frames."""
 
     def __init__(self, classifier: Any, codec: DiceMixedAdapter) -> None:
+        super().__init__()
         self.classifier = classifier
         self.codec = codec
         self.classes_ = np.asarray(getattr(classifier, "classes_", (0, 1)))
@@ -173,14 +180,11 @@ def generate_dice_counterfactuals(
     features_to_vary: list[str],
     *,
     max_iterations: int = 200,
-    search_total_cfs: int = 1,
     search_restarts: int = 1,
     stopping_threshold: float = 0.5,
     random_state: int = 42,
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
     """Generate one CF per factual from DiCE's valid pre-sparsification set."""
-    if search_total_cfs < 1:
-        raise ValueError("search_total_cfs must be positive")
     if search_restarts < 1:
         raise ValueError("search_restarts must be positive")
     if not 0.5 <= stopping_threshold < 1.0:
@@ -201,7 +205,7 @@ def generate_dice_counterfactuals(
             try:
                 explainer.generate_counterfactuals(
                     queries.iloc[[index]],
-                    total_CFs=search_total_cfs,
+                    total_CFs=1,
                     desired_class=int(target),
                     features_to_vary=features_to_vary,
                     stopping_threshold=stopping_threshold,
@@ -210,7 +214,6 @@ def generate_dice_counterfactuals(
                     initialization="kdtree",
                     proximity_weight=0.2,
                     sparsity_weight=0.2,
-                    diversity_weight=5.0 if search_total_cfs > 1 else 0.0,
                     categorical_penalty=0.1,
                     maxiterations=max_iterations,
                     verbose=False,
@@ -218,7 +221,10 @@ def generate_dice_counterfactuals(
                 # DiCE rounds continuous values before exposing final_cfs_df
                 # and may thereby move a marginal CF back across the boundary.
                 # Recover the genetic solver's unrounded candidates instead.
-                final_frame = explainer.label_decode_cfs(explainer.final_cfs)
+                final_frame = cast(
+                    pd.DataFrame | None,
+                    explainer.label_decode_cfs(explainer.final_cfs),
+                )
                 attempt_returned = final_frame is not None and len(final_frame) > 0
             except UserConfigValidationException as error:
                 if "No counterfactuals found" not in str(error):
@@ -226,7 +232,7 @@ def generate_dice_counterfactuals(
                 final_frame = None
                 attempt_returned = False
             returned = returned or attempt_returned
-            if not attempt_returned:
+            if not attempt_returned or final_frame is None:
                 continue
 
             candidates = codec.decode(final_frame)
@@ -263,7 +269,6 @@ def run_dataset(  # noqa: PLR0913
     *,
     max_test: int = DEFAULT_MAX_TEST,
     max_iterations: int = 200,
-    search_total_cfs: int = 1,
     search_restarts: int = 1,
     stopping_threshold: float = 0.5,
     validation_fraction: float = DEFAULT_VALIDATION_FRACTION,
@@ -332,7 +337,6 @@ def run_dataset(  # noqa: PLR0913
         y_target,
         vary,
         max_iterations=max_iterations,
-        search_total_cfs=search_total_cfs,
         search_restarts=search_restarts,
         stopping_threshold=stopping_threshold,
     )
@@ -370,6 +374,7 @@ def run_dataset(  # noqa: PLR0913
         y_target,
         bundle.numerical_features_indices,
         immutable_idx,
+        categorical_groups=codec.groups,
         sparsity_eps=0.05,
     )
     print_metrics(common_metrics, prefix=f"{dataset_name}/DiCE-genetic")
@@ -400,12 +405,10 @@ def run_dataset(  # noqa: PLR0913
         "search": "genetic",
         "initialization": "kdtree",
         "max_iterations": max_iterations,
-        "search_total_cfs": search_total_cfs,
         "search_restarts": search_restarts,
         "stopping_threshold": stopping_threshold,
         "proximity_weight": 0.2,
         "sparsity_weight": 0.2,
-        "diversity_weight": 5.0 if search_total_cfs > 1 else 0.0,
         "categorical_penalty": 0.1,
         "categorical_actions": "compact_atomic_groups",
         "posthoc_action_pruning": True,
@@ -481,7 +484,6 @@ def main() -> None:
     parser.add_argument("--dataset", choices=[*DATASETS, "all"], default="all")
     parser.add_argument("--max-test", type=int, default=DEFAULT_MAX_TEST)
     parser.add_argument("--max-iterations", type=int, default=200)
-    parser.add_argument("--search-total-cfs", type=int, default=1)
     parser.add_argument("--search-restarts", type=int, default=1)
     parser.add_argument("--stopping-threshold", type=float, default=0.5)
     parser.add_argument(
@@ -503,7 +505,6 @@ def main() -> None:
             dataset,
             max_test=args.max_test,
             max_iterations=args.max_iterations,
-            search_total_cfs=args.search_total_cfs,
             search_restarts=args.search_restarts,
             stopping_threshold=args.stopping_threshold,
             validation_fraction=args.validation_fraction,

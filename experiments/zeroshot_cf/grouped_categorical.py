@@ -4,14 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Callable, Sequence
+from typing import Any, Callable, Sequence
 
 import numpy as np
 from experiments.zeroshot_cf.data import OneHotActionGroup
-from experiments.zeroshot_cf.diverse_counterfactuals import (
-    select_diverse_counterfactuals,
-)
 from experiments.zeroshot_cf.greedy import project_candidate_values
+from experiments.zeroshot_cf.mixed_distance import (
+    action_unit_change_count,
+    grouped_gower_distance,
+)
 
 
 @dataclass(frozen=True)
@@ -68,7 +69,7 @@ class GroupedCategoricalCodec:
                 f"{matrix.shape}"
             )
 
-        encoded = [matrix[:, self.scalar_columns]]
+        encoded: list[np.ndarray] = [matrix[:, self.scalar_columns]]
         for group in self.groups:
             values = matrix[:, group.columns]
             binary = np.isclose(values, 0.0) | np.isclose(values, 1.0)
@@ -92,7 +93,8 @@ class CompactMixedSampler:
     changes are handled atomically by the mixed search or categorical fallback.
     """
 
-    def __init__(self, sampler, codec: GroupedCategoricalCodec) -> None:
+    def __init__(self, sampler: Any, codec: GroupedCategoricalCodec) -> None:
+        super().__init__()
         self.sampler = sampler
         self.codec = codec
 
@@ -103,7 +105,7 @@ class CompactMixedSampler:
         self,
         X_query: np.ndarray,
         candidate_cols: Sequence[int],
-        **kwargs,
+        **kwargs: Any,
     ) -> np.ndarray:
         return self.sampler.sample_candidates(
             self.codec.encode(X_query),
@@ -115,7 +117,7 @@ class CompactMixedSampler:
         self,
         X_query: np.ndarray,
         candidate_cols: Sequence[int],
-        **kwargs,
+        **kwargs: Any,
     ) -> np.ndarray:
         return self.sampler.sample_candidate_grid(
             self.codec.encode(X_query),
@@ -127,7 +129,7 @@ class CompactMixedSampler:
         self,
         X_query: np.ndarray,
         target_col: int,
-        **kwargs,
+        **kwargs: Any,
     ) -> np.ndarray:
         encoded_col = self._encoded_candidates([target_col])[0]
         return self.sampler.sample_feature(
@@ -136,7 +138,7 @@ class CompactMixedSampler:
             **kwargs,
         )
 
-    def score_joint_rows(self, X_rows: np.ndarray, **kwargs) -> np.ndarray:
+    def score_joint_rows(self, X_rows: np.ndarray, **kwargs: Any) -> np.ndarray:
         """Evaluate complete original-space rows in the compact TabICL space."""
         return self.sampler.score_joint_rows(self.codec.encode(X_rows), **kwargs)
 
@@ -147,8 +149,8 @@ ConditionedCategoryDistribution = Callable[
 
 
 def greedy_mixed_counterfactual(  # noqa: PLR0913
-    sampler,
-    disc,
+    sampler: Any,
+    disc: Any,
     x: np.ndarray,
     y_target: int,
     numerical_columns: Sequence[int],
@@ -156,36 +158,31 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     *,
     candidate_quantiles: Sequence[float] | None = None,
     candidate_confidences: Sequence[float] | None = None,
-    feature_domains=None,
+    feature_domains: Any = None,
     cf_mode: str = "sparse",
-    tabicl_joint_plausibility=None,
+    tabicl_joint_plausibility: Any = None,
     max_validity_steps: int | None = None,
     allow_revisits: bool = True,
     joint_shortlist_size: int = 16,
-    primary_shortlist_size: int | None = None,
     max_extra_actions: int = 1,
     min_joint_log_gain: float = 0.0,
-    n_counterfactuals: int = 1,
     tau: float = 0.5,
     temperature: float = 1e-9,
     category_distribution: ConditionedCategoryDistribution | None = None,
     categorical_proposal_count: int = 1,
-) -> tuple[np.ndarray, list[int], dict]:
+) -> tuple[np.ndarray, list[int], dict[str, Any]]:
     """Greedily select the best action across numerical and categorical types.
 
     At every validity-search step, all scalar and categorical TabICL proposals
     compete in one discriminator batch. Invalid states are ranked only by
-    target-probability ascent. The first valid state is selected by action-unit
-    sparsity and factual proximity, then committed without any joint-density
-    call. ``sparse`` mode returns it immediately. ``data_plausible`` mode then
-    performs one validity-preserving refinement attempt. It cheaply keeps at
-    most one representative per action unit, fills a bounded shortlist, and
-    scores the sparse incumbent plus that shortlist in one whole-row TabICL
-    batch. The incumbent remains the fallback unless raw joint log density
-    improves. When multiple counterfactuals are requested, the same scored
-    batch supplies a quality-constrained pool. ``primary_shortlist_size`` can
-    freeze the first CFE to a smaller prefix while later rows use the full
-    diversity pool. Later rows are selected by changed-action-set diversity.
+    target-probability ascent. Once valid proposals exist, the candidate with
+    the lowest grouped Gower distance is selected subject to validity and the
+    search/action budget, then committed without a joint-density call.
+    ``sparse`` mode returns it immediately. ``data_plausible`` mode performs
+    one validity-preserving refinement attempt. It keeps at most one
+    representative per action unit, fills a bounded shortlist, and scores the
+    sparse incumbent plus that shortlist in one whole-row TabICL batch. The
+    incumbent remains the fallback unless raw joint log density improves.
 
     TabICL ranks categorical alternatives within each group before the target
     classifier compares the resulting rows globally. Each action unit is used
@@ -200,20 +197,10 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         raise ValueError("cf_mode must be 'sparse' or 'data_plausible'")
     if joint_shortlist_size < 1:
         raise ValueError("joint_shortlist_size must be at least 1")
-    if primary_shortlist_size is not None and not (
-        1 <= primary_shortlist_size <= joint_shortlist_size
-    ):
-        raise ValueError(
-            "primary_shortlist_size must be between 1 and joint_shortlist_size"
-        )
     if max_extra_actions < 0:
         raise ValueError("max_extra_actions must be non-negative")
     if min_joint_log_gain < 0:
         raise ValueError("min_joint_log_gain must be non-negative")
-    if n_counterfactuals < 1:
-        raise ValueError("n_counterfactuals must be at least 1")
-    if n_counterfactuals > 1 and cf_mode != "data_plausible":
-        raise ValueError("multiple counterfactuals require data_plausible mode")
     if cf_mode == "data_plausible" and tabicl_joint_plausibility is None:
         raise ValueError("data_plausible mode requires a TabICL joint scorer")
     if cf_mode == "sparse" and tabicl_joint_plausibility is not None:
@@ -264,20 +251,11 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         return prediction == y_target and probability >= tau, probability
 
     def counterfactual_costs(rows: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Return action-level sparsity and Euclidean factual distance."""
-        matrix = np.atleast_2d(rows)
-        sparsity = np.zeros(len(matrix), dtype=np.int64)
-        if numerical:
-            sparsity += np.count_nonzero(
-                ~np.isclose(matrix[:, numerical], factual[numerical]),
-                axis=1,
-            )
-        for group in groups:
-            columns = list(group.columns)
-            factual_category = int(np.argmax(factual[columns]))
-            sparsity += np.argmax(matrix[:, columns], axis=1) != factual_category
-        proximity = np.linalg.norm(matrix - factual, axis=1)
-        return sparsity, proximity
+        """Return action-unit change count and grouped Gower distance."""
+        return (
+            action_unit_change_count(rows, factual, numerical, groups),
+            grouped_gower_distance(rows, factual, numerical, groups),
+        )
 
     def proposal_supports(candidate_metadata: Sequence[dict]) -> np.ndarray:
         """Return comparable local-support ranks for cheap prescreening."""
@@ -302,10 +280,10 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         probabilities: np.ndarray,
         candidate_metadata: Sequence[dict],
     ) -> np.ndarray:
-        """Select a small, action-diverse batch before whole-row scoring."""
+        """Select a small per-action batch before whole-row scoring."""
         if not len(eligible):
             return np.empty(0, dtype=int)
-        candidate_sparsity, candidate_proximity = counterfactual_costs(rows)
+        _, candidate_gower = counterfactual_costs(rows)
         support_penalty = -np.log(
             np.clip(proposal_supports(candidate_metadata), 1e-12, 1.0)
         )
@@ -320,9 +298,8 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
             np.lexsort(
                 (
                     -probabilities[eligible],
-                    candidate_proximity[eligible],
                     support_penalty[eligible],
-                    candidate_sparsity[eligible],
+                    candidate_gower[eligible],
                 )
             )
         ]
@@ -353,16 +330,15 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         rows: np.ndarray,
         candidate_metadata: Sequence[dict],
     ) -> int:
-        """Choose a sparse valid candidate without querying joint TabICL."""
-        candidate_sparsity, candidate_proximity = counterfactual_costs(rows)
+        """Choose the closest valid candidate without querying joint TabICL."""
+        _, candidate_gower = counterfactual_costs(rows)
         proposal_support = proposal_supports(candidate_metadata)
         support_penalty = -np.log(np.clip(proposal_support, 1e-12, 1.0))
         ranked = np.lexsort(
             (
                 -probabilities[eligible],
                 support_penalty[eligible],
-                candidate_proximity[eligible],
-                candidate_sparsity[eligible],
+                candidate_gower[eligible],
             )
         )
         return int(eligible[ranked[0]])
@@ -386,12 +362,7 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     joint_rerank_attempted = False
     post_valid_refinement = tabicl_joint_plausibility is not None
     refinement_stopping_reason = "not_started"
-    diverse_counterfactuals: np.ndarray | None = None
-    diverse_joint_log_densities: np.ndarray | None = None
-    diverse_target_probabilities: np.ndarray | None = None
-    diversity_sparse_joint_log_density: float | None = None
     joint_scoring_runtime_s = 0.0
-    diversity_selection_runtime_s = 0.0
 
     round_limit = max_validity_steps if allow_revisits else 1
     for round_index in range(round_limit):
@@ -657,6 +628,7 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
             valid = (predictions == y_target) & (probabilities >= tau)
             tabicl_joint_scores = None
 
+            best: int | None = None
             if flipped:
                 unvisited = np.asarray(
                     [row.tobytes() not in visited_rows for row in trials]
@@ -665,9 +637,7 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                     joint_rerank_attempted = True
                     if initial_sparse_action_count is None:
                         raise RuntimeError("initial sparse action count is unavailable")
-                    candidate_sparsity, candidate_proximity = counterfactual_costs(
-                        trials
-                    )
+                    candidate_sparsity, candidate_gower = counterfactual_costs(trials)
                     eligible_for_scoring = np.flatnonzero(
                         valid
                         & unvisited
@@ -688,122 +658,39 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                     scoring_rows = np.vstack(
                         (current.reshape(1, -1), trials[shortlist])
                     )
-                    primary_limit = (
-                        len(shortlist)
-                        if primary_shortlist_size is None
-                        else min(primary_shortlist_size, len(shortlist))
-                    )
                     joint_started = perf_counter()
-                    if n_counterfactuals > 1 and primary_limit < len(shortlist):
-                        primary_scoring_rows = np.vstack(
-                            (
-                                current.reshape(1, -1),
-                                trials[shortlist[:primary_limit]],
-                            )
-                        )
-                        primary_joint_batch = tabicl_joint_plausibility.score_rows(
-                            primary_scoring_rows,
-                            y_target,
-                        )
-                        diversity_joint_batch = tabicl_joint_plausibility.score_rows(
-                            scoring_rows,
-                            y_target,
-                        )
-                    else:
-                        primary_joint_batch = tabicl_joint_plausibility.score_rows(
-                            scoring_rows,
-                            y_target,
-                        )
-                        diversity_joint_batch = primary_joint_batch
+                    joint_batch = tabicl_joint_plausibility.score_rows(
+                        scoring_rows,
+                        y_target,
+                    )
                     joint_scoring_runtime_s += perf_counter() - joint_started
                     current_joint_log_density = float(
-                        primary_joint_batch.joint_log_density[0]
+                        joint_batch.joint_log_density[0]
                     )
                     initial_joint_log_density = current_joint_log_density
-                    diversity_sparse_joint_log_density = float(
-                        diversity_joint_batch.joint_log_density[0]
-                    )
                     tabicl_joint_scores = {
                         "joint_log_density": np.full(
                             len(trials), np.nan, dtype=np.float64
                         )
                     }
-                    tabicl_joint_scores["joint_log_density"][
-                        shortlist[:primary_limit]
-                    ] = (
-                        primary_joint_batch.joint_log_density[1:]
+                    tabicl_joint_scores["joint_log_density"][shortlist] = (
+                        joint_batch.joint_log_density[1:]
                     )
                     improving = (
-                        primary_joint_batch.joint_log_density[1:]
+                        joint_batch.joint_log_density[1:]
                         > current_joint_log_density + min_joint_log_gain
                     )
-                    eligible = shortlist[:primary_limit][improving]
-                    if len(eligible):
-                        ranked = np.lexsort(
-                            (
-                                candidate_proximity[eligible],
-                                candidate_sparsity[eligible],
-                                -tabicl_joint_scores["joint_log_density"][eligible],
-                            )
-                        )
-                        best = int(eligible[ranked[0]])
-                    if n_counterfactuals > 1:
-                        quality_preserving = (
-                            diversity_joint_batch.joint_log_density[1:]
-                            >= diversity_sparse_joint_log_density + min_joint_log_gain
-                        )
-                        best_scoring_index = (
-                            0
-                            if not len(eligible)
-                            else int(np.flatnonzero(shortlist == best)[0]) + 1
-                        )
-                        raw_pool_indices = [
-                            0,
-                            best_scoring_index,
-                            *(np.flatnonzero(quality_preserving) + 1).tolist(),
-                        ]
-                        pool_scoring_indices = np.asarray(
-                            list(dict.fromkeys(raw_pool_indices)),
-                            dtype=int,
-                        )
-                        primary_pool_index = int(
-                            np.flatnonzero(
-                                pool_scoring_indices == best_scoring_index
-                            )[0]
-                        )
-                        pool_rows = scoring_rows[pool_scoring_indices]
-                        pool_joint_scores = diversity_joint_batch.joint_log_density[
-                            pool_scoring_indices
-                        ]
-                        pool_target_probabilities = np.concatenate(
-                            (
-                                np.asarray([current_probability], dtype=np.float64),
-                                probabilities[shortlist],
-                            )
-                        )[pool_scoring_indices]
-                        diversity_started = perf_counter()
-                        selected_pool_indices = select_diverse_counterfactuals(
-                            pool_rows,
-                            pool_joint_scores,
-                            factual,
-                            numerical,
-                            groups,
-                            primary_index=primary_pool_index,
-                            max_outputs=n_counterfactuals,
-                        )
-                        diversity_selection_runtime_s += (
-                            perf_counter() - diversity_started
-                        )
-                        diverse_counterfactuals = pool_rows[selected_pool_indices]
-                        diverse_joint_log_densities = pool_joint_scores[
-                            selected_pool_indices
-                        ]
-                        diverse_target_probabilities = pool_target_probabilities[
-                            selected_pool_indices
-                        ]
+                    eligible = shortlist[improving]
                     if not len(eligible):
                         refinement_stopping_reason = "no_improving_candidate"
                         break
+                    ranked = np.lexsort(
+                        (
+                            candidate_gower[eligible],
+                            -tabicl_joint_scores["joint_log_density"][eligible],
+                        )
+                    )
+                    best = int(eligible[ranked[0]])
                     refinement_stopping_reason = "one_shot_accepted"
                 else:
                     break
@@ -818,6 +705,8 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
             else:
                 best = int(np.argmax(probabilities))
 
+            if best is None:
+                break
             selected_probability = float(probabilities[best])
             if (
                 not flipped
@@ -907,9 +796,9 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                     "n_valid_candidates": int(valid.sum()),
                 }
             )
-            selected_sparsity, selected_proximity = counterfactual_costs(trials[best])
+            selected_sparsity, selected_gower = counterfactual_costs(trials[best])
             selected["action_sparsity"] = int(selected_sparsity[0])
-            selected["proximity_l2"] = float(selected_proximity[0])
+            selected["grouped_gower"] = float(selected_gower[0])
             current = trials[best]
             visited_rows.add(current.tobytes())
             current_probability = selected_probability
@@ -978,21 +867,6 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         if initial_joint_log_density is None or current_joint_log_density is None
         else current_joint_log_density - initial_joint_log_density
     )
-    if diverse_counterfactuals is None:
-        diverse_counterfactuals = current.reshape(1, -1).copy()
-        diverse_joint_log_densities = np.asarray(
-            [
-                np.nan
-                if current_joint_log_density is None
-                else current_joint_log_density
-            ],
-            dtype=np.float64,
-        )
-        diverse_target_probabilities = np.asarray(
-            [current_probability],
-            dtype=np.float64,
-        )
-
     for column in np.flatnonzero(current != factual):
         changed_order.append(int(column))
     return (
@@ -1031,18 +905,9 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                 else int(getattr(tabicl_joint_plausibility, "row_count", 0))
             ),
             "joint_shortlist_size": joint_shortlist_size,
-            "primary_shortlist_size": primary_shortlist_size,
             "max_extra_actions": max_extra_actions,
             "min_joint_log_gain": min_joint_log_gain,
-            "n_counterfactuals_requested": n_counterfactuals,
-            "diverse_counterfactuals": diverse_counterfactuals,
-            "diverse_joint_log_densities": diverse_joint_log_densities,
-            "diverse_target_probabilities": diverse_target_probabilities,
-            "diversity_sparse_joint_log_density": (
-                diversity_sparse_joint_log_density
-            ),
             "joint_scoring_runtime_s": joint_scoring_runtime_s,
-            "diversity_selection_runtime_s": diversity_selection_runtime_s,
             "extra_actions": (
                 0
                 if initial_sparse_action_count is None

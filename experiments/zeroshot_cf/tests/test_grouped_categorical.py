@@ -254,7 +254,7 @@ def test_data_plausible_can_replace_action_without_increasing_sparsity() -> None
     assert info["refinement_stopping_reason"] == "one_shot_accepted"
 
 
-def test_data_plausible_scores_one_bounded_action_diverse_batch() -> None:
+def test_data_plausible_scores_one_bounded_per_action_batch() -> None:
     class UniformSampler:
         def sample_candidate_grid(
             self,
@@ -307,118 +307,6 @@ def test_data_plausible_scores_one_bounded_action_diverse_batch() -> None:
     assert info["accepted_refinement_count"] == 1
 
 
-def test_data_plausible_reuses_one_joint_batch_for_multiple_counterfactuals() -> None:
-    class UniformSampler:
-        def sample_candidate_grid(
-            self,
-            _query,
-            columns,
-            *,
-            quantiles,
-            fixed_target,
-            confidences=None,
-        ):
-            del quantiles, fixed_target, confidences
-            return np.ones((len(columns), 1))
-
-    class AnyActionDisc:
-        def predict_proba(self, X):
-            p1 = 0.1 + 0.6 * np.max(X, axis=1)
-            return np.column_stack([1.0 - p1, p1])
-
-    class CountingScorer:
-        def __init__(self):
-            self.batch_count = 0
-            self.row_count = 0
-
-        def score_rows(self, rows, target_class):
-            assert target_class == 1
-            self.batch_count += 1
-            self.row_count += len(rows)
-            return TabICLJointScoreBatch(
-                np.count_nonzero(rows, axis=1).astype(float)
-            )
-
-    scorer = CountingScorer()
-    counterfactual, _, info = greedy_mixed_counterfactual(
-        UniformSampler(),
-        AnyActionDisc(),
-        np.zeros(8),
-        y_target=1,
-        numerical_columns=list(range(8)),
-        categorical_groups=[],
-        candidate_quantiles=(0.5,),
-        cf_mode="data_plausible",
-        tabicl_joint_plausibility=scorer,
-        joint_shortlist_size=7,
-        max_extra_actions=1,
-        n_counterfactuals=5,
-    )
-
-    diverse = np.asarray(info["diverse_counterfactuals"])
-    np.testing.assert_array_equal(diverse[0], counterfactual)
-    assert diverse.shape == (5, 8)
-    assert len({tuple(row) for row in diverse}) == 5
-    assert np.all(np.count_nonzero(diverse, axis=1) <= 2)
-    assert np.all(info["diverse_joint_log_densities"] >= 1.0)
-    assert scorer.batch_count == 1
-    assert scorer.row_count == 8
-    assert info["joint_scoring_batch_count"] == 1
-    assert info["n_counterfactuals_requested"] == 5
-
-
-def test_diversity_pool_does_not_change_frozen_primary_shortlist() -> None:
-    class UniformSampler:
-        def sample_candidate_grid(
-            self,
-            _query,
-            columns,
-            *,
-            quantiles,
-            fixed_target,
-            confidences=None,
-        ):
-            del quantiles, fixed_target, confidences
-            return np.ones((len(columns), 1))
-
-    class AnyActionDisc:
-        def predict_proba(self, X):
-            p1 = 0.1 + 0.6 * np.max(X, axis=1)
-            return np.column_stack([1.0 - p1, p1])
-
-    class BatchDependentScorer:
-        def score_rows(self, rows, target_class):
-            assert target_class == 1
-            weights = (
-                np.asarray([2.0, 1.0, 3.0])
-                if len(rows) == 3
-                else np.asarray([1.0, 2.0, 3.0])
-            )
-            scores = rows[:, 1:] @ weights
-            return TabICLJointScoreBatch(scores)
-
-    counterfactual, _, info = greedy_mixed_counterfactual(
-        UniformSampler(),
-        AnyActionDisc(),
-        np.zeros(4),
-        y_target=1,
-        numerical_columns=list(range(4)),
-        categorical_groups=[],
-        candidate_quantiles=(0.5,),
-        cf_mode="data_plausible",
-        tabicl_joint_plausibility=BatchDependentScorer(),
-        joint_shortlist_size=3,
-        primary_shortlist_size=2,
-        max_extra_actions=1,
-        n_counterfactuals=4,
-    )
-
-    np.testing.assert_array_equal(counterfactual, [1.0, 1.0, 0.0, 0.0])
-    diverse = np.asarray(info["diverse_counterfactuals"])
-    np.testing.assert_array_equal(diverse[0], counterfactual)
-    assert any(np.array_equal(row, [1.0, 0.0, 0.0, 1.0]) for row in diverse)
-
-
 def test_global_mixed_search_chooses_categorical_action_over_numerical() -> None:
     """A category swap goes first when it has the largest classifier effect."""
     group = OneHotActionGroup("job", (1, 2))
@@ -459,6 +347,26 @@ def test_global_mixed_search_chooses_numerical_action_over_categorical() -> None
     assert changed == [0]
     assert info["history"][0]["action_type"] == "numerical"
     assert info["flipped"] is True
+
+
+def test_valid_candidates_are_ranked_by_grouped_gower_before_probability() -> None:
+    group = OneHotActionGroup("job", (1, 2))
+    factual = np.array([0.0, 1.0, 0.0])
+
+    counterfactual, _, info = greedy_mixed_counterfactual(
+        _MixedGridSampler([[0.9]]),
+        _MixedActionDisc(numerical_weight=0.5, categorical_weight=0.7),
+        factual,
+        y_target=1,
+        numerical_columns=[0],
+        categorical_groups=[group],
+        candidate_quantiles=(0.5,),
+    )
+
+    # Both proposals are valid and the category has higher target probability,
+    # but 0.9 / 2 feature units is closer than 1 / 2 feature units.
+    np.testing.assert_array_equal(counterfactual, [0.9, 1.0, 0.0])
+    assert info["history"][0]["grouped_gower"] == 0.45
 
 
 def test_validity_search_requires_progress_from_first_step() -> None:

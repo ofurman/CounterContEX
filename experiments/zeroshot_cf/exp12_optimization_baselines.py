@@ -30,16 +30,17 @@ import numpy as np
 from experiments.zeroshot_cf.data import (
     OneHotActionGroup,
     get_grouped_categorical_action_space,
+    get_one_hot_groups,
     load_dataset,
 )
 from experiments.zeroshot_cf.discriminator import train_discriminator
-from experiments.zeroshot_cf.exp11_nice_nun_baseline import ActionUnit, _action_units
 from experiments.zeroshot_cf.exp8_tabicl_cf import _select_test_rows
 from experiments.zeroshot_cf.exp9_dicoflex_benchmark import (
     DATASETS,
     DEFAULT_MAX_TEST,
     DEFAULT_VALIDATION_FRACTION,
 )
+from experiments.zeroshot_cf.exp11_nice_nun_baseline import ActionUnit, _action_units
 from experiments.zeroshot_cf.metrics_harness import (
     compute_dicoflex_common_metrics,
     print_metrics,
@@ -380,22 +381,23 @@ def growing_spheres_counterfactual(
             break
         radius *= radius_multiplier
 
+    final_candidate: np.ndarray
     if candidate is None:
-        candidate = best_probability_row
+        final_candidate = best_probability_row
     else:
-        candidate = prune_counterfactual_actions(
+        final_candidate = prune_counterfactual_actions(
             disc_model, factual, candidate, target, action_units, tau=tau
         )
-        candidate = contract_scalar_actions(
+        final_candidate = contract_scalar_actions(
             disc_model,
             factual,
-            candidate,
+            final_candidate,
             target,
             scalar_columns,
             tau=tau,
         )
-    valid, probabilities = _is_valid(disc_model, candidate, target, tau)
-    return candidate, {
+    valid, probabilities = _is_valid(disc_model, final_candidate, target, tau)
+    return final_candidate, {
         "valid": bool(valid[0]),
         "target_probability": float(probabilities[0]),
         "evaluations": evaluations,
@@ -497,6 +499,7 @@ def run_dataset(  # noqa: PLR0913
         y_target,
         bundle.numerical_features_indices,
         immutable_idx,
+        categorical_groups=get_one_hot_groups(bundle),
         sparsity_eps=0.05,
     )
     print_metrics(common_metrics, prefix=f"{dataset_name}/{method}")

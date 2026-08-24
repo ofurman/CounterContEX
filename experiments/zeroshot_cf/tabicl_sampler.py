@@ -18,14 +18,16 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar, Literal, overload
+from typing_extensions import override
 
 import numpy as np
 import torch
 from experiments.zeroshot_cf.tabicl_checkpoints import require_checkpoints
-from tabicl import TabICLClassifier
-from tabicl._unsupervised.unsupervised import TabICLUnsupervised
+from tabicl import TabICLClassifier, TabICLRegressor
+from tabicl._model.quantile_dist import QuantileDistribution
 from tabicl._sklearn.preprocessing import Shuffler
+from tabicl._unsupervised.unsupervised import TabICLUnsupervised
 
 ModelFactory = Callable[..., Any]
 
@@ -78,6 +80,34 @@ def _knn_indices(X: np.ndarray, query: np.ndarray, k: int) -> np.ndarray:
     dist2 = np.einsum("ij,ij->i", diff, diff)
     nearest = np.argpartition(dist2, k - 1)[:k]
     return np.sort(nearest)
+
+
+@overload
+def _select_context(
+    X_context: np.ndarray,
+    y_context: np.ndarray | None,
+    *,
+    target_class: int | None,
+    max_context: int | None,
+    selection: str,
+    query: np.ndarray | None,
+    random_state: int,
+    return_indices: Literal[False] = False,
+) -> tuple[np.ndarray, np.ndarray | None]: ...
+
+
+@overload
+def _select_context(
+    X_context: np.ndarray,
+    y_context: np.ndarray | None,
+    *,
+    target_class: int | None,
+    max_context: int | None,
+    selection: str,
+    query: np.ndarray | None,
+    random_state: int,
+    return_indices: Literal[True],
+) -> tuple[np.ndarray, np.ndarray | None, np.ndarray]: ...
 
 
 def _select_context(
@@ -152,7 +182,17 @@ def _local_tabicl_model_factory(
     explicit local loading and per-context full-conditional memoization.
     """
     class _LocalCheckpointTabICLUnsupervised(TabICLUnsupervised):
-        def _load_shared_model(self, estimator_cls):
+        _numerical_quantile_grid: ClassVar[np.ndarray | None] = None
+        _conditional_estimator_cache: dict[
+            tuple[int, tuple[int, ...], bytes, bytes],
+            tuple[TabICLClassifier | TabICLRegressor, bool],
+        ] | None = None
+
+        @override
+        def _load_shared_model(
+            self,
+            estimator_cls: type[TabICLClassifier] | type[TabICLRegressor],
+        ) -> torch.nn.Module:
             path = (
                 classifier_path if estimator_cls is TabICLClassifier else regressor_path
             )
@@ -167,8 +207,16 @@ def _local_tabicl_model_factory(
             estimator.model_.to(estimator.device_)
             return estimator.model_
 
-        def _sample_numerical(self, dist, temperature, rng):
-            quantile_grid = getattr(self, "_numerical_quantile_grid", None)
+        @staticmethod
+        @override
+        def _sample_numerical(
+            dist: QuantileDistribution,
+            temperature: float,
+            rng: np.random.Generator,
+        ) -> np.ndarray:
+            quantile_grid = (
+                _LocalCheckpointTabICLUnsupervised._numerical_quantile_grid
+            )
             if quantile_grid is not None:
                 if len(quantile_grid) != dist.quantiles.shape[0]:
                     raise ValueError(
@@ -185,7 +233,13 @@ def _local_tabicl_model_factory(
                 return quantile_mode(dist)
             return TabICLUnsupervised._sample_numerical(dist, temperature, rng)
 
-        def _fit_conditional_estimator(self, col_idx, X_train, y_train):
+        @override
+        def _fit_conditional_estimator(
+            self,
+            col_idx: int,
+            X_train: np.ndarray,
+            y_train: np.ndarray,
+        ) -> tuple[TabICLClassifier | TabICLRegressor, bool]:
             """Reuse a fitted full-conditional estimator within one context."""
             cache = getattr(self, "_conditional_estimator_cache", None)
             if cache is None:
@@ -258,6 +312,7 @@ class TabICLConditionalDensitySampler:
         numerical_point_estimate: str = "median",
         categorical_features: Sequence[int] | None = None,
     ) -> None:
+        super().__init__()
         if context_update not in {"replace", "refit"}:
             raise ValueError(
                 "context_update must be 'replace' or 'refit', "
@@ -295,6 +350,12 @@ class TabICLConditionalDensitySampler:
         self.selected_labels_: np.ndarray | None = None
         self.selected_confidences_: np.ndarray | None = None
         self._uses_confidence = False
+
+    def _require_model(self) -> Any:
+        """Return the initialized backend model or raise a lifecycle error."""
+        if self.model is None:
+            raise RuntimeError("Call set_context() before using the TabICL model.")
+        return self.model
 
     def _build_model(self, y_idx: int):
         if any(j >= y_idx for j in self.categorical_features):
@@ -405,12 +466,13 @@ class TabICLConditionalDensitySampler:
 
         if self.model is None:
             self.model = self._build_model(y_idx)
+        model = self._require_model()
         if not self._model_initialized or self.context_update == "refit":
-            self.model.fit(X_aug)
+            model.fit(X_aug)
             self._model_initialized = True
         else:
             self._replace_fitted_context(
-                self.model,
+                model,
                 X_aug,
                 self.categorical_features,
                 y_idx,
@@ -418,7 +480,7 @@ class TabICLConditionalDensitySampler:
         # Conditional estimators and their TabICL KV representations are valid
         # only for this factual's selected context. Reuse them across greedy
         # iterations, then discard them when the next context is installed.
-        self.model._conditional_estimator_cache = {}
+        model._conditional_estimator_cache = {}
 
         self.selected_context_ = X.copy()
         self.selected_labels_ = np.asarray(y).copy()
@@ -542,15 +604,16 @@ class TabICLConditionalDensitySampler:
         candidates = np.asarray(candidate_cols, dtype=int)
         X_aug = self._augmented_candidate_rows(
             X_query,
-            candidates,
+            candidates.tolist(),
             fixed_target,
             fixed_confidence=fixed_confidence,
         )
         temperature = (
             self.temperature if sample_temperature is None else sample_temperature
         )
+        model = self._require_model()
         filled = np.asarray(
-            self.model.impute(
+            model.impute(
                 X_aug,
                 temperature=float(temperature),
                 n_iterations=1,
@@ -586,7 +649,7 @@ class TabICLConditionalDensitySampler:
             else np.asarray(fixed_confidence, dtype=np.float32)
         )
         is_batched = confidence is not None and confidence.ndim == 1
-        n_queries = len(confidence) if is_batched else 1
+        n_queries = len(confidence) if confidence is not None and is_batched else 1
         X_aug = self._augmented_candidate_rows(
             X_query,
             [target_col] * n_queries,
@@ -594,13 +657,14 @@ class TabICLConditionalDensitySampler:
             allow_duplicate_cols=n_queries > 1,
             fixed_confidence=fixed_confidence,
         )
-        train_mask = ~np.isnan(self.model.X_[:, target_col])
+        model = self._require_model()
+        train_mask = ~np.isnan(model.X_[:, target_col])
         conditioning = [
-            j for j in range(self.model.n_features_in_) if j != target_col
+            j for j in range(model.n_features_in_) if j != target_col
         ]
         rng = np.random.default_rng(self.random_state)
         X_train_cond, y_train_cond, X_test_cond = (
-            self.model._prepare_conditional_data(
+            model._prepare_conditional_data(
                 tgt_idx=target_col,
                 cond_features=conditioning,
                 train_mask=train_mask,
@@ -608,7 +672,7 @@ class TabICLConditionalDensitySampler:
                 rng=rng,
             )
         )
-        estimator, is_categorical = self.model._fit_conditional_estimator(
+        estimator, is_categorical = model._fit_conditional_estimator(
             target_col,
             X_train_cond,
             y_train_cond,
@@ -681,21 +745,23 @@ class TabICLConditionalDensitySampler:
             )
         X_aug = self._augmented_candidate_rows(
             X_query,
-            expanded_candidates,
+            expanded_candidates.tolist(),
             fixed_target,
             allow_duplicate_cols=True,
             fixed_confidence=expanded_confidences,
         )
 
+        model = self._require_model()
+        model_type = type(model)
         sentinel = object()
-        previous = getattr(self.model, "_numerical_quantile_grid", sentinel)
-        self.model._numerical_quantile_grid = np.tile(
+        previous = getattr(model_type, "_numerical_quantile_grid", sentinel)
+        model_type._numerical_quantile_grid = np.tile(
             alphas,
             n_confidences,
         ).astype(np.float32)
         try:
             filled = np.asarray(
-                self.model.impute(
+                model.impute(
                     X_aug,
                     temperature=float(self.temperature),
                     n_iterations=1,
@@ -703,9 +769,9 @@ class TabICLConditionalDensitySampler:
             )
         finally:
             if previous is sentinel:
-                delattr(self.model, "_numerical_quantile_grid")
+                delattr(model_type, "_numerical_quantile_grid")
             else:
-                self.model._numerical_quantile_grid = previous
+                model_type._numerical_quantile_grid = previous
 
         values = filled[
             np.arange(len(expanded_candidates)),
@@ -744,11 +810,12 @@ class TabICLConditionalDensitySampler:
                 fixed_confidence=fixed_confidence,
             )
 
-        original_state = self.model.random_state
+        model = self._require_model()
+        original_state = model.random_state
         draws = []
         try:
             for offset in range(n_samples):
-                self.model.random_state = self.random_state + offset
+                model.random_state = self.random_state + offset
                 draws.append(
                     self.sample_candidates(
                         X_query,
@@ -759,7 +826,7 @@ class TabICLConditionalDensitySampler:
                     )
                 )
         finally:
-            self.model.random_state = original_state
+            model.random_state = original_state
         return np.stack(draws, axis=0)
 
     def impute_masked(
@@ -802,8 +869,9 @@ class TabICLConditionalDensitySampler:
                 "fixed_confidence requires confidence_context in set_context()"
             )
         X_aug = np.concatenate(augmented, axis=1)
+        model = self._require_model()
         filled = np.asarray(
-            self.model.impute(
+            model.impute(
                 X_aug,
                 temperature=float(self.temperature),
                 n_iterations=1,

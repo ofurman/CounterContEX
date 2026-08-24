@@ -1,6 +1,0 @@
-# dataset	backend	max_test	n_estimators	temperature	tag
-# Fixed final comparison only: prob_ascent + knn_both@512 + disc labels + one pass.
-moons	tabicl	100	4	1e-9	moons_exp8_tabicl_v2
-heloc	tabicl	50	4	1e-9	heloc_exp8_tabicl_v2
-moons	tabpfn	100	4	1e-9	moons_exp8_tabpfn_v3
-heloc	tabpfn	50	4	1e-9	heloc_exp8_tabpfn_v3

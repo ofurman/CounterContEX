@@ -2,35 +2,41 @@
 
 """Experiment 8: greedy counterfactuals with the TabICLv2 backend.
 
-This runner intentionally does not repeat the context ablation. It fixes the
-Athena winner for all comparison datasets:
+This runner intentionally uses one fixed configuration:
 
 * selector: ``prob_ascent``
 * context: 512 nearest neighbours from both classes (``knn_both@512``)
-* labels: predictions of the discriminator being explained (Athena Exp7)
-* configurable greedy rounds; on mixed data, numerical proposals and atomic
+* labels: predictions of the discriminator being explained
+* iterative greedy search; on mixed data, numerical proposals and atomic
   categorical swaps compete globally at every step
 
 Numerical candidate interventions for each greedy step are expanded into one
 matrix and imputed in one TabICL call. They are then scored together with every
-legal whole-category swap. The overall counterfactual search remains iterative.
-Context remains per-factual because the winning kNN context is query-specific.
+legal whole-category swap. While no proposal is valid, the search commits the
+largest target-probability improvement. Once valid proposals exist, it commits
+the lowest grouped-Gower row, with each categorical group counted once rather
+than by dummy-column width. The overall search remains iterative. Context
+remains per-factual because the kNN context is query-specific.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
-import json
 import time
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+from experiments.zeroshot_cf.data import get_one_hot_groups
 from experiments.zeroshot_cf.exp4_greedy_cf import (
     _DATASET_PARAMS,
     TAU,
     evaluate_and_report,
+)
+from experiments.zeroshot_cf.mixed_distance import (
+    action_unit_change_count,
+    grouped_gower_distance,
 )
 from experiments.zeroshot_cf.tabicl_joint_plausibility import (
     TabICLJointScorer,
@@ -117,11 +123,6 @@ def generate_tabicl_counterfactuals(
     temperature: float = DEFAULT_TEMPERATURE,
     n_estimators: int = DEFAULT_N_ESTIMATORS,
     max_test: int | None = None,
-    context_labels: str = "disc",
-    candidate_mode: str = "batched",
-    context_update: str = "replace",
-    point_estimate: str = DEFAULT_POINT_ESTIMATE,
-    project_to_domain: bool = True,
     candidate_quantiles: tuple[float, ...] | None = None,
     confidence_quantiles: tuple[float, ...] | None = None,
     cf_mode: str = "sparse",
@@ -129,28 +130,16 @@ def generate_tabicl_counterfactuals(
     max_validity_steps: int | None = None,
     allow_revisits: bool = True,
     joint_shortlist_size: int = 16,
-    primary_shortlist_size: int | None = None,
     max_extra_actions: int = 1,
     min_joint_log_gain: float = 0.0,
-    n_counterfactuals: int = 1,
     validation_fraction: float = 0.0,
     test_selection: str = "first",
     drop_heloc_all_minus9: bool = False,
     cache_dir: Path | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
-    """Generate TabICL counterfactuals under the fixed Athena configuration."""
-    if context_labels not in {"disc", "data"}:
-        raise ValueError("context_labels must be 'disc' or 'data'")
-    if candidate_mode not in {"batched", "sequential"}:
-        raise ValueError("candidate_mode must be 'batched' or 'sequential'")
-    if context_update not in {"replace", "refit"}:
-        raise ValueError("context_update must be 'replace' or 'refit'")
-    if point_estimate not in {"median", "mode"}:
-        raise ValueError("point_estimate must be 'median' or 'mode'")
+    """Generate TabICL counterfactuals under the fixed configuration."""
     if candidate_quantiles is not None:
         candidate_quantiles = tuple(float(q) for q in candidate_quantiles)
-        if candidate_mode != "batched":
-            raise ValueError("candidate_quantiles require candidate_mode='batched'")
     if confidence_quantiles is not None:
         confidence_quantiles = tuple(float(q) for q in confidence_quantiles)
         if candidate_quantiles is None:
@@ -163,36 +152,22 @@ def generate_tabicl_counterfactuals(
         raise ValueError("max_validity_steps must be at least 1")
     if joint_shortlist_size < 1:
         raise ValueError("joint_shortlist_size must be at least 1")
-    if primary_shortlist_size is not None and not (
-        1 <= primary_shortlist_size <= joint_shortlist_size
-    ):
-        raise ValueError(
-            "primary_shortlist_size must be between 1 and joint_shortlist_size"
-        )
     if max_extra_actions < 0:
         raise ValueError("max_extra_actions must be non-negative")
     if min_joint_log_gain < 0:
         raise ValueError("min_joint_log_gain must be non-negative")
-    if n_counterfactuals < 1:
-        raise ValueError("n_counterfactuals must be at least 1")
-    if n_counterfactuals > 1 and cf_mode != "data_plausible":
-        raise ValueError("multiple counterfactuals require data_plausible mode")
-    if n_counterfactuals > joint_shortlist_size + 1:
-        raise ValueError(
-            "n_counterfactuals cannot exceed joint_shortlist_size + 1"
-        )
     if test_selection not in {"first", "stratified"}:
         raise ValueError("test_selection must be 'first' or 'stratified'")
 
     from experiments.zeroshot_cf.data import (
         get_grouped_categorical_action_space,
-        get_one_hot_groups,
         load_dataset,
     )
     from experiments.zeroshot_cf.discriminator import train_discriminator
     from experiments.zeroshot_cf.greedy import infer_feature_domains
     from experiments.zeroshot_cf.grouped_categorical import (
         CompactMixedSampler,
+        ConditionedCategoryDistribution,
         GroupedCategoricalCodec,
         greedy_mixed_counterfactual,
     )
@@ -253,7 +228,7 @@ def generate_tabicl_counterfactuals(
     )
     y_pred = disc_model.predict(X_test)
     y_target = 1 - y_pred
-    y_context = disc_model.predict(X_train) if context_labels == "disc" else y_train
+    y_context = disc_model.predict(X_train)
     context_probabilities = (
         np.asarray(disc_model.predict_proba(X_train))
         if confidence_quantiles is not None
@@ -263,16 +238,13 @@ def generate_tabicl_counterfactuals(
     print(f"\n=== Experiment 8 (TabICL): {dataset_name.upper()} ===")
     print(
         f"  selector=prob_ascent, context={ATHENA_CONTEXT_STRATEGY}"
-        f"@{ATHENA_CONTEXT_SIZE}, labels={context_labels}, "
-        f"candidate_mode={candidate_mode}, context_update={context_update}, "
-        f"point_estimate={point_estimate}, project_to_domain={project_to_domain}, "
+        f"@{ATHENA_CONTEXT_SIZE}, labels=disc, "
+        f"point_estimate={DEFAULT_POINT_ESTIMATE}, project_to_domain=True, "
         f"candidate_quantiles={candidate_quantiles}, "
         f"confidence_quantiles={confidence_quantiles}, "
         f"cf_mode={cf_mode}, joint_shortlist_size={joint_shortlist_size}, "
-        f"primary_shortlist_size={primary_shortlist_size}, "
         f"max_extra_actions={max_extra_actions}, "
         f"min_joint_log_gain={min_joint_log_gain}, "
-        f"n_counterfactuals={n_counterfactuals}, "
         f"max_validity_steps={effective_max_validity_steps}, "
         f"allow_revisits={allow_revisits}, "
         f"split={bundle.split_variant}, test_selection={test_selection}, "
@@ -294,8 +266,7 @@ def generate_tabicl_counterfactuals(
         random_state=42,
         device=TABICL_DEVICE,
         cache_dir=cache_dir,
-        context_update=context_update,
-        numerical_point_estimate=point_estimate,
+        numerical_point_estimate=DEFAULT_POINT_ESTIMATE,
         categorical_features=(
             None if categorical_codec is None else categorical_codec.categorical_columns
         ),
@@ -318,8 +289,7 @@ def generate_tabicl_counterfactuals(
             random_state=42,
             device=TABICL_DEVICE,
             cache_dir=cache_dir,
-            context_update=context_update,
-            numerical_point_estimate=point_estimate,
+            numerical_point_estimate=DEFAULT_POINT_ESTIMATE,
             categorical_features=(
                 None
                 if categorical_codec is None
@@ -331,39 +301,15 @@ def generate_tabicl_counterfactuals(
             if categorical_codec is None
             else CompactMixedSampler(joint_sampler_context, categorical_codec)
         )
-    feature_domains = infer_feature_domains(X_train) if project_to_domain else None
+    feature_domains = infer_feature_domains(X_train)
 
     X_cf = X_test.copy()
     X_sparse = X_test.copy()
-    X_cf_set = np.full(
-        (len(X_test), n_counterfactuals, X_test.shape[1]),
-        np.nan,
-        dtype=np.float64,
-    )
-    cf_set_available = np.zeros(
-        (len(X_test), n_counterfactuals),
-        dtype=bool,
-    )
-    cf_set_joint_log_density = np.full(
-        (len(X_test), n_counterfactuals),
-        np.nan,
-        dtype=np.float64,
-    )
-    cf_set_target_probability = np.full(
-        (len(X_test), n_counterfactuals),
-        np.nan,
-        dtype=np.float64,
-    )
     changed_per_point: list[list[int]] = [[] for _ in range(len(X_test))]
     flipped_per_point = [False] * len(X_test)
     steps_per_point = [0] * len(X_test)
     history_per_point: list[list[tuple]] = [[] for _ in range(len(X_test))]
     attempt_history_per_point: list[list[tuple]] = [[] for _ in range(len(X_test))]
-    selection_history_per_point: list[list[dict]] = [[] for _ in range(len(X_test))]
-    confidence_grid_per_point: list[tuple[float, ...] | None] = [
-        None for _ in range(len(X_test))
-    ]
-    categorical_history_per_point: list[list[dict]] = [[] for _ in range(len(X_test))]
     validity_steps_per_point = [0] * len(X_test)
     initial_valid_step_per_point: list[int | None] = [None for _ in range(len(X_test))]
     refinement_steps_per_point = [0] * len(X_test)
@@ -373,21 +319,17 @@ def generate_tabicl_counterfactuals(
     initial_tabicl_joint_log_density_per_point = np.full(len(X_test), np.nan)
     final_tabicl_joint_log_density_per_point = np.full(len(X_test), np.nan)
     tabicl_joint_log_density_gain_per_point = np.full(len(X_test), np.nan)
-    diversity_sparse_joint_log_density_per_point = np.full(len(X_test), np.nan)
     joint_scoring_batch_count_per_point = np.zeros(len(X_test), dtype=int)
     joint_rows_scored_per_point = np.zeros(len(X_test), dtype=int)
     extra_actions_per_point = np.zeros(len(X_test), dtype=int)
     refinement_stopping_reason_per_point = ["not_started"] * len(X_test)
     point_runtime_s = np.zeros(len(X_test), dtype=np.float64)
     joint_scoring_runtime_s_per_point = np.zeros(len(X_test), dtype=np.float64)
-    diversity_selection_runtime_s_per_point = np.zeros(
-        len(X_test), dtype=np.float64
-    )
 
     started = time.perf_counter()
     for i, (x, target) in enumerate(zip(X_test, y_target, strict=True)):
         point_started = time.perf_counter()
-        # Athena winner: both-class pool, per-factual 512-row kNN context.
+        # Both-class pool with a per-factual 512-row kNN context.
         sampler_query = (
             x if categorical_codec is None else categorical_codec.encode_row(x)
         )
@@ -406,9 +348,15 @@ def generate_tabicl_counterfactuals(
         )
         confidence_grid = None
         if confidence_quantiles is not None:
+            selected_confidences = sampler_context.selected_confidences_
+            selected_labels = sampler_context.selected_labels_
+            if selected_confidences is None or selected_labels is None:
+                raise RuntimeError(
+                    "confidence-conditioned context diagnostics are unavailable"
+                )
             confidence_grid = empirical_confidence_grid(
-                sampler_context.selected_confidences_,
-                sampler_context.selected_labels_,
+                selected_confidences,
+                selected_labels,
                 int(target),
                 confidence_quantiles,
             )
@@ -434,7 +382,7 @@ def generate_tabicl_counterfactuals(
                 n_permutations=tabicl_joint_permutations,
             )
 
-        category_distribution = None
+        category_distribution: ConditionedCategoryDistribution | None = None
         if categorical_codec is not None and grouped_actionable:
             category_distribution_cache: dict[
                 tuple[bytes, str], tuple[np.ndarray, np.ndarray]
@@ -445,7 +393,7 @@ def generate_tabicl_counterfactuals(
                 else tuple(float(value) for value in point_confidence_grid)
             )
 
-            def category_distribution(
+            def conditioned_category_distribution(
                 row: np.ndarray,
                 group: Any,
                 confidence: float | None,
@@ -502,6 +450,8 @@ def generate_tabicl_counterfactuals(
                     anchor_index = int(matches[0])
                 return categories, probability_grid[anchor_index]
 
+            category_distribution = conditioned_category_distribution
+
         x_cf, changed, greedy_info = greedy_mixed_counterfactual(
             sampler,
             disc_model,
@@ -517,40 +467,14 @@ def generate_tabicl_counterfactuals(
             max_validity_steps=effective_max_validity_steps,
             allow_revisits=allow_revisits,
             joint_shortlist_size=joint_shortlist_size,
-            primary_shortlist_size=primary_shortlist_size,
             max_extra_actions=max_extra_actions,
             min_joint_log_gain=min_joint_log_gain,
-            n_counterfactuals=n_counterfactuals,
             tau=tau,
             temperature=temperature,
             category_distribution=category_distribution,
             categorical_proposal_count=CATEGORICAL_PROPOSAL_COUNT,
         )
         X_cf[i] = x_cf
-        selected_set = np.asarray(
-            greedy_info["diverse_counterfactuals"],
-            dtype=np.float64,
-        )
-        if selected_set.ndim != 2 or selected_set.shape[1] != X_test.shape[1]:
-            raise RuntimeError(
-                "diverse counterfactuals have an incompatible shape: "
-                f"{selected_set.shape}"
-            )
-        if len(selected_set) > n_counterfactuals:
-            raise RuntimeError("diverse selector returned too many counterfactuals")
-        if not np.allclose(selected_set[0], x_cf):
-            raise RuntimeError("the first diverse CFE must equal the primary CFE")
-        cf_count = len(selected_set)
-        X_cf_set[i, :cf_count] = selected_set
-        cf_set_available[i, :cf_count] = True
-        cf_set_joint_log_density[i, :cf_count] = np.asarray(
-            greedy_info["diverse_joint_log_densities"],
-            dtype=np.float64,
-        )
-        cf_set_target_probability[i, :cf_count] = np.asarray(
-            greedy_info["diverse_target_probabilities"],
-            dtype=np.float64,
-        )
         initial_sparse_row = greedy_info.get("initial_sparse_row")
         if initial_sparse_row is not None:
             X_sparse[i] = np.asarray(initial_sparse_row, dtype=X_sparse.dtype)
@@ -559,9 +483,6 @@ def generate_tabicl_counterfactuals(
         steps_per_point[i] = greedy_info["steps"]
         history_per_point[i] = greedy_info["history"]
         attempt_history_per_point[i] = greedy_info["attempt_history"]
-        selection_history_per_point[i] = greedy_info["selection_history"]
-        confidence_grid_per_point[i] = confidence_grid
-        categorical_history_per_point[i] = greedy_info["categorical_history"]
         validity_steps_per_point[i] = greedy_info["validity_steps"]
         initial_valid_step_per_point[i] = greedy_info.get("initial_valid_step")
         refinement_steps_per_point[i] = greedy_info.get("refinement_steps", 0)
@@ -585,13 +506,6 @@ def generate_tabicl_counterfactuals(
         joint_score_gain = greedy_info.get("tabicl_joint_log_density_gain")
         if joint_score_gain is not None:
             tabicl_joint_log_density_gain_per_point[i] = float(joint_score_gain)
-        diversity_sparse_score = greedy_info.get(
-            "diversity_sparse_joint_log_density"
-        )
-        if diversity_sparse_score is not None:
-            diversity_sparse_joint_log_density_per_point[i] = float(
-                diversity_sparse_score
-            )
         joint_scoring_batch_count_per_point[i] = int(
             greedy_info.get("joint_scoring_batch_count", 0)
         )
@@ -605,9 +519,6 @@ def generate_tabicl_counterfactuals(
         joint_scoring_runtime_s_per_point[i] = float(
             greedy_info.get("joint_scoring_runtime_s", 0.0)
         )
-        diversity_selection_runtime_s_per_point[i] = float(
-            greedy_info.get("diversity_selection_runtime_s", 0.0)
-        )
         point_runtime_s[i] = time.perf_counter() - point_started
         if i == 0:
             first_s = time.perf_counter() - started
@@ -617,7 +528,6 @@ def generate_tabicl_counterfactuals(
             )
 
     runtime_s = time.perf_counter() - started
-    lof_per_point = None
     target_probability_per_point = np.asarray(disc_model.predict_proba(X_cf))[
         np.arange(len(X_cf)), y_target.astype(int)
     ]
@@ -628,18 +538,7 @@ def generate_tabicl_counterfactuals(
         "actionable_idx": actionable_idx,
         "immutable_idx": immutable_idx,
         "disc_model": disc_model,
-        "selector": "prob_ascent",
-        "context_type": ATHENA_CONTEXT_STRATEGY,
-        "context_labels": context_labels,
-        "tau": tau,
-        "budget": len(numerical_actionable_idx),
         "temperature": temperature,
-        "n_permutations": 0,
-        "max_context": ATHENA_CONTEXT_SIZE,
-        "candidate_mode": candidate_mode,
-        "context_update": context_update,
-        "point_estimate": point_estimate,
-        "project_to_domain": project_to_domain,
         "candidate_quantiles": candidate_quantiles,
         "confidence_quantiles": confidence_quantiles,
         "cf_mode": cf_mode,
@@ -648,49 +547,31 @@ def generate_tabicl_counterfactuals(
             if cf_mode == "data_plausible"
             else "proposal_support"
         ),
-        "tabicl_joint_permutations": tabicl_joint_permutations,
         "max_validity_steps": effective_max_validity_steps,
         "allow_revisits": allow_revisits,
         "joint_shortlist_size": joint_shortlist_size,
-        "primary_shortlist_size": primary_shortlist_size,
         "max_extra_actions": max_extra_actions,
         "min_joint_log_gain": min_joint_log_gain,
-        "n_counterfactuals_requested": n_counterfactuals,
         "categorical_proposal_count": CATEGORICAL_PROPOSAL_COUNT,
         "categorical_confidence_batching": True,
         "conditional_estimator_cache": True,
         "tabicl_kv_cache": sampler_context.estimator_params.get("kv_cache", False),
-        "grouped_actionable": [group.name for group in grouped_actionable],
-        "validation_fraction": validation_fraction,
         "test_selection": test_selection,
         "split_variant": bundle.split_variant,
-        "drop_heloc_all_minus9": drop_heloc_all_minus9,
         "preprocessing_variant": bundle.preprocessing_variant,
         "n_dropped_rows": bundle.n_dropped_rows,
         "n_estimators": n_estimators,
         "runtime_s": runtime_s,
         "X_sparse": X_sparse,
-        "X_cf_set": X_cf_set,
-        "cf_set_available": cf_set_available,
-        "cf_set_joint_log_density": cf_set_joint_log_density,
-        "cf_set_target_probability": cf_set_target_probability,
         "point_runtime_s": point_runtime_s,
         "joint_scoring_runtime_s_per_point": (
             joint_scoring_runtime_s_per_point
         ),
-        "diversity_selection_runtime_s_per_point": (
-            diversity_selection_runtime_s_per_point
-        ),
-        "numerical_actionable_idx": tuple(numerical_actionable_idx),
-        "grouped_actionable_objects": tuple(grouped_actionable),
         "changed_per_point": changed_per_point,
         "flipped_per_point": flipped_per_point,
         "steps_per_point": steps_per_point,
         "history_per_point": history_per_point,
         "attempt_history_per_point": attempt_history_per_point,
-        "selection_history_per_point": selection_history_per_point,
-        "confidence_grid_per_point": confidence_grid_per_point,
-        "categorical_history_per_point": categorical_history_per_point,
         "validity_steps_per_point": validity_steps_per_point,
         "initial_valid_step_per_point": initial_valid_step_per_point,
         "refinement_steps_per_point": refinement_steps_per_point,
@@ -710,9 +591,6 @@ def generate_tabicl_counterfactuals(
         "tabicl_joint_log_density_gain_per_point": (
             tabicl_joint_log_density_gain_per_point
         ),
-        "diversity_sparse_joint_log_density_per_point": (
-            diversity_sparse_joint_log_density_per_point
-        ),
         "joint_scoring_batch_count_per_point": (
             joint_scoring_batch_count_per_point
         ),
@@ -721,7 +599,6 @@ def generate_tabicl_counterfactuals(
         "refinement_stopping_reason_per_point": (
             refinement_stopping_reason_per_point
         ),
-        "lof_per_point": lof_per_point,
         "target_probability_per_point": target_probability_per_point,
     }
     return X_test, y_test, X_cf, info
@@ -741,6 +618,26 @@ def run_and_report(
         info,
         write_csv=False,
     )
+    bundle = info["bundle"]
+    categorical_groups = get_one_hot_groups(bundle)
+    valid = np.asarray(info["disc_model"].predict(X_cf)) == info["y_target"]
+    grouped_gower = grouped_gower_distance(
+        X_cf,
+        X_test,
+        bundle.numerical_features_indices,
+        categorical_groups,
+    )
+    action_counts = action_unit_change_count(
+        X_cf,
+        X_test,
+        bundle.numerical_features_indices,
+        categorical_groups,
+        numerical_tolerance=0.05,
+    )
+    metrics["proximity_grouped_gower"] = (
+        float(grouped_gower[valid].mean()) if valid.any() else float("nan")
+    )
+    metrics["action_unit_sparsity_mean"] = float(action_counts.mean())
     initial_action_counts = np.asarray(
         info["initial_sparse_action_count_per_point"], dtype=float
     )
@@ -755,13 +652,14 @@ def run_and_report(
         "dataset": dataset_name,
         "backend": "tabicl_v2",
         "selector": "prob_ascent",
+        "valid_candidate_objective": "grouped_gower",
         "context_strategy": ATHENA_CONTEXT_STRATEGY,
         "context_size": ATHENA_CONTEXT_SIZE,
-        "context_labels": info["context_labels"],
-        "candidate_mode": info["candidate_mode"],
-        "context_update": info["context_update"],
-        "point_estimate": info["point_estimate"],
-        "project_to_domain": info["project_to_domain"],
+        "context_labels": "disc",
+        "candidate_mode": "batched",
+        "context_update": "replace",
+        "point_estimate": DEFAULT_POINT_ESTIMATE,
+        "project_to_domain": True,
         "candidate_quantiles": info["candidate_quantiles"],
         "confidence_quantiles": info["confidence_quantiles"],
         "cf_mode": info["cf_mode"],
@@ -806,41 +704,12 @@ def run_and_report(
         writer.writeheader()
         writer.writerow(row)
     print(f"\n  Wrote {output}")
-    if info["lof_per_point"] is not None:
-        diagnostics = {
-            "dataset": dataset_name,
-            "preprocessing_variant": info["preprocessing_variant"],
-            "split_variant": info["split_variant"],
-            "n_dropped_rows": info["n_dropped_rows"],
-            "lof_per_point": info["lof_per_point"].tolist(),
-            "y_pred": info["y_pred"].tolist(),
-            "y_target": info["y_target"].tolist(),
-            "target_probability_per_point": info[
-                "target_probability_per_point"
-            ].tolist(),
-            "changed_per_point": info["changed_per_point"],
-            "flipped_per_point": info["flipped_per_point"],
-            "steps_per_point": info["steps_per_point"],
-            "history_per_point": info["history_per_point"],
-            "attempt_history_per_point": info["attempt_history_per_point"],
-            "selection_history_per_point": info["selection_history_per_point"],
-            "confidence_grid_per_point": info["confidence_grid_per_point"],
-            "categorical_history_per_point": info["categorical_history_per_point"],
-            "X_test": X_test.tolist(),
-            "X_cf": X_cf.tolist(),
-        }
-        diagnostics_output = (
-            RESULTS_DIR / f"exp8_tabicl_{dataset_name}_diagnostics.json"
-        )
-        with diagnostics_output.open("w") as handle:
-            json.dump(diagnostics, handle, indent=2)
-        print(f"  Wrote {diagnostics_output}")
     return metrics
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="TabICL greedy counterfactuals at Athena's winning context"
+        description="TabICL greedy counterfactuals with a fixed kNN context"
     )
     parser.add_argument(
         "--dataset",
@@ -855,34 +724,6 @@ def main() -> None:
         type=int,
         default=None,
         help="Default: moons=100, heloc=50; use -1 for the full test split.",
-    )
-    parser.add_argument(
-        "--context-labels",
-        choices=["disc", "data"],
-        default="disc",
-        help="Athena Exp7 used discriminator labels; 'data' reproduces Exp6.",
-    )
-    parser.add_argument(
-        "--candidate-mode",
-        choices=["batched", "sequential"],
-        default="batched",
-        help="Use sequential only for the small equivalence/runtime baseline.",
-    )
-    parser.add_argument(
-        "--context-update",
-        choices=["replace", "refit"],
-        default="replace",
-        help=(
-            "'replace' updates TabICL's stored context without reloading weights; "
-            "'refit' calls the upstream fit() method for every factual and is "
-            "intended only as a small correctness baseline."
-        ),
-    )
-    parser.add_argument(
-        "--point-estimate",
-        choices=["median", "mode"],
-        default=DEFAULT_POINT_ESTIMATE,
-        help="Numerical TabICL point estimate; mode aligns with TabPFN near-MAP.",
     )
     parser.add_argument(
         "--candidate-quantiles",
@@ -912,8 +753,9 @@ def main() -> None:
         choices=["sparse", "data-plausible"],
         default="sparse",
         help=(
-            "Sparse stops at the first valid sparse CFE; data-plausible then "
-            "performs one bounded TabICL complete-row reranking batch."
+            "Sparse stops after selecting the lowest grouped-Gower valid "
+            "proposal; data-plausible then performs one bounded TabICL "
+            "complete-row reranking batch."
         ),
     )
     parser.add_argument(
@@ -943,12 +785,6 @@ def main() -> None:
         help="Maximum valid alternatives in the one-shot whole-row batch.",
     )
     parser.add_argument(
-        "--primary-shortlist-size",
-        type=int,
-        default=None,
-        help="Optional shortlist prefix used to choose the rank-1 CFE.",
-    )
-    parser.add_argument(
         "--max-extra-actions",
         type=int,
         default=1,
@@ -959,12 +795,6 @@ def main() -> None:
         type=float,
         default=0.0,
         help="Minimum raw whole-row log-density gain over the sparse CFE.",
-    )
-    parser.add_argument(
-        "--n-counterfactuals",
-        type=int,
-        default=1,
-        help="Number of quality-constrained CFEs requested per factual.",
     )
     parser.add_argument(
         "--validation-fraction",
@@ -989,11 +819,6 @@ def main() -> None:
             "the -9 no-bureau-record sentinel."
         ),
     )
-    parser.add_argument(
-        "--no-domain-projection",
-        action="store_true",
-        help="Disable training-range/support projection (diagnostic only).",
-    )
     parser.add_argument("--cache-dir", type=Path, default=None)
     args = parser.parse_args()
 
@@ -1007,11 +832,6 @@ def main() -> None:
             temperature=args.temperature,
             n_estimators=args.n_estimators,
             max_test=args.max_test,
-            context_labels=args.context_labels,
-            candidate_mode=args.candidate_mode,
-            context_update=args.context_update,
-            point_estimate=args.point_estimate,
-            project_to_domain=not args.no_domain_projection,
             candidate_quantiles=(
                 None
                 if args.candidate_quantiles is None
@@ -1027,10 +847,8 @@ def main() -> None:
             max_validity_steps=args.max_validity_steps,
             allow_revisits=args.allow_revisits,
             joint_shortlist_size=args.joint_shortlist_size,
-            primary_shortlist_size=args.primary_shortlist_size,
             max_extra_actions=args.max_extra_actions,
             min_joint_log_gain=args.min_joint_log_gain,
-            n_counterfactuals=args.n_counterfactuals,
             validation_fraction=args.validation_fraction,
             test_selection=args.test_selection,
             drop_heloc_all_minus9=args.drop_heloc_all_minus9,

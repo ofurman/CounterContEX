@@ -309,7 +309,6 @@ def greedy_counterfactual(
     tau: float = 0.5,
     budget: Optional[int] = None,
     temperature: float = 1e-9,
-    max_rounds: int = 1,
     batch_candidates: bool = False,
     feature_domains=None,
     retain_best: bool = False,
@@ -343,26 +342,10 @@ def greedy_counterfactual(
         Probability threshold for the flip: stop when ``predict == y_target``
         AND ``predict_proba[y_target] >= tau``. Default 0.5 ≡ hard flip.
     budget : int or None
-        Max number of features to change **per round**. Defaults to
-        ``len(actionable_idx)``.
+        Max number of features to change. Defaults to ``len(actionable_idx)``.
     temperature : float
         Sampling temperature for the committed value. ``1e-9`` = near-MAP
         (deterministic single-column commit).
-    max_rounds : int
-        Number of greedy passes over the actionable columns. Within a round
-        each column may be edited at most once (the original constraint);
-        ``max_rounds=1`` (default) is byte-identical to the single-pass
-        behaviour. In rounds >= 2 a column edited in an earlier round becomes
-        eligible again — its re-draw is conditioned on the *current* ``x_cf``
-        (the other columns have moved since it was set), so repeated rounds
-        are coordinate ascent toward the target-class conditional mode.
-        Two guards apply in rounds >= 2 only:
-        (a) an edit is committed only if it **strictly increases**
-        ``predict_proba[y_target]`` — for ``prob_ascent`` no candidate can
-        beat the argmax, so a non-improving argmax ends the round; and
-        (b) if a round commits nothing, the loop stops early — no
-        single-column near-MAP edit improves ``p_target``, i.e. a fixed
-        point, and at near-zero temperature further rounds are no-ops.
     batch_candidates : bool
         If True, evaluate all remaining ``prob_ascent`` candidates through one
         ``sampler.sample_candidates`` call per greedy step. This preserves the
@@ -373,20 +356,18 @@ def greedy_counterfactual(
         conditional quantiles per feature and score every feature/value pair.
         ``None`` preserves the single point-estimate path.
     require_improvement : bool
-        Apply the revisit-round strict target-probability improvement guard
-        from the first pass. An outer mixed-data loop uses this when numerical
-        features are revisited after a categorical pass.
+        Commit a candidate only if it strictly increases target probability.
+        The mixed-data TabICL loop uses this when numerical features are
+        revisited after a categorical pass.
 
     Returns
     -------
     (x_cf, changed, info)
         ``x_cf`` — the counterfactual (ndarray, shape (d,)).
-        ``changed`` — **distinct** changed column indices in first-touch order
-        (L0 = ``len(changed)``; a column re-edited in a later round is not
-        repeated).
-        ``info`` — dict with ``flipped`` (bool), ``steps`` (int = total edits
-        committed, >= ``len(changed)`` when ``max_rounds > 1``), ``rounds``
-        (int = rounds entered), and ``history`` (per-edit list of
+        ``changed`` — ordered list of changed column indices
+        (L0 = ``len(changed)``).
+        ``info`` — dict with ``flipped`` (bool), ``steps`` (int), and
+        ``history`` (per-edit list of
         ``(feature_idx, value, p_target_after, selection_score)``).
     """
     x = np.asarray(x, dtype=np.float64).copy()
@@ -394,8 +375,6 @@ def greedy_counterfactual(
     actionable = list(actionable_idx)
     if budget is None:
         budget = len(actionable)
-    if max_rounds < 1:
-        raise ValueError(f"max_rounds must be >= 1, got {max_rounds}")
     if candidate_quantiles is not None:
         candidate_quantiles = tuple(float(q) for q in candidate_quantiles)
         if selector != "prob_ascent" or not batch_candidates:
@@ -413,11 +392,10 @@ def greedy_counterfactual(
     y_current = 1 - int(y_target)  # binary task
 
     x_cf = x.copy()
-    changed: List[int] = []  # distinct columns, first-touch order (= L0)
+    changed: List[int] = []
     history: List[tuple] = []
     selection_history: List[Dict] = []
     total_edits = 0
-    rounds_used = 0
 
     def _flip_state(row: np.ndarray) -> Tuple[bool, float]:
         rr = row.reshape(1, -1)
@@ -431,109 +409,94 @@ def greedy_counterfactual(
     best_p_t = p_t
     best_steps = total_edits
     best_history_length = 0
-    for rnd in range(max_rounds):
-        if flipped:
+    while not flipped and len(changed) < budget:
+        candidates = [j for j in actionable if j not in changed]
+        if not candidates:
             break
-        rounds_used = rnd + 1
-        edited_this_round: List[int] = []
 
-        while not flipped and len(edited_this_round) < budget:
-            candidates = [j for j in actionable if j not in edited_this_round]
-            if not candidates:
-                break
-
-            selection_metadata: Dict = {}
-            if selector == "prob_ascent":
-                if candidate_quantiles is not None:
-                    j_star, score, val, selection_metadata = (
-                        _select_prob_ascent_quantile_grid(
-                            sampler,
-                            disc,
-                            x_cf,
-                            y_target,
-                            candidates,
-                            candidate_quantiles,
-                            feature_domains,
-                            confidences=candidate_confidences,
-                            tau=tau,
-                            plausibility_model=plausibility_model,
-                            validity_first=validity_first,
-                            probability_slack=probability_slack,
-                        )
-                    )
-                else:
-                    select = (
-                        _select_prob_ascent_batched
-                        if batch_candidates
-                        else _select_prob_ascent
-                    )
-                    j_star, score, val = select(
+        selection_metadata: Dict = {}
+        if selector == "prob_ascent":
+            if candidate_quantiles is not None:
+                j_star, score, val, selection_metadata = (
+                    _select_prob_ascent_quantile_grid(
                         sampler,
                         disc,
                         x_cf,
                         y_target,
                         candidates,
-                        temperature,
+                        candidate_quantiles,
                         feature_domains,
+                        confidences=candidate_confidences,
+                        tau=tau,
+                        plausibility_model=plausibility_model,
+                        validity_first=validity_first,
+                        probability_slack=probability_slack,
                     )
-            elif selector == "class_divergence":
-                j_star, score, val = _select_class_divergence(
-                    sampler, x_cf, y_target, y_current, candidates
                 )
             else:
-                raise ValueError(
-                    f"Unknown selector {selector!r}; expected 'prob_ascent' or "
-                    "'class_divergence'."
+                select = (
+                    _select_prob_ascent_batched
+                    if batch_candidates
+                    else _select_prob_ascent
                 )
-
-            if val is None:
-                val = float(
-                    sampler.sample_feature(
-                        x_cf.reshape(1, -1),
-                        target_col=j_star,
-                        sample_temperature=temperature,
-                        fixed_target=y_target,
-                    )[0]
+                j_star, score, val = select(
+                    sampler,
+                    disc,
+                    x_cf,
+                    y_target,
+                    candidates,
+                    temperature,
+                    feature_domains,
                 )
-                val = float(
-                    project_candidate_values(
-                        [j_star], np.array([val]), feature_domains
-                    )[0]
+        elif selector == "class_divergence":
+            j_star, score, val = _select_class_divergence(
+                sampler, x_cf, y_target, y_current, candidates
+            )
+        else:
+            raise ValueError(
+                f"Unknown selector {selector!r}; expected 'prob_ascent' or "
+                "'class_divergence'."
+            )
+
+        if val is None:
+            val = float(
+                sampler.sample_feature(
+                    x_cf.reshape(1, -1),
+                    target_col=j_star,
+                    sample_temperature=temperature,
+                    fixed_target=y_target,
+                )[0]
+            )
+            val = float(
+                project_candidate_values(
+                    [j_star], np.array([val]), feature_domains
+                )[0]
+            )
+
+        if require_improvement:
+            if selector == "prob_ascent":
+                p_trial = score
+            else:
+                trial = x_cf.copy()
+                trial[j_star] = val
+                p_trial = float(
+                    disc.predict_proba(trial.reshape(1, -1))[0, y_target]
                 )
+            if p_trial <= p_t:
+                break
 
-            if rnd > 0 or require_improvement:
-                # Strict-improvement acceptance in re-visit rounds. For
-                # prob_ascent ``score`` already is p_target after the trial
-                # edit; for class_divergence it is a divergence, so p must be
-                # probed with one extra disc call.
-                if selector == "prob_ascent":
-                    p_trial = score
-                else:
-                    trial = x_cf.copy()
-                    trial[j_star] = val
-                    p_trial = float(
-                        disc.predict_proba(trial.reshape(1, -1))[0, y_target]
-                    )
-                if p_trial <= p_t:
-                    break  # end this round; round-level guard decides the rest
-
-            x_cf[j_star] = val
-            edited_this_round.append(j_star)
-            if j_star not in changed:
-                changed.append(j_star)
-            total_edits += 1
-            flipped, p_t = _flip_state(x_cf)
-            history.append((j_star, val, p_t, score))
-            selection_history.append(selection_metadata)
-            if p_t > best_p_t:
-                best_x_cf = x_cf.copy()
-                best_changed = changed.copy()
-                best_p_t = p_t
-                best_steps = total_edits
-                best_history_length = len(history)
-
-        if (rnd > 0 or require_improvement) and not edited_this_round:
-            break  # fixed point: no single-column edit improves p_target
+        x_cf[j_star] = val
+        changed.append(j_star)
+        total_edits += 1
+        flipped, p_t = _flip_state(x_cf)
+        history.append((j_star, val, p_t, score))
+        selection_history.append(selection_metadata)
+        if p_t > best_p_t:
+            best_x_cf = x_cf.copy()
+            best_changed = changed.copy()
+            best_p_t = p_t
+            best_steps = total_edits
+            best_history_length = len(history)
 
     attempt_history = history.copy()
     attempt_selection_history = selection_history.copy()
@@ -559,7 +522,6 @@ def greedy_counterfactual(
         "flipped": bool(flipped),
         "steps": total_edits,
         "attempt_steps": len(attempt_history),
-        "rounds": rounds_used,
         "history": history,
         "attempt_history": attempt_history,
         "best_target_probability": float(best_p_t),

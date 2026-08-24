@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
+from experiments.zeroshot_cf.data import OneHotActionGroup
 from experiments.zeroshot_cf.metrics_harness import (
     compute_dicoflex_common_metrics,
     compute_metrics,
@@ -229,6 +229,9 @@ def test_dicoflex_common_metrics_match_reference_definitions():
     assert metrics["actionability"] == pytest.approx(1.0)
     # Four of nine transformed entries exceed DiCoFlex's epsilon of 0.05.
     assert metrics["sparsity"] == pytest.approx(4 / 9)
+    assert metrics["action_unit_sparsity_mean"] == pytest.approx(4 / 3)
+    # Valid rows have mixed distances 0.02 and 0.25 over two numeric units.
+    assert metrics["proximity_grouped_gower"] == pytest.approx(0.135)
     # Only the first two, valid rows contribute: (0.04 + 0.50) / 2.
     assert metrics["proximity_continuous_manhattan"] == pytest.approx(0.27)
     assert metrics["proximity_continuous_euclidean"] == pytest.approx(
@@ -238,6 +241,25 @@ def test_dicoflex_common_metrics_match_reference_definitions():
     assert np.isfinite(metrics["lof_scores_test"])
     assert np.isfinite(metrics["isolation_forest_scores_cf"])
     assert np.isfinite(metrics["isolation_forest_scores_test"])
+
+
+def test_dicoflex_grouped_gower_treats_one_hot_group_as_one_feature() -> None:
+    X_test = np.array([[0.0, 1.0, 0.0, 0.0]])
+    X_cf = np.array([[0.2, 0.0, 0.0, 1.0]])
+    X_train = np.random.default_rng(23).uniform(0, 1, (40, 4))
+    metrics = compute_dicoflex_common_metrics(
+        _MockDisc(np.array([1])),
+        X_cf,
+        X_test,
+        X_train,
+        y_target=np.array([1]),
+        numerical_idx=[0],
+        categorical_groups=[OneHotActionGroup("kind", (1, 2, 3))],
+    )
+
+    # (0.2 numeric contribution + 1 categorical mismatch) / 2 units.
+    assert metrics["proximity_grouped_gower"] == pytest.approx(0.6)
+    assert metrics["action_unit_sparsity_mean"] == pytest.approx(2.0)
 
 
 def test_dicoflex_common_metrics_keep_singleton_target_dimension():
