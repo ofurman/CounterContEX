@@ -20,16 +20,16 @@ from __future__ import annotations
 
 import numpy as np
 import torch
-from sklearn.linear_model import LogisticRegression
-
 from experiments.zeroshot_cf.discriminator import DiscriminatorModel
 from experiments.zeroshot_cf.greedy import (
-    greedy_counterfactual,
-    _select_prob_ascent,
     _select_class_divergence,
+    _select_prob_ascent,
+    greedy_counterfactual,
+    infer_feature_domains,
+    project_candidate_values,
 )
 from experiments.zeroshot_cf.sampler import ConditionalDensitySampler
-
+from sklearn.linear_model import LogisticRegression
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -276,6 +276,89 @@ def test_budget_exhaustion_returns_not_flipped():
     assert info["flipped"] is False
     assert changed == []
     np.testing.assert_array_equal(x_cf, x)
+
+
+class _NonImprovingSampler:
+    def sample_feature(
+        self,
+        X,
+        target_col,
+        sample_temperature=None,
+        fixed_target=None,
+    ):
+        del X, target_col, sample_temperature, fixed_target
+        return np.array([0.0])
+
+
+class _NonImprovingDisc:
+    def predict_proba(self, X):
+        p1 = 0.1 * np.asarray(X)[:, 0]
+        return np.column_stack([1.0 - p1, p1])
+
+    def predict(self, X):
+        return np.zeros(len(X), dtype=int)
+
+
+def test_first_round_strict_guard_rejects_non_improving_revisit():
+    """An outer revisit cannot commit a candidate that lowers target probability."""
+    factual = np.array([1.0])
+
+    counterfactual, changed, info = greedy_counterfactual(
+        _NonImprovingSampler(),
+        _NonImprovingDisc(),
+        factual,
+        y_target=1,
+        actionable_idx=[0],
+        selector="prob_ascent",
+        require_improvement=True,
+    )
+
+    np.testing.assert_array_equal(counterfactual, factual)
+    assert changed == []
+    assert info["steps"] == 0
+    assert info["require_improvement"] is True
+
+
+def test_projection_uses_bounds_and_small_empirical_supports():
+    X_train = np.array(
+        [[0.0, 0.0], [0.5, 0.5], [1.0, 1.0]], dtype=np.float64
+    )
+    domains = infer_feature_domains(X_train, max_discrete_values=3)
+
+    projected = project_candidate_values([0, 1], np.array([-2.0, 0.61]), domains)
+
+    np.testing.assert_allclose(projected, [0.0, 0.5])
+
+
+class _SumDisc:
+    def predict_proba(self, X):
+        p1 = np.clip(X[:, 0] + X[:, 1], 0.0, 1.0)
+        return np.column_stack([1.0 - p1, p1])
+
+    def predict(self, X):
+        return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
+
+
+def test_failed_search_can_return_best_intermediate_state():
+    sampler = _StubSamplerPA(vals={0: 0.4, 1: -0.2})
+    x = np.array([0.0, 0.0])
+
+    x_cf, changed, info = greedy_counterfactual(
+        sampler,
+        _SumDisc(),
+        x,
+        y_target=1,
+        actionable_idx=[0, 1],
+        selector="prob_ascent",
+        retain_best=True,
+    )
+
+    np.testing.assert_allclose(x_cf, [0.4, 0.0])
+    assert changed == [0]
+    assert info["steps"] == 1
+    assert len(info["history"]) == 1
+    assert len(info["attempt_history"]) == 2
+    assert info["best_target_probability"] == 0.4
 
 
 # ---------------------------------------------------------------------------

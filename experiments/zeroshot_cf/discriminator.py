@@ -64,8 +64,9 @@ def train_discriminator(
     Returns:
         Trained DiscriminatorModel.
     """
-    MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    cache_path = MODELS_DIR / f"disc_{dataset_name}_{disc_type}.pkl"
+    models_dir = Path(os.environ.get("ZEROSHOT_CF_MODELS_DIR", str(MODELS_DIR)))
+    models_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = models_dir / f"disc_{dataset_name}_{disc_type}.pkl"
 
     if cache_path.exists() and not force_retrain:
         print(f"[discriminator] Loading cached model from {cache_path}")
@@ -84,8 +85,10 @@ def train_discriminator(
     else:
         raise ValueError(f"Unknown disc_type: {disc_type!r}")
 
-    print(f"[discriminator] Training {disc_type.upper()} on {dataset_name} "
-          f"({len(X_train)} train, {len(X_test)} test) ...")
+    print(
+        f"[discriminator] Training {disc_type.upper()} on {dataset_name} "
+        f"({len(X_train)} train, {len(X_test)} test) ..."
+    )
     clf.fit(X_train, y_train)
 
     train_acc = clf.score(X_train, y_train)

@@ -29,12 +29,66 @@ HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/exp1_single_feature.py
 HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/exp2_counterfactuals.py
 ```
 
+### 4. Run the TabICL backend with the fixed context
+
+TabICL uses a fixed `prob_ascent + gower_knn_both@512` configuration. It does not
+repeat the context grid. Candidate feature
+interventions are batched into one TabICL imputation call per greedy step.
+Numerical imputations default to the densest interior quantile interval
+(mode), candidates are projected to the training range and small empirical
+supports, and a failed search returns its best intermediate state.
+
+Stage the two TabICLv2 checkpoints once with network access:
+
+```bash
+uv run python -m experiments.zeroshot_cf.tabicl_checkpoints
+```
+
+This writes ordinary checkpoint files under
+`experiments/zeroshot_cf/models/tabicl/`. Copy that directory to the same path
+on Athena, or pass its transferred location with `--cache-dir`.
+
+Verify the transferred weights and one minimal real-model imputation offline:
+
+```bash
+HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.tabicl_smoke_test
+```
+
+Then run fully offline:
+
+```bash
+HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.exp8_tabicl_cf \
+    --dataset moons
+
+HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.exp8_tabicl_cf \
+    --dataset heloc --max-test 50
+```
+
+Context labels are predictions from the discriminator being explained. TabICL
+candidate evaluation uses the batched path.
+
+To replace the single conditional point estimate with classifier-guided
+multi-quantile candidates, pass a fixed probability grid:
+
+```bash
+HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.exp8_tabicl_cf \
+    --dataset heloc --max-test 10 \
+    --candidate-quantiles 0.05 0.20 0.50 0.80 0.95
+```
+
+For each actionable feature, TabICL fits one target-conditioned in-context
+regression task and predicts a quantile distribution. The duplicated query rows
+extract all requested quantiles in the same batched prediction; the external
+discriminator then chooses the best feature/value pair.
+
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TABPFN_DEVICE` | `auto` | Device for TabPFN inference (`auto`/`cpu`/`mps`) |
 | `TABPFN_LOCAL_CACHE` | `experiments/zeroshot_cf/models/` | Path to staged checkpoints |
+| `TABICL_DEVICE` | `auto` | Device for TabICL inference (`auto`/`cpu`/`mps`/`cuda`) |
+| `TABICL_LOCAL_CACHE` | `experiments/zeroshot_cf/models/tabicl/` | Path to staged TabICLv2 checkpoints |
 | `HF_HUB_OFFLINE` | unset | Set to `1` to enforce no network access |
 
 ## Dependencies
@@ -50,7 +104,7 @@ incompatibility and installed editable with `--no-deps`.
 
 ## Datasets & in-context rows
 
-Both datasets use the `cel` 80/20 **stratified** split (`random_state=42`) and MinMax
+The datasets use the `cel` 80/20 **stratified** split (`random_state=42`) and MinMax
 scaling to `[0,1]` fit on the train split. TabPFN is never trained — the "context" is the
 in-context conditioning set passed to `TabPFNUnsupervisedModel.fit()` at inference time.
 
