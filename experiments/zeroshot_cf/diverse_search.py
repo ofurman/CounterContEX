@@ -1,11 +1,12 @@
 # Copyright (c) Prior Labs GmbH 2026.
 
-"""Validity-constrained diverse search for mixed-data counterfactuals."""
+"""Bounded diverse beam search with joint DPP counterfactual selection."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
+from itertools import combinations
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -23,30 +24,33 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class DiverseSearchConfig:
-    """Search and quality budgets for a set of counterfactuals."""
+class DiverseBeamSearchConfig:
+    """Budgets and objectives for the separate diverse generator."""
 
     n_counterfactuals: int = 3
     beam_width: int = 8
-    archive_size: int = 64
+    candidate_pool_size: int = 16
     max_extra_actions: int = 2
     max_gower_ratio: float = 1.5
     max_gower_increase: float = 0.02
     states_per_action_set: int = 2
     categorical_proposal_count: int | None = None
+    dpp_action_weight: float = 0.75
+    dpp_gower_quality_weight: float = 4.0
+    dpp_sparsity_quality_weight: float = 1.0
 
-    def __post_init__(self) -> None:
+    def __post_init__(self) -> None:  # noqa: C901
         if self.n_counterfactuals < 1:
             raise ValueError("n_counterfactuals must be at least 1")
         if self.beam_width < 1:
             raise ValueError("beam_width must be at least 1")
-        if self.archive_size < self.n_counterfactuals:
-            raise ValueError("archive_size must be at least n_counterfactuals")
+        if self.candidate_pool_size < self.n_counterfactuals:
+            raise ValueError("candidate_pool_size must be at least n_counterfactuals")
         if self.max_extra_actions < 0:
             raise ValueError("max_extra_actions must be non-negative")
         if not np.isfinite(self.max_gower_ratio) or self.max_gower_ratio < 1.0:
             raise ValueError("max_gower_ratio must be at least 1")
-        if not np.isfinite(self.max_gower_increase) or self.max_gower_increase < 0.0:
+        if not np.isfinite(self.max_gower_increase) or self.max_gower_increase < 0:
             raise ValueError("max_gower_increase must be non-negative")
         if self.states_per_action_set < 1:
             raise ValueError("states_per_action_set must be at least 1")
@@ -55,6 +59,12 @@ class DiverseSearchConfig:
             and self.categorical_proposal_count < 1
         ):
             raise ValueError("categorical_proposal_count must be positive")
+        if not 0.0 <= self.dpp_action_weight <= 1.0:
+            raise ValueError("dpp_action_weight must be between zero and one")
+        if self.dpp_gower_quality_weight < 0:
+            raise ValueError("dpp_gower_quality_weight must be non-negative")
+        if self.dpp_sparsity_quality_weight < 0:
+            raise ValueError("dpp_sparsity_quality_weight must be non-negative")
 
 
 @dataclass(frozen=True)
@@ -64,15 +74,17 @@ class DiverseCounterfactualResult:
     counterfactuals: np.ndarray
     target_probabilities: np.ndarray
     histories: tuple[tuple[dict[str, Any], ...], ...]
+    depths: np.ndarray
     requested_count: int
-    archive_count: int
+    valid_candidate_count: int
+    candidate_pool_count: int
     search_depth: int
+    dpp_logdet: float | None
 
     @property
     def available_count(self) -> int:
         """Return the number of valid counterfactuals found."""
         return len(self.counterfactuals)
-
 
 @dataclass(frozen=True)
 class _BeamState:
@@ -132,249 +144,242 @@ def _classifier_outputs(
     return probability_matrix[:, int(target_positions[0])], predictions
 
 
-def _numerical_trials(
-    sampler: Any,
+def _available_numerical(
     state: _BeamState,
-    columns: Sequence[int],
+    numerical_columns: Sequence[int],
+    *,
+    allow_revisits: bool,
+) -> list[int]:
+    return [
+        int(column)
+        for column in numerical_columns
+        if allow_revisits or int(column) not in state.used_numerical
+    ]
+
+
+def _numerical_trials_for_beam(
+    sampler: Any,
+    beam: Sequence[_BeamState],
+    numerical_columns: Sequence[int],
     y_target: int,
     candidate_quantiles: np.ndarray | None,
     candidate_confidences: np.ndarray | None,
     feature_domains: Any,
     temperature: float,
-) -> tuple[list[np.ndarray], list[dict[str, Any]]]:
-    if not columns:
-        return [], []
+    *,
+    allow_revisits: bool,
+) -> tuple[list[np.ndarray], list[_BeamState], list[dict[str, Any]]]:
+    """Expand numerical branches in one TabICL call when supported."""
+    pair_states: list[_BeamState] = []
+    pair_columns: list[int] = []
+    for state in beam:
+        columns = _available_numerical(
+            state,
+            numerical_columns,
+            allow_revisits=allow_revisits,
+        )
+        pair_states.extend([state] * len(columns))
+        pair_columns.extend(columns)
+    if not pair_columns:
+        return [], [], []
+
+    queries = np.stack([state.row for state in pair_states])
+    columns_array = np.asarray(pair_columns, dtype=int)
+    n_confidences = 1 if candidate_confidences is None else len(candidate_confidences)
+    n_quantiles = 1 if candidate_quantiles is None else len(candidate_quantiles)
+
     if candidate_quantiles is None:
-        values = np.asarray(
-            sampler.sample_candidates(
-                state.row.reshape(1, -1),
-                columns,
+        if hasattr(sampler, "sample_candidates_batch"):
+            raw_values = sampler.sample_candidates_batch(
+                queries,
+                pair_columns,
                 sample_temperature=temperature,
                 fixed_target=y_target,
-            ),
-            dtype=np.float64,
-        )
-        expected = (len(columns),)
-        if values.shape != expected:
-            raise ValueError(
-                "sample_candidates returned an unexpected shape; "
-                f"expected {expected}, got {values.shape}"
             )
-        expanded_columns = np.asarray(columns, dtype=int)
-        expanded_quantiles: np.ndarray | None = None
-        expanded_confidences: np.ndarray | None = None
-    else:
+        else:
+            raw_values = [
+                sampler.sample_candidates(
+                    state.row.reshape(1, -1),
+                    [column],
+                    sample_temperature=temperature,
+                    fixed_target=y_target,
+                )[0]
+                for state, column in zip(pair_states, pair_columns, strict=True)
+            ]
+        values = np.asarray(raw_values, dtype=np.float64).reshape(
+            len(pair_columns), 1, 1
+        )
+    elif hasattr(sampler, "sample_candidate_grid_batch"):
         values = np.asarray(
-            sampler.sample_candidate_grid(
-                state.row.reshape(1, -1),
-                columns,
+            sampler.sample_candidate_grid_batch(
+                queries,
+                pair_columns,
                 quantiles=candidate_quantiles,
                 fixed_target=y_target,
                 confidences=candidate_confidences,
             ),
             dtype=np.float64,
         )
-        n_confidences = (
-            1 if candidate_confidences is None else len(candidate_confidences)
-        )
-        expected = (
-            (len(columns), len(candidate_quantiles))
-            if candidate_confidences is None
-            else (len(columns), n_confidences, len(candidate_quantiles))
-        )
-        if values.shape != expected:
-            raise ValueError(
-                "sample_candidate_grid returned an unexpected shape; "
-                f"expected {expected}, got {values.shape}"
-            )
-        expanded_columns = np.repeat(
-            np.asarray(columns, dtype=int),
-            n_confidences * len(candidate_quantiles),
-        )
-        expanded_quantiles = np.tile(
-            candidate_quantiles,
-            len(columns) * n_confidences,
-        )
-        expanded_confidences = (
-            None
-            if candidate_confidences is None
-            else np.tile(
-                np.repeat(candidate_confidences, len(candidate_quantiles)),
-                len(columns),
-            )
+    else:
+        grids = [
+            np.asarray(
+                sampler.sample_candidate_grid(
+                    state.row.reshape(1, -1),
+                    [column],
+                    quantiles=candidate_quantiles,
+                    fixed_target=y_target,
+                    confidences=candidate_confidences,
+                ),
+                dtype=np.float64,
+            ).reshape(n_confidences, n_quantiles)
+            for state, column in zip(pair_states, pair_columns, strict=True)
+        ]
+        values = np.stack(grids)
+
+    expected = (len(pair_columns), n_confidences, n_quantiles)
+    if values.shape != expected:
+        raise ValueError(
+            "batched TabICL proposals returned an unexpected shape; "
+            f"expected {expected}, got {values.shape}"
         )
 
+    repeated_columns = np.repeat(columns_array, n_confidences * n_quantiles)
     flat_values = project_candidate_values(
-        expanded_columns.tolist(),
+        repeated_columns.tolist(),
         values.reshape(-1),
         feature_domains,
     )
-    rows = np.repeat(state.row.reshape(1, -1), len(flat_values), axis=0)
-    rows[np.arange(len(flat_values)), expanded_columns] = flat_values
-    metadata = [
-        {
-            "action_type": "numerical",
-            "feature": int(column),
-            "quantile": (
-                None
-                if expanded_quantiles is None
-                else float(expanded_quantiles[position])
-            ),
-            "confidence": (
-                None
-                if expanded_confidences is None
-                else float(expanded_confidences[position])
-            ),
-        }
-        for position, column in enumerate(expanded_columns)
-    ]
-    return list(rows), metadata
+    rows: list[np.ndarray] = []
+    parents: list[_BeamState] = []
+    metadata: list[dict[str, Any]] = []
+    position = 0
+    for state, column in zip(pair_states, pair_columns, strict=True):
+        for confidence_index in range(n_confidences):
+            for quantile_index in range(n_quantiles):
+                row = state.row.copy()
+                row[column] = flat_values[position]
+                rows.append(row)
+                parents.append(state)
+                metadata.append(
+                    {
+                        "action_type": "numerical",
+                        "feature": int(column),
+                        "quantile": (
+                            None
+                            if candidate_quantiles is None
+                            else float(candidate_quantiles[quantile_index])
+                        ),
+                        "confidence": (
+                            None
+                            if candidate_confidences is None
+                            else float(candidate_confidences[confidence_index])
+                        ),
+                    }
+                )
+                position += 1
+    return rows, parents, metadata
 
 
-def _categorical_trials(
-    state: _BeamState,
-    groups: Sequence[OneHotActionGroup],
+def _categorical_trials_for_beam(
+    beam: Sequence[_BeamState],
+    categorical_groups: Sequence[OneHotActionGroup],
     candidate_confidences: np.ndarray | None,
     category_distribution: ConditionedCategoryDistribution | None,
     proposal_count: int | None,
-) -> tuple[list[np.ndarray], list[dict[str, Any]]]:
-    rows: list[np.ndarray] = []
-    metadata: list[dict[str, Any]] = []
-    for group in groups:
-        columns = list(group.columns)
-        values = state.row[columns]
-        if not np.isclose(values.sum(), 1.0):
-            raise ValueError(f"one-hot group {group.name!r} is invalid")
-        previous_category = int(np.argmax(values))
-        scores: dict[int, tuple[float, float | None]] = {}
-        if category_distribution is None:
-            scores = dict.fromkeys(range(len(columns)), (1.0, None))
-        else:
-            anchors = (
-                [None]
-                if candidate_confidences is None
-                else candidate_confidences.tolist()
-            )
-            for anchor in anchors:
-                categories, probabilities = category_distribution(
-                    state.row,
-                    group,
-                    anchor,
-                )
-                for category, probability in zip(
-                    np.asarray(categories, dtype=int),
-                    np.asarray(probabilities, dtype=np.float64),
-                    strict=True,
-                ):
-                    previous = scores.get(int(category))
-                    if previous is None or probability > previous[0]:
-                        scores[int(category)] = (
-                            float(probability),
-                            None if anchor is None else float(anchor),
-                        )
-        alternatives = [
-            category
-            for category in range(len(columns))
-            if category != previous_category
-        ]
-        alternatives.sort(
-            key=lambda category: scores.get(category, (0.0, None))[0],
-            reverse=True,
-        )
-        if proposal_count is not None:
-            alternatives = alternatives[:proposal_count]
-        for proposal_rank, category in enumerate(alternatives, start=1):
-            probability, confidence = scores.get(category, (0.0, None))
-            trial = state.row.copy()
-            trial[columns] = 0.0
-            trial[group.columns[category]] = 1.0
-            rows.append(trial)
-            metadata.append(
-                {
-                    "action_type": "categorical",
-                    "group": group.name,
-                    "from_category": previous_category,
-                    "to_category": category,
-                    "tabicl_conditional_probability": probability,
-                    "tabicl_confidence_anchor": confidence,
-                    "tabicl_proposal_rank": proposal_rank,
-                    "in_tabicl_support": category in scores,
-                }
-            )
-    return rows, metadata
-
-
-def _expand_state(  # noqa: PLR0913
-    sampler: Any,
-    state: _BeamState,
-    y_target: int,
-    numerical_columns: Sequence[int],
-    categorical_groups: Sequence[OneHotActionGroup],
-    candidate_quantiles: np.ndarray | None,
-    candidate_confidences: np.ndarray | None,
-    feature_domains: Any,
-    temperature: float,
-    category_distribution: ConditionedCategoryDistribution | None,
-    config: DiverseSearchConfig,
     *,
     allow_revisits: bool,
-) -> tuple[list[np.ndarray], list[dict[str, Any]]]:
-    numerical = [
-        int(column)
-        for column in numerical_columns
-        if allow_revisits or int(column) not in state.used_numerical
-    ]
-    groups = [
-        group
-        for group in categorical_groups
-        if allow_revisits or group.name not in state.used_groups
-    ]
-    numerical_rows, numerical_metadata = _numerical_trials(
-        sampler,
-        state,
-        numerical,
-        y_target,
-        candidate_quantiles,
-        candidate_confidences,
-        feature_domains,
-        temperature,
-    )
-    categorical_rows, categorical_metadata = _categorical_trials(
-        state,
-        groups,
-        candidate_confidences,
-        category_distribution,
-        config.categorical_proposal_count,
-    )
-    return (
-        numerical_rows + categorical_rows,
-        numerical_metadata + categorical_metadata,
-    )
+) -> tuple[list[np.ndarray], list[_BeamState], list[dict[str, Any]]]:
+    rows: list[np.ndarray] = []
+    parents: list[_BeamState] = []
+    metadata: list[dict[str, Any]] = []
+    for state in beam:
+        groups = [
+            group
+            for group in categorical_groups
+            if allow_revisits or group.name not in state.used_groups
+        ]
+        for group in groups:
+            columns = list(group.columns)
+            values = state.row[columns]
+            if not np.isclose(values.sum(), 1.0):
+                raise ValueError(f"one-hot group {group.name!r} is invalid")
+            previous_category = int(np.argmax(values))
+            scores: dict[int, tuple[float, float | None]] = {}
+            if category_distribution is None:
+                scores = dict.fromkeys(range(len(columns)), (1.0, None))
+            else:
+                anchors = (
+                    [None]
+                    if candidate_confidences is None
+                    else candidate_confidences.tolist()
+                )
+                for anchor in anchors:
+                    categories, probabilities = category_distribution(
+                        state.row,
+                        group,
+                        anchor,
+                    )
+                    for category, probability in zip(
+                        np.asarray(categories, dtype=int),
+                        np.asarray(probabilities, dtype=np.float64),
+                        strict=True,
+                    ):
+                        previous = scores.get(int(category))
+                        if previous is None or probability > previous[0]:
+                            scores[int(category)] = (
+                                float(probability),
+                                None if anchor is None else float(anchor),
+                            )
+            alternatives = [
+                category
+                for category in range(len(columns))
+                if category != previous_category
+            ]
+            alternatives.sort(
+                key=lambda category: scores.get(category, (0.0, None))[0],
+                reverse=True,
+            )
+            if proposal_count is not None:
+                alternatives = alternatives[:proposal_count]
+            for proposal_rank, category in enumerate(alternatives, start=1):
+                probability, confidence = scores.get(category, (0.0, None))
+                trial = state.row.copy()
+                trial[columns] = 0.0
+                trial[group.columns[category]] = 1.0
+                rows.append(trial)
+                parents.append(state)
+                metadata.append(
+                    {
+                        "action_type": "categorical",
+                        "group": group.name,
+                        "from_category": previous_category,
+                        "to_category": category,
+                        "tabicl_conditional_probability": probability,
+                        "tabicl_confidence_anchor": confidence,
+                        "tabicl_proposal_rank": proposal_rank,
+                        "in_tabicl_support": category in scores,
+                    }
+                )
+    return rows, parents, metadata
 
 
-def _state_sort_key(
+def _state_quality_key(
     state: _BeamState,
     factual: np.ndarray,
     numerical_columns: Sequence[int],
     categorical_groups: Sequence[OneHotActionGroup],
-) -> tuple[float, float, int, bytes]:
+) -> tuple[float, int, float, bytes]:
     gower = float(
         grouped_gower_distance(
-            state.row,
-            factual,
-            numerical_columns,
-            categorical_groups,
+            state.row, factual, numerical_columns, categorical_groups
         )[0]
     )
     sparsity = int(
         action_unit_change_count(
-            state.row,
-            factual,
-            numerical_columns,
-            categorical_groups,
+            state.row, factual, numerical_columns, categorical_groups
         )[0]
     )
-    return -state.probability, gower, sparsity, state.row.tobytes()
+    return gower, sparsity, -state.probability, state.row.tobytes()
 
 
 def _prune_beam(
@@ -382,32 +387,29 @@ def _prune_beam(
     factual: np.ndarray,
     numerical_columns: Sequence[int],
     categorical_groups: Sequence[OneHotActionGroup],
-    config: DiverseSearchConfig,
+    config: DiverseBeamSearchConfig,
 ) -> list[_BeamState]:
-    """Keep strong representatives from distinct action-set niches."""
-    unique_rows: dict[bytes, _BeamState] = {}
+    """Keep strong representatives from distinct changed-feature niches."""
+    unique: dict[bytes, _BeamState] = {}
     for state in states:
         key = state.row.tobytes()
-        previous = unique_rows.get(key)
+        previous = unique.get(key)
         if previous is None or state.probability > previous.probability:
-            unique_rows[key] = state
+            unique[key] = state
 
     niches: dict[frozenset[tuple[str, int | str]], list[_BeamState]] = {}
-    for state in unique_rows.values():
+    for state in unique.values():
         signature = action_unit_signature(
-            state.row,
-            factual,
-            numerical_columns,
-            categorical_groups,
+            state.row, factual, numerical_columns, categorical_groups
         )
         niches.setdefault(signature, []).append(state)
     for niche in niches.values():
         niche.sort(
-            key=lambda state: _state_sort_key(
-                state,
-                factual,
-                numerical_columns,
-                categorical_groups,
+            key=lambda state: (
+                -state.probability,
+                *_state_quality_key(
+                    state, factual, numerical_columns, categorical_groups
+                ),
             )
         )
 
@@ -415,159 +417,215 @@ def _prune_beam(
     for rank in range(config.states_per_action_set):
         candidates = [niche[rank] for niche in niches.values() if len(niche) > rank]
         candidates.sort(
-            key=lambda state: _state_sort_key(
-                state,
-                factual,
-                numerical_columns,
-                categorical_groups,
+            key=lambda state: (
+                -state.probability,
+                *_state_quality_key(
+                    state, factual, numerical_columns, categorical_groups
+                ),
             )
         )
-        for state in candidates:
-            selected.append(state)
-            if len(selected) == config.beam_width:
-                return selected
+        selected.extend(candidates[: config.beam_width - len(selected)])
+        if len(selected) == config.beam_width:
+            break
     return selected
 
 
-def _select_diverse_set(
+def _quality_eligible_candidates(
     candidates: Sequence[_BeamState],
-    primary: np.ndarray,
-    *,
-    primary_is_valid: bool,
     factual: np.ndarray,
     numerical_columns: Sequence[int],
     categorical_groups: Sequence[OneHotActionGroup],
-    config: DiverseSearchConfig,
+    config: DiverseBeamSearchConfig,
 ) -> list[_BeamState]:
     if not candidates:
         return []
-    unique = {candidate.row.tobytes(): candidate for candidate in candidates}
-    pool = list(unique.values())
-
-    primary_key = primary.tobytes()
-    if primary_is_valid and primary_key in unique:
-        anchor = unique[primary_key]
-    else:
-        pool.sort(
-            key=lambda state: (
-                _state_sort_key(
-                    state,
-                    factual,
-                    numerical_columns,
-                    categorical_groups,
-                )[1:3],
-                -state.probability,
-                state.row.tobytes(),
-            )
-        )
-        anchor = pool[0]
-
-    anchor_gower = float(
-        grouped_gower_distance(
-            anchor.row,
-            factual,
-            numerical_columns,
-            categorical_groups,
-        )[0]
+    pool = list({state.row.tobytes(): state for state in candidates}.values())
+    anchor = min(
+        pool,
+        key=lambda state: _state_quality_key(
+            state, factual, numerical_columns, categorical_groups
+        ),
     )
-    anchor_sparsity = int(
-        action_unit_change_count(
-            anchor.row,
-            factual,
-            numerical_columns,
-            categorical_groups,
-        )[0]
+    anchor_gower, anchor_sparsity, _, _ = _state_quality_key(
+        anchor, factual, numerical_columns, categorical_groups
     )
     max_gower = config.max_gower_ratio * anchor_gower + config.max_gower_increase
     max_sparsity = anchor_sparsity + config.max_extra_actions
-    eligible = []
-    for candidate in pool:
-        gower = float(
-            grouped_gower_distance(
-                candidate.row,
-                factual,
-                numerical_columns,
-                categorical_groups,
-            )[0]
-        )
-        sparsity = int(
-            action_unit_change_count(
-                candidate.row,
-                factual,
-                numerical_columns,
-                categorical_groups,
-            )[0]
+    eligible: list[_BeamState] = []
+    for state in pool:
+        gower, sparsity, _, _ = _state_quality_key(
+            state, factual, numerical_columns, categorical_groups
         )
         if gower <= max_gower + 1e-12 and sparsity <= max_sparsity:
-            eligible.append(candidate)
+            eligible.append(state)
+    return eligible
 
-    selected = [anchor]
-    remaining = [
-        item for item in eligible if item.row.tobytes() != anchor.row.tobytes()
-    ]
-    signatures = {
-        item.row.tobytes(): action_unit_signature(
-            item.row,
-            factual,
-            numerical_columns,
-            categorical_groups,
+
+def _curate_candidate_pool(
+    candidates: Sequence[_BeamState],
+    factual: np.ndarray,
+    numerical_columns: Sequence[int],
+    categorical_groups: Sequence[OneHotActionGroup],
+    config: DiverseBeamSearchConfig,
+) -> list[_BeamState]:
+    """Bound the DPP pool while preserving distinct changed-feature sets."""
+    eligible = _quality_eligible_candidates(
+        candidates, factual, numerical_columns, categorical_groups, config
+    )
+    niches: dict[frozenset[tuple[str, int | str]], list[_BeamState]] = {}
+    for state in eligible:
+        signature = action_unit_signature(
+            state.row, factual, numerical_columns, categorical_groups
         )
-        for item in eligible
-    }
-    while remaining and len(selected) < config.n_counterfactuals:
-        best: _BeamState | None = None
-        best_key: tuple[float, float, float, int, float] | None = None
-        for candidate in remaining:
-            signature = signatures[candidate.row.tobytes()]
-            action_diversity = min(
-                action_set_jaccard_distance(
-                    signature,
-                    signatures[chosen.row.tobytes()],
-                )
-                for chosen in selected
+        niches.setdefault(signature, []).append(state)
+    for niche in niches.values():
+        niche.sort(
+            key=lambda state: _state_quality_key(
+                state, factual, numerical_columns, categorical_groups
             )
-            value_diversity = min(
-                float(
-                    grouped_gower_distance(
-                        candidate.row,
-                        chosen.row,
-                        numerical_columns,
-                        categorical_groups,
-                    )[0]
-                )
-                for chosen in selected
-            )
-            factual_gower = float(
-                grouped_gower_distance(
-                    candidate.row,
-                    factual,
-                    numerical_columns,
-                    categorical_groups,
-                )[0]
-            )
-            sparsity = int(
-                action_unit_change_count(
-                    candidate.row,
-                    factual,
-                    numerical_columns,
-                    categorical_groups,
-                )[0]
-            )
-            key = (
-                action_diversity,
-                value_diversity,
-                -factual_gower,
-                -sparsity,
-                candidate.probability,
-            )
-            if best_key is None or key > best_key:
-                best = candidate
-                best_key = key
-        if best is None:
+        )
+
+    selected: list[_BeamState] = []
+    rank = 0
+    while len(selected) < config.candidate_pool_size:
+        candidates_at_rank = [
+            niche[rank] for niche in niches.values() if len(niche) > rank
+        ]
+        if not candidates_at_rank:
             break
-        selected.append(best)
-        remaining = [candidate for candidate in remaining if candidate is not best]
+        candidates_at_rank.sort(
+            key=lambda state: _state_quality_key(
+                state, factual, numerical_columns, categorical_groups
+            )
+        )
+        selected.extend(
+            candidates_at_rank[: config.candidate_pool_size - len(selected)]
+        )
+        rank += 1
     return selected
+
+
+def _dpp_embedding(
+    rows: np.ndarray,
+    factual: np.ndarray,
+    numerical_columns: Sequence[int],
+    categorical_groups: Sequence[OneHotActionGroup],
+    action_weight: float,
+) -> np.ndarray:
+    """Build a unit-balanced action/value embedding for an RBF DPP kernel."""
+    matrix = np.atleast_2d(np.asarray(rows, dtype=np.float64))
+    reference = np.asarray(factual, dtype=np.float64)
+    numerical = tuple(int(column) for column in numerical_columns)
+    groups = tuple(categorical_groups)
+    n_units = len(numerical) + len(groups)
+    if n_units == 0:
+        return np.zeros((len(matrix), 1), dtype=np.float64)
+
+    action_parts: list[np.ndarray] = []
+    value_parts: list[np.ndarray] = []
+    if numerical:
+        numeric_values = np.clip(matrix[:, numerical], 0.0, 1.0)
+        action_parts.append(
+            (~np.isclose(numeric_values, reference[list(numerical)])).astype(float)
+        )
+        value_parts.append(numeric_values)
+    for group in groups:
+        columns = list(group.columns)
+        categories = np.argmax(matrix[:, columns], axis=1)
+        factual_category = int(np.argmax(reference[columns]))
+        action_parts.append((categories != factual_category).reshape(-1, 1))
+        # A one-hot category switch has unit value distance after this scaling.
+        value_parts.append(matrix[:, columns] / np.sqrt(2.0))
+
+    action = np.concatenate(action_parts, axis=1) / np.sqrt(n_units)
+    values = np.concatenate(value_parts, axis=1) / np.sqrt(n_units)
+    return np.concatenate(
+        [
+            np.sqrt(action_weight) * action,
+            np.sqrt(1.0 - action_weight) * values,
+        ],
+        axis=1,
+    )
+
+
+def select_dpp_subset(
+    rows: np.ndarray,
+    probabilities: np.ndarray,
+    factual: np.ndarray,
+    numerical_columns: Sequence[int],
+    categorical_groups: Sequence[OneHotActionGroup],
+    config: DiverseBeamSearchConfig,
+) -> tuple[np.ndarray, float | None]:
+    """Select the exact fixed-size DPP MAP subset from a small valid pool."""
+    matrix = np.atleast_2d(np.asarray(rows, dtype=np.float64))
+    target_probabilities = np.asarray(probabilities, dtype=np.float64)
+    if len(matrix) != len(target_probabilities):
+        raise ValueError("rows and probabilities must have the same length")
+    k = min(config.n_counterfactuals, len(matrix))
+    if k == 0:
+        return np.empty(0, dtype=int), None
+
+    gower = grouped_gower_distance(
+        matrix, factual, numerical_columns, categorical_groups
+    )
+    sparsity = action_unit_change_count(
+        matrix, factual, numerical_columns, categorical_groups
+    )
+    n_units = max(1, len(numerical_columns) + len(categorical_groups))
+    quality = np.exp(
+        -config.dpp_gower_quality_weight * gower
+        - config.dpp_sparsity_quality_weight * sparsity / n_units
+    )
+    embedding = _dpp_embedding(
+        matrix,
+        factual,
+        numerical_columns,
+        categorical_groups,
+        config.dpp_action_weight,
+    )
+    differences = embedding[:, None, :] - embedding[None, :, :]
+    squared_distances = np.einsum("ijk,ijk->ij", differences, differences)
+    positive = squared_distances[squared_distances > 1e-12]
+    bandwidth_squared = float(np.median(positive)) if len(positive) else 1.0
+    similarity = np.exp(-squared_distances / (2.0 * bandwidth_squared))
+    kernel = quality[:, None] * similarity * quality[None, :]
+
+    best_combination: tuple[int, ...] | None = None
+    best_logdet = -np.inf
+    best_tie: tuple[float, int, float, tuple[int, ...]] | None = None
+    for combination in combinations(range(len(matrix)), k):
+        indices = np.asarray(combination, dtype=int)
+        subkernel = kernel[np.ix_(indices, indices)]
+        sign, logdet = np.linalg.slogdet(
+            subkernel + np.eye(k, dtype=np.float64) * 1e-12
+        )
+        score = float(logdet) if sign > 0 else -np.inf
+        tie = (
+            float(gower[indices].sum()),
+            int(sparsity[indices].sum()),
+            -float(target_probabilities[indices].sum()),
+            combination,
+        )
+        if score > best_logdet + 1e-12 or (
+            np.isclose(score, best_logdet, atol=1e-12, rtol=0.0)
+            and (best_tie is None or tie < best_tie)
+        ):
+            best_combination = combination
+            best_logdet = score
+            best_tie = tie
+
+    if best_combination is None:
+        return np.empty(0, dtype=int), None
+    ordered = sorted(
+        best_combination,
+        key=lambda index: (
+            float(gower[index]),
+            int(sparsity[index]),
+            -float(target_probabilities[index]),
+            matrix[index].tobytes(),
+        ),
+    )
+    return np.asarray(ordered, dtype=int), best_logdet
 
 
 def generate_diverse_counterfactuals(  # noqa: C901, PLR0912, PLR0913
@@ -578,9 +636,7 @@ def generate_diverse_counterfactuals(  # noqa: C901, PLR0912, PLR0913
     numerical_columns: Sequence[int],
     categorical_groups: Sequence[OneHotActionGroup],
     *,
-    primary_counterfactual: np.ndarray,
-    primary_info: dict[str, Any],
-    config: DiverseSearchConfig,
+    config: DiverseBeamSearchConfig,
     candidate_quantiles: Sequence[float] | None = None,
     candidate_confidences: Sequence[float] | None = None,
     feature_domains: Any = None,
@@ -590,15 +646,14 @@ def generate_diverse_counterfactuals(  # noqa: C901, PLR0912, PLR0913
     temperature: float = 1e-9,
     category_distribution: ConditionedCategoryDistribution | None = None,
 ) -> DiverseCounterfactualResult:
-    """Search multiple paths and return a quality-constrained diverse set.
+    """Generate a valid beam pool and jointly select a diverse subset.
 
-    The supplied primary counterfactual is retained as the first result when
-    it is valid. Invalid rows are never returned. If the search cannot find the
-    requested number of valid, unique rows within the budgets, it returns the
-    smaller set without padding.
+    This method is independent of the existing greedy single-CFE method.
+    Invalid candidates stay in the beam only after strict target-probability
+    improvement. Valid candidates enter a bounded, quality-controlled pool.
+    Exact fixed-size DPP MAP selection returns no invalid or duplicate padding.
     """
     factual = np.asarray(x, dtype=np.float64)
-    primary = np.asarray(primary_counterfactual, dtype=np.float64)
     numerical = tuple(int(column) for column in numerical_columns)
     groups = tuple(categorical_groups)
     n_action_units = len(numerical) + len(groups)
@@ -620,9 +675,7 @@ def generate_diverse_counterfactuals(  # noqa: C901, PLR0912, PLR0913
         raise ValueError("candidate_confidences require candidate_quantiles")
 
     factual_probabilities, factual_predictions = _classifier_outputs(
-        disc,
-        factual,
-        y_target,
+        disc, factual, y_target
     )
     initial = _BeamState(
         row=factual.copy(),
@@ -632,82 +685,80 @@ def generate_diverse_counterfactuals(  # noqa: C901, PLR0912, PLR0913
         used_groups=frozenset(),
         history=(),
     )
-    initial_is_valid = (
+    initial_is_valid = bool(
         factual_predictions[0] == y_target and factual_probabilities[0] >= tau
     )
-    archive: dict[bytes, _BeamState] = {}
+    valid_candidates: dict[bytes, _BeamState] = {}
     if initial_is_valid:
-        archive[initial.row.tobytes()] = initial
-
-    primary_probabilities, primary_predictions = _classifier_outputs(
-        disc,
-        primary,
-        y_target,
-    )
-    primary_is_valid = bool(
-        primary_predictions[0] == y_target and primary_probabilities[0] >= tau
-    )
-    if primary_is_valid:
-        archive[primary.tobytes()] = _BeamState(
-            row=primary.copy(),
-            probability=float(primary_probabilities[0]),
-            depth=int(primary_info.get("validity_steps", 0)),
-            used_numerical=frozenset(),
-            used_groups=frozenset(),
-            history=tuple(primary_info.get("history", ())),
-        )
-
+        valid_candidates[initial.row.tobytes()] = initial
     beam = [] if initial_is_valid else [initial]
+    visited = {initial.row.tobytes()}
     search_depth = 0
+
     for depth in range(1, max_validity_steps + 1):
         if not beam:
             break
         search_depth = depth
-        trial_rows: list[np.ndarray] = []
-        trial_parents: list[_BeamState] = []
-        trial_metadata: list[dict[str, Any]] = []
-        for state in beam:
-            rows, metadata = _expand_state(
+        numerical_rows, numerical_parents, numerical_metadata = (
+            _numerical_trials_for_beam(
                 sampler,
-                state,
-                y_target,
+                beam,
                 numerical,
-                groups,
+                y_target,
                 quantiles,
                 confidences,
                 feature_domains,
                 temperature,
-                category_distribution,
-                config,
                 allow_revisits=allow_revisits,
             )
-            trial_rows.extend(rows)
-            trial_parents.extend([state] * len(rows))
-            trial_metadata.extend(metadata)
-        if not trial_rows:
-            break
+        )
+        categorical_rows, categorical_parents, categorical_metadata = (
+            _categorical_trials_for_beam(
+                beam,
+                groups,
+                confidences,
+                category_distribution,
+                config.categorical_proposal_count,
+                allow_revisits=allow_revisits,
+            )
+        )
+        trial_rows = numerical_rows + categorical_rows
+        trial_parents = numerical_parents + categorical_parents
+        trial_metadata = numerical_metadata + categorical_metadata
 
-        trials = np.stack(trial_rows)
+        # Projection and repeated quantiles can create identical rows.
+        unique_trials: dict[bytes, tuple[np.ndarray, _BeamState, dict[str, Any]]] = {}
+        for row, parent, metadata in zip(
+            trial_rows, trial_parents, trial_metadata, strict=True
+        ):
+            key = np.ascontiguousarray(row).tobytes()
+            if key in visited or key in unique_trials:
+                continue
+            unique_trials[key] = (row, parent, metadata)
+        if not unique_trials:
+            break
+        visited.update(unique_trials)
+
+        trials = np.stack([item[0] for item in unique_trials.values()])
+        parents = [item[1] for item in unique_trials.values()]
+        metadata_items = [item[2] for item in unique_trials.values()]
         probabilities, predictions = _classifier_outputs(disc, trials, y_target)
         next_states: list[_BeamState] = []
         for row, probability, prediction, parent, raw_metadata in zip(
             trials,
             probabilities,
             predictions,
-            trial_parents,
-            trial_metadata,
+            parents,
+            metadata_items,
             strict=True,
         ):
-            if probability <= parent.probability + 1e-12:
-                continue
+            immediate_valid = bool(prediction == y_target and probability >= tau)
             metadata = dict(raw_metadata)
             metadata.update(
                 {
-                    "selection_phase": "diverse_validity_search",
+                    "selection_phase": "diverse_beam_search",
                     "target_probability": float(probability),
-                    "immediate_valid": bool(
-                        prediction == y_target and probability >= tau
-                    ),
+                    "immediate_valid": immediate_valid,
                     "search_depth": depth,
                 }
             )
@@ -725,71 +776,54 @@ def generate_diverse_counterfactuals(  # noqa: C901, PLR0912, PLR0913
                 used_groups=frozenset(used_groups),
                 history=(*parent.history, metadata),
             )
-            if prediction == y_target and probability >= tau:
-                archive[state.row.tobytes()] = state
-            else:
+            if immediate_valid:
+                valid_candidates[state.row.tobytes()] = state
+            if probability > parent.probability + 1e-12:
                 next_states.append(state)
 
-        beam = _prune_beam(
-            next_states,
+        pool = _curate_candidate_pool(
+            list(valid_candidates.values()), factual, numerical, groups, config
+        )
+        if len(pool) >= config.candidate_pool_size:
+            break
+        beam = _prune_beam(next_states, factual, numerical, groups, config)
+
+    pool = _curate_candidate_pool(
+        list(valid_candidates.values()), factual, numerical, groups, config
+    )
+    if pool:
+        pool_rows = np.stack([state.row for state in pool])
+        pool_probabilities = np.asarray(
+            [state.probability for state in pool], dtype=np.float64
+        )
+        selected_indices, dpp_logdet = select_dpp_subset(
+            pool_rows,
+            pool_probabilities,
             factual,
             numerical,
             groups,
             config,
         )
-        if len(archive) >= config.n_counterfactuals:
-            feasible = _select_diverse_set(
-                list(archive.values()),
-                primary,
-                primary_is_valid=primary_is_valid,
-                factual=factual,
-                numerical_columns=numerical,
-                categorical_groups=groups,
-                config=config,
-            )
-            if len(feasible) == config.n_counterfactuals:
-                break
-        if len(archive) > config.archive_size:
-            retained = _select_diverse_set(
-                list(archive.values()),
-                primary,
-                primary_is_valid=primary_is_valid,
-                factual=factual,
-                numerical_columns=numerical,
-                categorical_groups=groups,
-                config=replace(
-                    config,
-                    n_counterfactuals=config.archive_size,
-                    max_gower_ratio=1.0,
-                    max_gower_increase=1.0,
-                    max_extra_actions=n_action_units,
-                ),
-            )
-            archive = {state.row.tobytes(): state for state in retained}
-
-    selected = _select_diverse_set(
-        list(archive.values()),
-        primary,
-        primary_is_valid=primary_is_valid,
-        factual=factual,
-        numerical_columns=numerical,
-        categorical_groups=groups,
-        config=config,
-    )
-    if selected:
+        selected = [pool[int(index)] for index in selected_indices]
         rows = np.stack([state.row for state in selected])
         probabilities = np.asarray(
-            [state.probability for state in selected],
-            dtype=np.float64,
+            [state.probability for state in selected], dtype=np.float64
         )
+        depths = np.asarray([state.depth for state in selected], dtype=int)
     else:
+        selected = []
         rows = np.empty((0, factual.shape[0]), dtype=np.float64)
         probabilities = np.empty(0, dtype=np.float64)
+        depths = np.empty(0, dtype=int)
+        dpp_logdet = None
     return DiverseCounterfactualResult(
         counterfactuals=rows,
         target_probabilities=probabilities,
         histories=tuple(state.history for state in selected),
+        depths=depths,
         requested_count=config.n_counterfactuals,
-        archive_count=len(archive),
+        valid_candidate_count=len(valid_candidates),
+        candidate_pool_count=len(pool),
         search_depth=search_depth,
+        dpp_logdet=dpp_logdet,
     )

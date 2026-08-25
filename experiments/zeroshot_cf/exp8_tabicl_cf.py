@@ -17,10 +17,9 @@ legal whole-category swap. While no proposal is valid, the search commits the
 largest target-probability improvement. Once valid proposals exist, it commits
 the lowest grouped-Gower row, with each categorical group counted once rather
 than by dummy-column width. The overall search remains iterative. Context
-remains per-factual because the Gower-kNN context is query-specific. Requesting
-multiple counterfactuals retains several probability-improving paths in a beam,
-archives valid rows, and selects a quality-constrained set using action-unit
-Jaccard diversity followed by grouped Gower diversity.
+remains per-factual because the Gower-kNN context is query-specific. The
+separate multiple-counterfactual generator expands one bounded beam, keeps a
+small valid candidate pool, and selects the final set jointly with a DPP.
 """
 
 from __future__ import annotations
@@ -39,7 +38,7 @@ from experiments.zeroshot_cf.data import (
 )
 from experiments.zeroshot_cf.discriminator import train_discriminator
 from experiments.zeroshot_cf.diverse_search import (
-    DiverseSearchConfig,
+    DiverseBeamSearchConfig,
     action_set_jaccard_distance,
     action_unit_signature,
     generate_diverse_counterfactuals,
@@ -159,7 +158,7 @@ def generate_tabicl_counterfactuals(
     min_joint_log_gain: float = 0.0,
     n_counterfactuals: int = 1,
     diversity_beam_width: int = 8,
-    diversity_archive_size: int = 64,
+    diversity_candidate_pool_size: int = 16,
     diversity_max_extra_actions: int = 2,
     diversity_max_gower_ratio: float = 1.5,
     diversity_max_gower_increase: float = 0.02,
@@ -187,10 +186,14 @@ def generate_tabicl_counterfactuals(
         raise ValueError("max_extra_actions must be non-negative")
     if min_joint_log_gain < 0:
         raise ValueError("min_joint_log_gain must be non-negative")
-    diversity_config = DiverseSearchConfig(
+    if n_counterfactuals > 1 and cf_mode != "sparse":
+        raise ValueError(
+            "the separate diverse generator currently requires sparse mode"
+        )
+    diversity_config = DiverseBeamSearchConfig(
         n_counterfactuals=n_counterfactuals,
         beam_width=diversity_beam_width,
-        archive_size=diversity_archive_size,
+        candidate_pool_size=diversity_candidate_pool_size,
         max_extra_actions=diversity_max_extra_actions,
         max_gower_ratio=diversity_max_gower_ratio,
         max_gower_increase=diversity_max_gower_increase,
@@ -271,6 +274,7 @@ def generate_tabicl_counterfactuals(
         f"allow_revisits={allow_revisits}, "
         f"n_counterfactuals={n_counterfactuals}, "
         f"diversity_beam_width={diversity_beam_width}, "
+        f"diversity_candidate_pool_size={diversity_candidate_pool_size}, "
         f"split={bundle.split_variant}, test_selection={test_selection}, "
         f"preprocessing={bundle.preprocessing_variant}, "
         f"n_dropped_rows={bundle.n_dropped_rows}, "
@@ -335,7 +339,7 @@ def generate_tabicl_counterfactuals(
         dtype=X_test.dtype,
     )
     diverse_available_count_per_point = np.zeros(len(X_test), dtype=int)
-    diverse_archive_count_per_point = np.zeros(len(X_test), dtype=int)
+    diverse_candidate_pool_count_per_point = np.zeros(len(X_test), dtype=int)
     diverse_search_depth_per_point = np.zeros(len(X_test), dtype=int)
     diverse_histories_per_point: list[tuple[tuple[dict[str, Any], ...], ...]] = [
         () for _ in range(len(X_test))
@@ -436,9 +440,7 @@ def generate_tabicl_counterfactuals(
                 _cache: dict[
                     tuple[bytes, str], tuple[np.ndarray, np.ndarray]
                 ] = category_distribution_cache,
-                _anchors: tuple[float | None, ...] = (
-                    categorical_confidence_anchors
-                ),
+                _anchors: tuple[float | None, ...] = (categorical_confidence_anchors),
                 _codec: Any = categorical_codec,
                 _sampler_context: Any = sampler_context,
             ) -> tuple[np.ndarray, np.ndarray]:
@@ -464,9 +466,7 @@ def generate_tabicl_counterfactuals(
                     )
                     _cache[key] = (
                         np.asarray(categories, dtype=int),
-                        np.atleast_2d(
-                            np.asarray(probability_grid, dtype=np.float64)
-                        ),
+                        np.atleast_2d(np.asarray(probability_grid, dtype=np.float64)),
                     )
                 categories, probability_grid = _cache[key]
                 if confidence is None:
@@ -487,29 +487,34 @@ def generate_tabicl_counterfactuals(
 
             category_distribution = conditioned_category_distribution
 
-        x_cf, changed, greedy_info = greedy_mixed_counterfactual(
-            sampler,
-            disc_model,
-            x,
-            target_class,
-            numerical_actionable_idx,
-            grouped_actionable,
-            candidate_quantiles=candidate_quantiles,
-            candidate_confidences=point_confidence_grid,
-            feature_domains=feature_domains,
-            cf_mode=cf_mode,
-            tabicl_joint_plausibility=tabicl_joint_plausibility,
-            max_validity_steps=effective_max_validity_steps,
-            allow_revisits=allow_revisits,
-            joint_shortlist_size=joint_shortlist_size,
-            max_extra_actions=max_extra_actions,
-            min_joint_log_gain=min_joint_log_gain,
-            tau=tau,
-            temperature=temperature,
-            category_distribution=category_distribution,
-            categorical_proposal_count=CATEGORICAL_PROPOSAL_COUNT,
-        )
-        if n_counterfactuals > 1:
+        if n_counterfactuals == 1:
+            x_cf, changed, greedy_info = greedy_mixed_counterfactual(
+                sampler,
+                disc_model,
+                x,
+                target_class,
+                numerical_actionable_idx,
+                grouped_actionable,
+                candidate_quantiles=candidate_quantiles,
+                candidate_confidences=point_confidence_grid,
+                feature_domains=feature_domains,
+                cf_mode=cf_mode,
+                tabicl_joint_plausibility=tabicl_joint_plausibility,
+                max_validity_steps=effective_max_validity_steps,
+                allow_revisits=allow_revisits,
+                joint_shortlist_size=joint_shortlist_size,
+                max_extra_actions=max_extra_actions,
+                min_joint_log_gain=min_joint_log_gain,
+                tau=tau,
+                temperature=temperature,
+                category_distribution=category_distribution,
+                categorical_proposal_count=CATEGORICAL_PROPOSAL_COUNT,
+            )
+            if greedy_info["flipped"]:
+                X_cf_sets[i, 0] = x_cf
+                diverse_available_count_per_point[i] = 1
+                diverse_candidate_pool_count_per_point[i] = 1
+        else:
             diverse_result = generate_diverse_counterfactuals(
                 sampler,
                 disc_model,
@@ -517,8 +522,6 @@ def generate_tabicl_counterfactuals(
                 target_class,
                 numerical_actionable_idx,
                 grouped_actionable,
-                primary_counterfactual=x_cf,
-                primary_info=greedy_info,
                 config=diversity_config,
                 candidate_quantiles=candidate_quantiles,
                 candidate_confidences=point_confidence_grid,
@@ -533,13 +536,49 @@ def generate_tabicl_counterfactuals(
             if available_count:
                 X_cf_sets[i, :available_count] = diverse_result.counterfactuals
             diverse_available_count_per_point[i] = available_count
-            diverse_archive_count_per_point[i] = diverse_result.archive_count
+            diverse_candidate_pool_count_per_point[i] = (
+                diverse_result.candidate_pool_count
+            )
             diverse_search_depth_per_point[i] = diverse_result.search_depth
             diverse_histories_per_point[i] = diverse_result.histories
-        elif greedy_info["flipped"]:
-            X_cf_sets[i, 0] = x_cf
-            diverse_available_count_per_point[i] = 1
-            diverse_archive_count_per_point[i] = 1
+            if available_count:
+                x_cf = diverse_result.counterfactuals[0].copy()
+                primary_history = list(diverse_result.histories[0])
+                primary_depth = int(diverse_result.depths[0])
+                changed = np.flatnonzero(~np.isclose(x_cf, x)).tolist()
+            else:
+                x_cf = x.copy()
+                primary_history = []
+                primary_depth = 0
+                changed = []
+            primary_action_count = int(
+                action_unit_change_count(
+                    x_cf,
+                    x,
+                    numerical_actionable_idx,
+                    grouped_actionable,
+                )[0]
+            )
+            greedy_info = {
+                "flipped": available_count > 0,
+                "steps": primary_depth,
+                "history": primary_history,
+                "attempt_history": [],
+                "validity_steps": primary_depth,
+                "initial_valid_step": primary_depth if available_count else None,
+                "initial_sparse_row": x_cf.copy() if available_count else None,
+                "initial_sparse_action_count": (
+                    primary_action_count if available_count else None
+                ),
+                "final_action_count": primary_action_count,
+                "refinement_steps": 0,
+                "accepted_refinement_count": 0,
+                "extra_actions": 0,
+                "refinement_stopping_reason": "diverse_method",
+                "joint_scoring_batch_count": 0,
+                "joint_rows_scored": 0,
+                "joint_scoring_runtime_s": 0.0,
+            }
         X_cf[i] = x_cf
         initial_sparse_row = greedy_info.get("initial_sparse_row")
         if initial_sparse_row is not None:
@@ -563,9 +602,7 @@ def generate_tabicl_counterfactuals(
         )
         initial_joint_score = greedy_info.get("initial_tabicl_joint_log_density")
         if initial_joint_score is not None:
-            initial_tabicl_joint_log_density_per_point[i] = float(
-                initial_joint_score
-            )
+            initial_tabicl_joint_log_density_per_point[i] = float(initial_joint_score)
         final_joint_score = greedy_info.get("final_tabicl_joint_log_density")
         if final_joint_score is not None:
             final_tabicl_joint_log_density_per_point[i] = float(final_joint_score)
@@ -575,9 +612,7 @@ def generate_tabicl_counterfactuals(
         joint_scoring_batch_count_per_point[i] = int(
             greedy_info.get("joint_scoring_batch_count", 0)
         )
-        joint_rows_scored_per_point[i] = int(
-            greedy_info.get("joint_rows_scored", 0)
-        )
+        joint_rows_scored_per_point[i] = int(greedy_info.get("joint_rows_scored", 0))
         extra_actions_per_point[i] = int(greedy_info.get("extra_actions", 0))
         refinement_stopping_reason_per_point[i] = str(
             greedy_info.get("refinement_stopping_reason", "unknown")
@@ -621,10 +656,12 @@ def generate_tabicl_counterfactuals(
         "min_joint_log_gain": min_joint_log_gain,
         "n_counterfactuals": n_counterfactuals,
         "diversity_beam_width": diversity_beam_width,
-        "diversity_archive_size": diversity_archive_size,
+        "diversity_candidate_pool_size": diversity_candidate_pool_size,
         "diversity_max_extra_actions": diversity_max_extra_actions,
         "diversity_max_gower_ratio": diversity_max_gower_ratio,
         "diversity_max_gower_increase": diversity_max_gower_increase,
+        "diversity_candidate_generation": "bounded_beam",
+        "diversity_selector": "exact_fixed_size_dpp_map",
         "categorical_proposal_count": CATEGORICAL_PROPOSAL_COUNT,
         "categorical_confidence_batching": True,
         "conditional_estimator_cache": True,
@@ -638,13 +675,13 @@ def generate_tabicl_counterfactuals(
         "X_sparse": X_sparse,
         "X_cf_sets": X_cf_sets,
         "diverse_available_count_per_point": (diverse_available_count_per_point),
-        "diverse_archive_count_per_point": diverse_archive_count_per_point,
+        "diverse_candidate_pool_count_per_point": (
+            diverse_candidate_pool_count_per_point
+        ),
         "diverse_search_depth_per_point": diverse_search_depth_per_point,
         "diverse_histories_per_point": diverse_histories_per_point,
         "point_runtime_s": point_runtime_s,
-        "joint_scoring_runtime_s_per_point": (
-            joint_scoring_runtime_s_per_point
-        ),
+        "joint_scoring_runtime_s_per_point": (joint_scoring_runtime_s_per_point),
         "changed_per_point": changed_per_point,
         "flipped_per_point": flipped_per_point,
         "steps_per_point": steps_per_point,
@@ -653,9 +690,7 @@ def generate_tabicl_counterfactuals(
         "validity_steps_per_point": validity_steps_per_point,
         "initial_valid_step_per_point": initial_valid_step_per_point,
         "refinement_steps_per_point": refinement_steps_per_point,
-        "accepted_refinement_count_per_point": (
-            accepted_refinement_count_per_point
-        ),
+        "accepted_refinement_count_per_point": (accepted_refinement_count_per_point),
         "initial_sparse_action_count_per_point": (
             initial_sparse_action_count_per_point
         ),
@@ -669,14 +704,10 @@ def generate_tabicl_counterfactuals(
         "tabicl_joint_log_density_gain_per_point": (
             tabicl_joint_log_density_gain_per_point
         ),
-        "joint_scoring_batch_count_per_point": (
-            joint_scoring_batch_count_per_point
-        ),
+        "joint_scoring_batch_count_per_point": (joint_scoring_batch_count_per_point),
         "joint_rows_scored_per_point": joint_rows_scored_per_point,
         "extra_actions_per_point": extra_actions_per_point,
-        "refinement_stopping_reason_per_point": (
-            refinement_stopping_reason_per_point
-        ),
+        "refinement_stopping_reason_per_point": (refinement_stopping_reason_per_point),
         "target_probability_per_point": target_probability_per_point,
     }
     return X_test, y_test, X_cf, info
@@ -858,28 +889,22 @@ def run_and_report(
         "min_joint_log_gain": info["min_joint_log_gain"],
         "n_counterfactuals": info["n_counterfactuals"],
         "diversity_beam_width": info["diversity_beam_width"],
-        "diversity_archive_size": info["diversity_archive_size"],
+        "diversity_candidate_pool_size": info["diversity_candidate_pool_size"],
         "diversity_max_extra_actions": info["diversity_max_extra_actions"],
         "diversity_max_gower_ratio": info["diversity_max_gower_ratio"],
         "diversity_max_gower_increase": info["diversity_max_gower_increase"],
         "joint_scoring_batch_count_mean": float(
             np.mean(info["joint_scoring_batch_count_per_point"])
         ),
-        "joint_rows_scored_mean": float(
-            np.mean(info["joint_rows_scored_per_point"])
-        ),
+        "joint_rows_scored_mean": float(np.mean(info["joint_rows_scored_per_point"])),
         "accepted_refinement_count_mean": float(
             np.mean(info["accepted_refinement_count_per_point"])
         ),
         "initial_sparse_action_count_mean": initial_action_count_mean,
-        "final_action_count_mean": float(
-            np.mean(info["final_action_count_per_point"])
-        ),
+        "final_action_count_mean": float(np.mean(info["final_action_count_per_point"])),
         "extra_actions_mean": float(np.mean(info["extra_actions_per_point"])),
         "categorical_proposal_count": info["categorical_proposal_count"],
-        "categorical_confidence_batching": info[
-            "categorical_confidence_batching"
-        ],
+        "categorical_confidence_batching": info["categorical_confidence_batching"],
         "conditional_estimator_cache": info["conditional_estimator_cache"],
         "tabicl_kv_cache": info["tabicl_kv_cache"],
         "split_variant": info["split_variant"],
@@ -1005,22 +1030,25 @@ def main() -> None:
         help="Number of partial counterfactual paths retained per search step.",
     )
     parser.add_argument(
-        "--diversity-archive-size",
+        "--diversity-candidate-pool-size",
         type=int,
-        default=64,
-        help="Maximum number of valid candidates retained per factual.",
+        default=16,
+        help="Valid candidates retained before exact DPP selection.",
     )
     parser.add_argument(
         "--diversity-max-extra-actions",
         type=int,
         default=2,
-        help="Maximum action-count increase over the primary counterfactual.",
+        help="Maximum action-count increase over the closest valid candidate.",
     )
     parser.add_argument(
         "--diversity-max-gower-ratio",
         type=float,
         default=1.5,
-        help="Multiplicative grouped-Gower quality limit relative to the primary.",
+        help=(
+            "Multiplicative grouped-Gower quality limit relative to the "
+            "closest valid candidate."
+        ),
     )
     parser.add_argument(
         "--diversity-max-gower-increase",
@@ -1083,7 +1111,7 @@ def main() -> None:
             min_joint_log_gain=args.min_joint_log_gain,
             n_counterfactuals=args.n_counterfactuals,
             diversity_beam_width=args.diversity_beam_width,
-            diversity_archive_size=args.diversity_archive_size,
+            diversity_candidate_pool_size=args.diversity_candidate_pool_size,
             diversity_max_extra_actions=args.diversity_max_extra_actions,
             diversity_max_gower_ratio=args.diversity_max_gower_ratio,
             diversity_max_gower_increase=args.diversity_max_gower_increase,

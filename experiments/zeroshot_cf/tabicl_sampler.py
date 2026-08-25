@@ -127,9 +127,10 @@ def _select_context(
     random_state: int,
     categorical_features: Sequence[int] = (),
     return_indices: bool = False,
-) -> tuple[np.ndarray, np.ndarray | None] | tuple[
-    np.ndarray, np.ndarray | None, np.ndarray
-]:
+) -> (
+    tuple[np.ndarray, np.ndarray | None]
+    | tuple[np.ndarray, np.ndarray | None, np.ndarray]
+):
     """Apply the same class filtering and random/kNN selection as TabPFN."""
     if selection not in {"random", "knn"}:
         raise ValueError(f"selection must be 'random' or 'knn', got {selection!r}")
@@ -193,12 +194,16 @@ def _local_tabicl_model_factory(
     narrow subclass keeps the upstream estimator implementation while adding
     explicit local loading and per-context full-conditional memoization.
     """
+
     class _LocalCheckpointTabICLUnsupervised(TabICLUnsupervised):
         _numerical_quantile_grid: ClassVar[np.ndarray | None] = None
-        _conditional_estimator_cache: dict[
-            tuple[int, tuple[int, ...], bytes, bytes],
-            tuple[TabICLClassifier | TabICLRegressor, bool],
-        ] | None = None
+        _conditional_estimator_cache: (
+            dict[
+                tuple[int, tuple[int, ...], bytes, bytes],
+                tuple[TabICLClassifier | TabICLRegressor, bool],
+            ]
+            | None
+        ) = None
 
         @override
         def _load_shared_model(
@@ -226,15 +231,18 @@ def _local_tabicl_model_factory(
             temperature: float,
             rng: np.random.Generator,
         ) -> np.ndarray:
-            quantile_grid = (
-                _LocalCheckpointTabICLUnsupervised._numerical_quantile_grid
-            )
+            quantile_grid = _LocalCheckpointTabICLUnsupervised._numerical_quantile_grid
             if quantile_grid is not None:
-                if len(quantile_grid) != dist.quantiles.shape[0]:
+                batch_rows = dist.quantiles.shape[0]
+                if batch_rows % len(quantile_grid) != 0:
                     raise ValueError(
-                        "quantile-grid rows must match the numerical "
-                        "distribution batch size"
+                        "the numerical distribution batch must contain a "
+                        "whole number of quantile grids"
                     )
+                quantile_grid = np.tile(
+                    quantile_grid,
+                    batch_rows // len(quantile_grid),
+                )
                 alphas = torch.as_tensor(
                     quantile_grid,
                     device=dist.quantiles.device,
@@ -327,8 +335,7 @@ class TabICLConditionalDensitySampler:
         super().__init__()
         if context_update not in {"replace", "refit"}:
             raise ValueError(
-                "context_update must be 'replace' or 'refit', "
-                f"got {context_update!r}"
+                f"context_update must be 'replace' or 'refit', got {context_update!r}"
             )
         if numerical_point_estimate not in {"median", "mode"}:
             raise ValueError(
@@ -346,9 +353,7 @@ class TabICLConditionalDensitySampler:
         self._model_factory = model_factory
         self.context_update = context_update
         self.numerical_point_estimate = numerical_point_estimate
-        self.categorical_features = tuple(
-            int(j) for j in (categorical_features or ())
-        )
+        self.categorical_features = tuple(int(j) for j in (categorical_features or ()))
         if len(set(self.categorical_features)) != len(self.categorical_features):
             raise ValueError("categorical_features must be unique")
         if any(j < 0 for j in self.categorical_features):
@@ -413,9 +418,7 @@ class TabICLConditionalDensitySampler:
             for j in model.categorical_features_
         }
         model.numerical_features_ = [
-            j
-            for j in range(X_aug.shape[1])
-            if j not in model.categorical_features_
+            j for j in range(X_aug.shape[1]) if j not in model.categorical_features_
         ]
 
     def set_context(
@@ -503,7 +506,7 @@ class TabICLConditionalDensitySampler:
         self._fitted = True
         return self
 
-    def _augmented_candidate_rows(
+    def _augmented_candidate_rows(  # noqa: C901, PLR0912
         self,
         X_query: np.ndarray,
         candidate_cols: Sequence[int],
@@ -516,10 +519,10 @@ class TabICLConditionalDensitySampler:
             raise RuntimeError("Call set_context() before sampling features.")
 
         X = np.asarray(X_query, dtype=np.float32)
-        if X.ndim != 2 or X.shape != (1, self._n_original_features):
+        if X.ndim != 2 or X.shape[1:] != (self._n_original_features,):
             raise ValueError(
-                "candidate expansion expects one query row with shape "
-                f"(1, {self._n_original_features}), got {X.shape}"
+                "candidate expansion expects query rows with shape "
+                f"(n, {self._n_original_features}), got {X.shape}"
             )
         candidates = np.asarray(candidate_cols, dtype=int)
         if candidates.ndim != 1 or len(candidates) == 0:
@@ -529,7 +532,15 @@ class TabICLConditionalDensitySampler:
         if np.any(candidates < 0) or np.any(candidates >= self._n_original_features):
             raise IndexError("candidate feature index is out of bounds")
 
-        rows = np.repeat(X, len(candidates), axis=0)
+        if len(X) == 1:
+            rows = np.repeat(X, len(candidates), axis=0)
+        elif len(X) == len(candidates):
+            rows = X.copy()
+        else:
+            raise ValueError(
+                "provide either one shared query row or one query row per "
+                "candidate column"
+            )
         rows[np.arange(len(candidates)), candidates] = np.nan
         target = np.full((len(rows), 1), float(fixed_target), dtype=np.float32)
         augmented = [rows, target]
@@ -634,6 +645,39 @@ class TabICLConditionalDensitySampler:
         )
         return filled[np.arange(len(candidates)), candidates].astype(np.float64)
 
+    def sample_candidates_batch(
+        self,
+        X_queries: np.ndarray,
+        candidate_cols: Sequence[int],
+        *,
+        sample_temperature: float | None = None,
+        fixed_target: int,
+        fixed_confidence: float | Sequence[float] | np.ndarray | None = None,
+    ) -> np.ndarray:
+        """Impute one candidate column in each query row in one model call."""
+        candidates = np.asarray(candidate_cols, dtype=int)
+        queries = np.asarray(X_queries)
+        if queries.ndim != 2 or len(queries) != len(candidates):
+            raise ValueError("X_queries must contain one row per candidate column")
+        X_aug = self._augmented_candidate_rows(
+            queries,
+            candidates.tolist(),
+            fixed_target,
+            allow_duplicate_cols=True,
+            fixed_confidence=fixed_confidence,
+        )
+        temperature = (
+            self.temperature if sample_temperature is None else sample_temperature
+        )
+        filled = np.asarray(
+            self._require_model().impute(
+                X_aug,
+                temperature=float(temperature),
+                n_iterations=1,
+            )
+        )
+        return filled[np.arange(len(candidates)), candidates].astype(np.float64)
+
     def categorical_distribution(
         self,
         X_query: np.ndarray,
@@ -672,18 +716,14 @@ class TabICLConditionalDensitySampler:
         )
         model = self._require_model()
         train_mask = ~np.isnan(model.X_[:, target_col])
-        conditioning = [
-            j for j in range(model.n_features_in_) if j != target_col
-        ]
+        conditioning = [j for j in range(model.n_features_in_) if j != target_col]
         rng = np.random.default_rng(self.random_state)
-        X_train_cond, y_train_cond, X_test_cond = (
-            model._prepare_conditional_data(
-                tgt_idx=target_col,
-                cond_features=conditioning,
-                train_mask=train_mask,
-                X_test=X_aug,
-                rng=rng,
-            )
+        X_train_cond, y_train_cond, X_test_cond = model._prepare_conditional_data(
+            tgt_idx=target_col,
+            cond_features=conditioning,
+            train_mask=train_mask,
+            X_test=X_aug,
+            rng=rng,
         )
         estimator, is_categorical = model._fit_conditional_estimator(
             target_col,
@@ -716,11 +756,45 @@ class TabICLConditionalDensitySampler:
         matrix is feature-major with shape ``(n_candidates, n_quantiles)``.
         """
         candidates = np.asarray(candidate_cols, dtype=int)
-        alphas = np.asarray(quantiles, dtype=np.float64)
-        if candidates.ndim != 1 or len(candidates) == 0:
-            raise ValueError("candidate_cols must be a non-empty 1D sequence")
         if len(np.unique(candidates)) != len(candidates):
             raise ValueError("candidate_cols must not contain duplicates")
+        query = np.asarray(X_query)
+        if query.ndim != 2 or len(query) != 1:
+            raise ValueError("sample_candidate_grid expects one query row")
+        queries = np.repeat(query, len(candidates), axis=0)
+        result = self.sample_candidate_grid_batch(
+            queries,
+            candidates,
+            quantiles=quantiles,
+            fixed_target=fixed_target,
+            confidences=confidences,
+        )
+        if confidences is None:
+            return result[:, 0, :]
+        return result
+
+    def sample_candidate_grid_batch(  # noqa: C901, PLR0912
+        self,
+        X_queries: np.ndarray,
+        candidate_cols: Sequence[int],
+        *,
+        quantiles: Sequence[float],
+        fixed_target: int,
+        confidences: Sequence[float] | None = None,
+    ) -> np.ndarray:
+        """Return quantile grids for query/feature pairs in one model call.
+
+        Unlike :meth:`sample_candidate_grid`, each candidate column is paired
+        with its own query row. This is the fast path used to expand an entire
+        counterfactual beam level at once.
+        """
+        candidates = np.asarray(candidate_cols, dtype=int)
+        queries = np.asarray(X_queries)
+        alphas = np.asarray(quantiles, dtype=np.float64)
+        if queries.ndim != 2 or len(queries) != len(candidates):
+            raise ValueError("X_queries must contain one row per candidate column")
+        if candidates.ndim != 1 or len(candidates) == 0:
+            raise ValueError("candidate_cols must be a non-empty 1D sequence")
         if alphas.ndim != 1 or len(alphas) == 0:
             raise ValueError("quantiles must be a non-empty 1D sequence")
         if not np.all(np.isfinite(alphas)) or np.any((alphas <= 0) | (alphas >= 1)):
@@ -746,10 +820,9 @@ class TabICLConditionalDensitySampler:
                 "confidences are required when confidence conditioning is enabled"
             )
 
-        expanded_candidates = np.repeat(
-            candidates,
-            n_confidences * len(alphas),
-        )
+        expansion = n_confidences * len(alphas)
+        expanded_queries = np.repeat(queries, expansion, axis=0)
+        expanded_candidates = np.repeat(candidates, expansion)
         expanded_confidences = None
         if confidence_values is not None:
             expanded_confidences = np.tile(
@@ -757,7 +830,7 @@ class TabICLConditionalDensitySampler:
                 len(candidates),
             )
         X_aug = self._augmented_candidate_rows(
-            X_query,
+            expanded_queries,
             expanded_candidates.tolist(),
             fixed_target,
             allow_duplicate_cols=True,
@@ -790,14 +863,11 @@ class TabICLConditionalDensitySampler:
             np.arange(len(expanded_candidates)),
             expanded_candidates,
         ]
-        reshaped = values.astype(np.float64).reshape(
+        return values.astype(np.float64).reshape(
             len(candidates),
             n_confidences,
             len(alphas),
         )
-        if confidences is None:
-            return reshaped[:, 0, :]
-        return reshaped
 
     def sample_feature(
         self,

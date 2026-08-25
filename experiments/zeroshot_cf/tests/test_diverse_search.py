@@ -1,6 +1,6 @@
 # Copyright (c) Prior Labs GmbH 2026.
 
-"""Tests for validity-constrained diverse counterfactual search."""
+"""Tests for bounded diverse beam search and DPP selection."""
 
 # ruff: noqa: ANN001, ANN202, D103
 
@@ -9,13 +9,11 @@ from __future__ import annotations
 import numpy as np
 from experiments.zeroshot_cf.data import OneHotActionGroup
 from experiments.zeroshot_cf.diverse_search import (
-    DiverseSearchConfig,
+    DiverseBeamSearchConfig,
     action_set_jaccard_distance,
     action_unit_signature,
     generate_diverse_counterfactuals,
-)
-from experiments.zeroshot_cf.grouped_categorical import (
-    greedy_mixed_counterfactual,
+    select_dpp_subset,
 )
 
 
@@ -42,24 +40,10 @@ class _AdditiveDisc:
         return np.column_stack([1.0 - p1, p1])
 
 
-def _primary(sampler, disc, factual, numerical_columns):
-    return greedy_mixed_counterfactual(
-        sampler,
-        disc,
-        factual,
-        y_target=1,
-        numerical_columns=numerical_columns,
-        categorical_groups=[],
-        candidate_quantiles=(0.5,),
-    )
-
-
 def test_diverse_beam_finds_distinct_valid_action_sets() -> None:
     sampler = _OnesSampler()
     disc = _AdditiveDisc()
     factual = np.zeros(3)
-    primary, _, primary_info = _primary(sampler, disc, factual, [0, 1, 2])
-
     result = generate_diverse_counterfactuals(
         sampler,
         disc,
@@ -67,11 +51,10 @@ def test_diverse_beam_finds_distinct_valid_action_sets() -> None:
         y_target=1,
         numerical_columns=[0, 1, 2],
         categorical_groups=[],
-        primary_counterfactual=primary,
-        primary_info=primary_info,
-        config=DiverseSearchConfig(
+        config=DiverseBeamSearchConfig(
             n_counterfactuals=3,
             beam_width=3,
+            candidate_pool_size=3,
             max_gower_ratio=1.0,
             max_gower_increase=0.0,
         ),
@@ -80,7 +63,6 @@ def test_diverse_beam_finds_distinct_valid_action_sets() -> None:
     )
 
     assert result.available_count == 3
-    np.testing.assert_array_equal(result.counterfactuals[0], primary)
     predictions = np.argmax(disc.predict_proba(result.counterfactuals), axis=1)
     np.testing.assert_array_equal(predictions, np.ones(3, dtype=int))
     signatures = {
@@ -102,8 +84,6 @@ def test_diverse_search_never_pads_with_invalid_or_duplicate_rows() -> None:
     sampler = _OnesSampler()
     disc = OneFeatureDisc()
     factual = np.zeros(1)
-    primary, _, primary_info = _primary(sampler, disc, factual, [0])
-
     result = generate_diverse_counterfactuals(
         sampler,
         disc,
@@ -111,9 +91,11 @@ def test_diverse_search_never_pads_with_invalid_or_duplicate_rows() -> None:
         y_target=1,
         numerical_columns=[0],
         categorical_groups=[],
-        primary_counterfactual=primary,
-        primary_info=primary_info,
-        config=DiverseSearchConfig(n_counterfactuals=3, beam_width=3),
+        config=DiverseBeamSearchConfig(
+            n_counterfactuals=3,
+            beam_width=3,
+            candidate_pool_size=3,
+        ),
         candidate_quantiles=(0.5,),
     )
 
@@ -122,57 +104,78 @@ def test_diverse_search_never_pads_with_invalid_or_duplicate_rows() -> None:
     assert result.target_probabilities[0] >= 0.5
 
 
-def test_diverse_search_prunes_an_overflowing_archive() -> None:
-    """Archive pruning compares states by identity, not NumPy row equality."""
+def test_dpp_prefers_distinct_action_sets() -> None:
+    factual = np.zeros(3)
+    rows = np.asarray(
+        [
+            [0.6, 0.0, 0.0],
+            [0.8, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.6, 0.0],
+            [0.0, 0.0, 0.6],
+        ]
+    )
+    selected, logdet = select_dpp_subset(
+        rows,
+        np.full(len(rows), 0.8),
+        factual,
+        [0, 1, 2],
+        [],
+        DiverseBeamSearchConfig(
+            n_counterfactuals=3,
+            candidate_pool_size=5,
+            dpp_action_weight=1.0,
+            dpp_gower_quality_weight=0.0,
+            dpp_sparsity_quality_weight=0.0,
+        ),
+    )
 
-    class AnyActionDisc:
-        classes_ = np.array([0, 1])
+    signatures = {
+        action_unit_signature(rows[index], factual, [0, 1, 2], []) for index in selected
+    }
+    assert len(signatures) == 3
+    assert logdet is not None
 
-        def predict_proba(self, X):
-            p1 = np.clip(0.1 + np.asarray(X).sum(axis=1), 0.0, 0.99)
-            return np.column_stack([1.0 - p1, p1])
 
-    class UnequalSampler:
-        def sample_candidate_grid(
+def test_beam_batches_all_numerical_pairs_per_depth() -> None:
+    class BatchedSampler(_OnesSampler):
+        def __init__(self):
+            self.batch_calls = 0
+
+        def sample_candidate_grid_batch(
             self,
-            _query,
+            queries,
             columns,
             *,
             quantiles,
             fixed_target,
             confidences=None,
         ):
-            del quantiles, fixed_target, confidences
-            values = (0.6, 0.8, 0.9, 1.0)
-            return np.asarray([[values[column]] for column in columns])
+            del fixed_target
+            assert confidences is None
+            assert len(queries) == len(columns)
+            self.batch_calls += 1
+            return np.ones((len(columns), 1, len(quantiles)))
 
-    sampler = UnequalSampler()
-    disc = AnyActionDisc()
-    factual = np.zeros(4)
-    primary, _, primary_info = _primary(sampler, disc, factual, [0, 1, 2, 3])
-
+    sampler = BatchedSampler()
     result = generate_diverse_counterfactuals(
         sampler,
-        disc,
-        factual,
+        _AdditiveDisc(),
+        np.zeros(3),
         y_target=1,
-        numerical_columns=[0, 1, 2, 3],
+        numerical_columns=[0, 1, 2],
         categorical_groups=[],
-        primary_counterfactual=primary,
-        primary_info=primary_info,
-        config=DiverseSearchConfig(
-            n_counterfactuals=2,
-            beam_width=4,
-            archive_size=2,
-            max_gower_ratio=1.0,
-            max_gower_increase=0.0,
+        config=DiverseBeamSearchConfig(
+            n_counterfactuals=3,
+            beam_width=3,
+            candidate_pool_size=3,
         ),
         candidate_quantiles=(0.5,),
+        allow_revisits=False,
     )
 
-    assert result.available_count == 1
-    assert result.archive_count == 2
-    np.testing.assert_array_equal(result.counterfactuals, [primary])
+    assert result.available_count == 3
+    assert sampler.batch_calls == 2
 
 
 def test_action_signature_counts_a_one_hot_group_once() -> None:

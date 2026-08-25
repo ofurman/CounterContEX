@@ -53,7 +53,7 @@ DEFAULT_MIN_JOINT_LOG_GAIN = 0.0
 DEFAULT_TABICL_JOINT_PERMUTATIONS = 1
 DEFAULT_N_COUNTERFACTUALS = 3
 DEFAULT_DIVERSITY_BEAM_WIDTH = 8
-DEFAULT_DIVERSITY_ARCHIVE_SIZE = 64
+DEFAULT_DIVERSITY_CANDIDATE_POOL_SIZE = 16
 DEFAULT_DIVERSITY_MAX_EXTRA_ACTIONS = 2
 DEFAULT_DIVERSITY_MAX_GOWER_RATIO = 1.5
 DEFAULT_DIVERSITY_MAX_GOWER_INCREASE = 0.02
@@ -102,7 +102,7 @@ def run_dataset(  # noqa: PLR0913
     min_joint_log_gain: float = DEFAULT_MIN_JOINT_LOG_GAIN,
     n_counterfactuals: int = DEFAULT_N_COUNTERFACTUALS,
     diversity_beam_width: int = DEFAULT_DIVERSITY_BEAM_WIDTH,
-    diversity_archive_size: int = DEFAULT_DIVERSITY_ARCHIVE_SIZE,
+    diversity_candidate_pool_size: int = DEFAULT_DIVERSITY_CANDIDATE_POOL_SIZE,
     diversity_max_extra_actions: int = DEFAULT_DIVERSITY_MAX_EXTRA_ACTIONS,
     diversity_max_gower_ratio: float = DEFAULT_DIVERSITY_MAX_GOWER_RATIO,
     diversity_max_gower_increase: float = DEFAULT_DIVERSITY_MAX_GOWER_INCREASE,
@@ -133,7 +133,7 @@ def run_dataset(  # noqa: PLR0913
         min_joint_log_gain=min_joint_log_gain,
         n_counterfactuals=n_counterfactuals,
         diversity_beam_width=diversity_beam_width,
-        diversity_archive_size=diversity_archive_size,
+        diversity_candidate_pool_size=diversity_candidate_pool_size,
         diversity_max_extra_actions=diversity_max_extra_actions,
         diversity_max_gower_ratio=diversity_max_gower_ratio,
         diversity_max_gower_increase=diversity_max_gower_increase,
@@ -161,9 +161,7 @@ def run_dataset(  # noqa: PLR0913
     diverse_metrics = evaluate_diverse_sets(X_test, info)
     print_metrics(common_metrics, prefix=f"{dataset_name}/DiCoFlex-common")
 
-    posthoc_lof = LocalOutlierFactor(n_neighbors=20, novelty=True).fit(
-        bundle.X_train
-    )
+    posthoc_lof = LocalOutlierFactor(n_neighbors=20, novelty=True).fit(bundle.X_train)
     lof_per_point = -np.asarray(posthoc_lof.score_samples(X_cf), dtype=float)
 
     y_cf_pred = np.asarray(info["disc_model"].predict(X_cf), dtype=int)
@@ -233,9 +231,7 @@ def run_dataset(  # noqa: PLR0913
     initial_action_counts = np.asarray(
         info["initial_sparse_action_count_per_point"], dtype=float
     )
-    final_action_counts = np.asarray(
-        info["final_action_count_per_point"], dtype=float
-    )
+    final_action_counts = np.asarray(info["final_action_count_per_point"], dtype=float)
     l0_count_mean = (
         float(final_action_counts[valid].mean()) if valid.any() else float("nan")
     )
@@ -257,9 +253,7 @@ def run_dataset(  # noqa: PLR0913
     joint_batch_counts = np.asarray(
         info["joint_scoring_batch_count_per_point"], dtype=float
     )
-    joint_rows_scored = np.asarray(
-        info["joint_rows_scored_per_point"], dtype=float
-    )
+    joint_rows_scored = np.asarray(info["joint_rows_scored_per_point"], dtype=float)
     stopping_reasons = list(info["refinement_stopping_reason_per_point"])
     stopping_reason_counts = ";".join(
         f"{reason}:{stopping_reasons.count(reason)}"
@@ -273,7 +267,11 @@ def run_dataset(  # noqa: PLR0913
 
     row: dict[str, Any] = {
         "dataset": dataset_name,
-        "method": f"tabicl_v2_{cf_mode}",
+        "method": (
+            "tabicl_v2_diverse_dpp"
+            if n_counterfactuals > 1
+            else f"tabicl_v2_{cf_mode}"
+        ),
         "cf_mode": cf_mode,
         "split_variant": bundle.split_variant,
         "split_seed": 42,
@@ -296,25 +294,35 @@ def run_dataset(  # noqa: PLR0913
         "max_validity_steps": max_validity_steps,
         "allow_revisits": allow_revisits,
         "categorical_proposal_count": info["categorical_proposal_count"],
-        "categorical_confidence_batching": info[
-            "categorical_confidence_batching"
-        ],
+        "categorical_confidence_batching": info["categorical_confidence_batching"],
         "conditional_estimator_cache": info["conditional_estimator_cache"],
         "tabicl_kv_cache": info["tabicl_kv_cache"],
         "joint_shortlist_size": joint_shortlist_size,
         "max_extra_actions": max_extra_actions,
         "min_joint_log_gain": min_joint_log_gain,
         "diversity_beam_width": diversity_beam_width,
-        "diversity_archive_size": diversity_archive_size,
+        "diversity_candidate_pool_size": diversity_candidate_pool_size,
         "diversity_max_extra_actions": diversity_max_extra_actions,
         "diversity_max_gower_ratio": diversity_max_gower_ratio,
         "diversity_max_gower_increase": diversity_max_gower_increase,
+        "diversity_candidate_generation": info[
+            "diversity_candidate_generation"
+        ],
+        "diversity_selector": info["diversity_selector"],
         "search_schedule": (
-            "probability_ascent_until_valid_then_one_shot_joint_reranking"
-            if cf_mode == "data_plausible"
-            else "probability_ascent_until_valid_then_min_grouped_gower"
+            "bounded_beam_then_exact_fixed_size_dpp_map"
+            if n_counterfactuals > 1
+            else (
+                "probability_ascent_until_valid_then_one_shot_joint_reranking"
+                if cf_mode == "data_plausible"
+                else "probability_ascent_until_valid_then_min_grouped_gower"
+            )
         ),
-        "valid_candidate_objective": "grouped_gower",
+        "valid_candidate_objective": (
+            "quality_constrained_dpp"
+            if n_counterfactuals > 1
+            else "grouped_gower"
+        ),
         "n_estimators": n_estimators,
         "temperature": temperature,
         "tau": tau,
@@ -401,9 +409,9 @@ def run_dataset(  # noqa: PLR0913
             ),
             "joint_rows_scored": int(info["joint_rows_scored_per_point"][i]),
             "extra_actions": int(info["extra_actions_per_point"][i]),
-            "refinement_stopping_reason": info[
-                "refinement_stopping_reason_per_point"
-            ][i],
+            "refinement_stopping_reason": info["refinement_stopping_reason_per_point"][
+                i
+            ],
             "initial_valid_action_sparsity": float(initial_valid_sparsity[i]),
             "initial_valid_grouped_gower": float(initial_valid_gower[i]),
             "final_grouped_gower": float(grouped_gower_per_point[i]),
@@ -469,8 +477,7 @@ def main() -> None:
         nargs="+",
         default=DEFAULT_CANDIDATE_QUANTILES,
         help=(
-            "Central TabICL conditional-quantile proposal grid "
-            "(default: 0.1...0.9)."
+            "Central TabICL conditional-quantile proposal grid (default: 0.1...0.9)."
         ),
     )
     parser.add_argument(
@@ -547,9 +554,9 @@ def main() -> None:
         default=DEFAULT_DIVERSITY_BEAM_WIDTH,
     )
     parser.add_argument(
-        "--diversity-archive-size",
+        "--diversity-candidate-pool-size",
         type=int,
-        default=DEFAULT_DIVERSITY_ARCHIVE_SIZE,
+        default=DEFAULT_DIVERSITY_CANDIDATE_POOL_SIZE,
     )
     parser.add_argument(
         "--diversity-max-extra-actions",
@@ -586,9 +593,7 @@ def main() -> None:
         tau=args.tau,
         candidate_quantiles=tuple(args.candidate_quantiles),
         confidence_quantiles=(
-            tuple(args.confidence_quantiles)
-            if args.confidence_conditioning
-            else None
+            tuple(args.confidence_quantiles) if args.confidence_conditioning else None
         ),
         cf_mode=args.cf_mode.replace("-", "_"),
         tabicl_joint_permutations=args.tabicl_joint_permutations,
@@ -599,7 +604,7 @@ def main() -> None:
         min_joint_log_gain=args.min_joint_log_gain,
         n_counterfactuals=args.n_counterfactuals,
         diversity_beam_width=args.diversity_beam_width,
-        diversity_archive_size=args.diversity_archive_size,
+        diversity_candidate_pool_size=args.diversity_candidate_pool_size,
         diversity_max_extra_actions=args.diversity_max_extra_actions,
         diversity_max_gower_ratio=args.diversity_max_gower_ratio,
         diversity_max_gower_increase=args.diversity_max_gower_increase,

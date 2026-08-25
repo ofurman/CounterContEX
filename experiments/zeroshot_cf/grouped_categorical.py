@@ -125,6 +125,32 @@ class CompactMixedSampler:
             **kwargs,
         )
 
+    def sample_candidates_batch(
+        self,
+        X_queries: np.ndarray,
+        candidate_cols: Sequence[int],
+        **kwargs: Any,
+    ) -> np.ndarray:
+        """Impute original-space query/feature pairs in one compact batch."""
+        return self.sampler.sample_candidates_batch(
+            self.codec.encode(X_queries),
+            self._encoded_candidates(candidate_cols),
+            **kwargs,
+        )
+
+    def sample_candidate_grid_batch(
+        self,
+        X_queries: np.ndarray,
+        candidate_cols: Sequence[int],
+        **kwargs: Any,
+    ) -> np.ndarray:
+        """Evaluate original-space query/feature quantile grids in one batch."""
+        return self.sampler.sample_candidate_grid_batch(
+            self.codec.encode(X_queries),
+            self._encoded_candidates(candidate_cols),
+            **kwargs,
+        )
+
     def sample_feature(
         self,
         X_query: np.ndarray,
@@ -664,9 +690,7 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                         y_target,
                     )
                     joint_scoring_runtime_s += perf_counter() - joint_started
-                    current_joint_log_density = float(
-                        joint_batch.joint_log_density[0]
-                    )
+                    current_joint_log_density = float(joint_batch.joint_log_density[0])
                     initial_joint_log_density = current_joint_log_density
                     tabicl_joint_scores = {
                         "joint_log_density": np.full(
@@ -827,9 +851,7 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                 refinement_steps += 1
             elif flipped and initial_valid_step is None:
                 initial_valid_step = len(history)
-                initial_sparse_action_count = int(
-                    counterfactual_costs(current)[0][0]
-                )
+                initial_sparse_action_count = int(counterfactual_costs(current)[0][0])
                 initial_sparse_row = current.copy()
                 if tabicl_joint_plausibility is not None:
                     # The one-shot refinement may replace the action that

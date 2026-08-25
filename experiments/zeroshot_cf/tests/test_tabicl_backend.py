@@ -86,7 +86,7 @@ class _FakeTabICLUnsupervised:
                 + 0.2 * confidence[rows]
             )
             if quantile_grid is not None:
-                values = values + np.asarray(quantile_grid)
+                values = values + np.resize(np.asarray(quantile_grid), len(rows))
             out[rows, col] = values
         return out
 
@@ -316,6 +316,29 @@ def test_quantile_grid_expands_rows_but_uses_one_imputation_call():
     )
     assert sampler.model.impute_calls == before + 1
     assert not hasattr(sampler.model, "_numerical_quantile_grid")
+
+
+def test_quantile_grid_batches_multiple_query_feature_pairs():
+    X, y = _context()
+    sampler = _sampler().set_context(
+        X, y_context=y, max_context=8, selection="knn", query=X[10]
+    )
+    before = sampler.model.impute_calls
+
+    values = sampler.sample_candidate_grid_batch(
+        X[[0, 1, 2]],
+        [0, 0, 2],
+        quantiles=[0.1, 0.5],
+        fixed_target=1,
+    )
+
+    assert values.shape == (3, 1, 2)
+    np.testing.assert_allclose(
+        values[:, 0],
+        [[0.7, 1.1], [0.7, 1.1], [0.9, 1.3]],
+        atol=1e-6,
+    )
+    assert sampler.model.impute_calls == before + 1
 
 
 def test_confidence_conditioning_uses_empirical_grid_in_one_call():
