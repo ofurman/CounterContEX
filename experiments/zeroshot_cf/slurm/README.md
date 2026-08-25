@@ -206,3 +206,73 @@ Runs log to the same `CounterContEX` W&B project, named
 `results/greedy_benchmark_{l2c,dicoflex}_metrics.csv`, with extra columns
 (`l0_count_mean`, `steps_mean`, `failure_rate`) not present in the exp2
 benchmark's output.
+
+## Full test set (`--max-test -1`)
+
+Both `run_full_benchmark.py` and `run_greedy_benchmark.py` accept
+`--max-test -1` for the dataset's full test split instead of a fixed cap —
+already supported by `exp2_counterfactuals.py`/`exp4_greedy_cf.py`'s own
+`generate_counterfactuals`, just not exercised by the two array jobs above.
+`run_benchmark_array_fulltest.sbatch` / `run_greedy_benchmark_array_fulltest.sbatch`
+run this, same `BENCHMARK_CONFIG`/cluster setup as the two scripts above,
+`--n-repeats 5` kept for the diversity metric.
+
+**Test-set sizes vary ~100x across these datasets** — this is the single
+biggest thing to know before submitting either script:
+
+| Dataset | Test rows |
+|---|---:|
+| admission | 100 |
+| german | 200 |
+| student | 226 |
+| sba | 1,159 |
+| default | 3,000 |
+| adult | 9,045 |
+| adult_dicoflex, bank, gmc, lending-club | 10,000 |
+
+### exp2 full-test-set cost (extrapolated from the 256-pt calibration table
+above — `robust_impute` chunks internally at 256 rows, so this is chunk-count
+x per-chunk-cost, not a blind linear guess)
+
+At `--n-repeats 5`: admission ~4min, student ~27min, german ~1.6h, sba
+~5.4h, gmc ~13.3h, adult ~12h, adult_dicoflex ~16.7h, lending-club ~20h,
+default ~45h (~1.9 days), **bank ~63h (~2.6 days) — the likely worst case**.
+Serial total (all 10 on one GPU) ≈ 7.4 days; as this array, wall-clock is
+bounded by `bank` alone. `--time=72:00:00` in the sbatch may not be enough
+for `bank` on some clusters — check your actual job/QOS time limit
+(`sacctmgr show qos` or equivalent) before submitting the full array.
+
+### exp4 full-test-set cost — **6 of 10 datasets are very likely infeasible,
+not just slow**
+
+Extrapolating exp4's ~n_actionable²/2 unbatched-calls-per-point worst case
+(calibrated at ~0.8s/call from the admission smoke test) to full test-set
+size, at `--n-repeats 5`:
+
+| Dataset | Worst case | Feasible at `--time=72:00:00`? |
+|---|---:|:---|
+| admission | ~2.3h | yes |
+| student | ~13.8h | yes |
+| german | ~30.2h | yes |
+| sba | ~117.2h (4.9 days) | no — needs `--time` raised |
+| gmc | ~611.1h (25.5 days) | **no** |
+| adult | ~361.8h (15.1 days) | **no** |
+| lending-club | ~866.7h (36.1 days) | **no** |
+| adult_dicoflex | ~866.7h (36.1 days) | **no** |
+| default | ~920.0h (38.3 days) | **no** |
+| bank | ~1511.1h (63.0 days) | **no** |
+
+Real cost will be lower wherever points flip before exhausting budget (the
+`german` calibration point flipped in 2 of 16 steps, well under worst case)
+— but the datasets with near-zero exp2 validity are exactly the ones
+plausible to hit worst case often, so treat this table as realistic, not
+merely pessimistic. `run_greedy_benchmark_array_fulltest.sbatch`'s
+`--time=72:00:00` only actually covers german/admission/student/sba (array
+indices 0, 2, 3, 9) — the other six tasks will be **killed by the time
+limit before producing a result**, not just run slowly. Before submitting
+the full `--array=0-9`, either:
+
+- Submit only the feasible subset: `sbatch --array=0,2,3,9 run_greedy_benchmark_array_fulltest.sbatch`
+- Cap `--max-test` for the other six specifically (edit the sbatch, or run
+  them separately with e.g. `--max-test 500`)
+- Accept partial/killed results for those six as a best-effort exploration

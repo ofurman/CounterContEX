@@ -72,7 +72,8 @@ WANDB_PROJECT_DEFAULT = "zeroshot-cf-benchmark"
 def wandb_run_name(
     dataset_name: str, disc_type: str, suite: str, max_test: int, n_repeats: int, seed: int
 ) -> str:
-    return f"{dataset_name}-{disc_type}-{suite}-mt{max_test}-nr{n_repeats}-seed{seed}"
+    mt_label = "full" if max_test is None or max_test < 0 else str(max_test)
+    return f"{dataset_name}-{disc_type}-{suite}-mt{mt_label}-nr{n_repeats}-seed{seed}"
 
 # dataset -> (disc_type, metric_suite)
 BENCHMARK_CONFIG: Dict[str, Tuple[str, str]] = {
@@ -138,6 +139,7 @@ def run_one(
         X_orig_list, X_cf_list, y_orig_list = [], [], []
         disc = bundle = None
         n_failed_total = 0
+        n_queries = None
         t0 = time.time()
         for r in range(n_repeats):
             seed = base_seed + r * 1000  # keep per-target-class (+0/+1) offsets from colliding
@@ -149,6 +151,8 @@ def run_one(
                 disc_type=disc_type,
                 n_permutations=n_permutations,
             )
+            if n_queries is None:
+                n_queries = len(X_test)  # actual point count — max_test may be -1/None ("full")
             disc = info["disc_model"]
             bundle = info["bundle"]
             X_orig_list.append(X_test)
@@ -180,7 +184,7 @@ def run_one(
         metrics["dataset"] = dataset_name
         metrics["disc_type"] = disc_type
         metrics["metric_suite"] = suite
-        metrics["n_queries"] = max_test
+        metrics["n_queries"] = n_queries
         metrics["n_repeats"] = n_repeats
         metrics["n_failed"] = n_failed_total
         metrics["search_time_s"] = elapsed
@@ -204,7 +208,15 @@ def main() -> None:
         description="Full TabPFN zero-shot benchmark across ported CETGFN datasets"
     )
     parser.add_argument("--dataset", choices=["all", *BENCHMARK_CONFIG.keys()], default="all")
-    parser.add_argument("--max-test", type=int, default=256)
+    parser.add_argument(
+        "--max-test",
+        type=int,
+        default=256,
+        help="Points per dataset (default: 256). -1 for the FULL test split "
+             "(up to 10,000 points for some datasets — see slurm/README.md's "
+             "'full test set' section for per-dataset sizes and cost before "
+             "using this).",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--n-permutations",

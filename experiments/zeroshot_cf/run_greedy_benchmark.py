@@ -102,9 +102,10 @@ def wandb_run_name(
     dataset_name: str, disc_type: str, suite: str, selector: str, tau: float,
     max_test: int, n_repeats: int, seed: int,
 ) -> str:
+    mt_label = "full" if max_test is None or max_test < 0 else str(max_test)
     return (
         f"greedy-{dataset_name}-{disc_type}-{suite}-{selector}-tau{tau}"
-        f"-mt{max_test}-nr{n_repeats}-seed{seed}"
+        f"-mt{mt_label}-nr{n_repeats}-seed{seed}"
     )
 
 
@@ -171,6 +172,7 @@ def run_one(
         all_changed, all_flipped, all_steps = [], [], []
         disc = bundle = None
         n_failed_total = 0
+        n_queries = None
         t0 = time.time()
         for r in range(n_repeats):
             seed = base_seed + r * 1000
@@ -187,6 +189,8 @@ def run_one(
                 base_seed=seed,
                 disc_type=disc_type,
             )
+            if n_queries is None:
+                n_queries = len(X_test)  # actual point count — max_test may be -1/None ("full")
             disc = info["disc_model"]
             bundle = info["bundle"]
             X_orig_list.append(X_test)
@@ -237,7 +241,7 @@ def run_one(
         metrics["metric_suite"] = suite
         metrics["selector"] = selector
         metrics["tau"] = tau
-        metrics["n_queries"] = max_test
+        metrics["n_queries"] = n_queries
         metrics["n_repeats"] = n_repeats
         metrics["n_failed"] = n_failed_total
         metrics["search_time_s"] = elapsed
@@ -266,7 +270,10 @@ def main() -> None:
         type=int,
         default=16,
         help="Points per dataset (default: 16 — NOT 256; see module docstring "
-             "for why exp4 is far more expensive per point than exp2).",
+             "for why exp4 is far more expensive per point than exp2). -1 for "
+             "the FULL test split — up to 10,000 points for some datasets; "
+             "see slurm/README.md's 'full test set' section before using this, "
+             "it is very likely infeasible for the largest datasets with exp4.",
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
