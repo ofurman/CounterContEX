@@ -168,3 +168,41 @@ prints its own `wandb sync <path>` command in the job's `.out` log either way).
 overridable via `sbatch --export` — edit that line directly to change it. If
 you don't want W&B at all, drop `--wandb-project "$WANDB_PROJECT"` from the
 sbatch's `run_full_benchmark.py` call and add `--no-wandb` instead.
+
+## The greedy (exp4) variant
+
+`run_greedy_benchmark_array.sbatch` / `run_greedy_benchmark.py` is the same
+10-dataset array, same `BENCHMARK_CONFIG`, same conda env/account/partition —
+but generates CFs with `exp4_greedy_cf.py`'s classifier-in-the-loop greedy
+search (`greedy.py`) instead of `exp2`'s one-shot joint imputation. This is
+the method that actually puts the validity-oracle classifier in the
+generation loop (picking, and stopping on, a flip) rather than only using it
+before/after generation — see the module docstring in
+`run_greedy_benchmark.py` for the full architectural comparison.
+
+**It's also far more expensive per point.** exp4's default selector calls
+TabPFN once per remaining candidate feature at *every* greedy step — worst
+case (budget exhausted, no early flip) is roughly `n_actionable²/2`
+unbatched TabPFN calls per point, vs. exp2's one batched call for the whole
+test set. One-point local calibration (RTX 4070 Ti): `admission` (6
+actionable) exhausted its full budget without flipping in ~25s;
+`german` (16 actionable) flipped after only 2 of 16 steps in ~26s — cost and
+success are inversely correlated, so the datasets exp2 already struggled
+with (gmc, lending-club, bank, default) are plausibly both the slowest
+*and* the least likely to flip even here.
+
+Because of that, `run_greedy_benchmark_array.sbatch` defaults to
+`--max-test 16` (not 256) and `--n-repeats 1` (greedy is near-deterministic
+at its default near-MAP temperature, so repeats don't buy much diversity
+signal), and its `--time=03:00:00` is an **extrapolation from two
+single-point samples**, not a calibrated number — recalibrate on `default`
+specifically (the likely worst case) before trusting it, and before ever
+raising `--max-test` past 16.
+
+Runs log to the same `CounterContEX` W&B project, named
+`greedy-<dataset>-<disc_type>-<metric_suite>-<selector>-tau<tau>-mt<max_test>-nr<n_repeats>-seed<seed>`
+(the `greedy-` prefix plus selector/tau keep these distinguishable from the
+`run_full_benchmark.py` runs already in that project) and write to
+`results/greedy_benchmark_{l2c,dicoflex}_metrics.csv`, with extra columns
+(`l0_count_mean`, `steps_mean`, `failure_rate`) not present in the exp2
+benchmark's output.

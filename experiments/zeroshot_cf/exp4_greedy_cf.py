@@ -61,8 +61,27 @@ def generate_counterfactuals(
     n_permutations: int = N_PERMUTATIONS,
     max_context: int = MAX_CONTEXT,
     max_test: Optional[int] = None,
+    base_seed: int = 42,
+    disc_type: str = "lr",
+    allow_repeats: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict]:
-    """Generate greedy CFs for one dataset. Returns (X_test, y_test, X_cf, info)."""
+    """Generate greedy CFs for one dataset. Returns (X_test, y_test, X_cf, info).
+
+    Args:
+        base_seed: Base random_state for the per-target-class sampler (default:
+            42, matching the previously-hardcoded value). At the default
+            near-MAP temperature (1e-9) the committed values are already close
+            to deterministic, so varying this mainly changes context subsampling,
+            not the generated values.
+        disc_type: Validity-oracle classifier — 'lr' (default) or 'mlp'. Forwarded
+            to discriminator.train_discriminator; cached separately per disc_type.
+        allow_repeats: If True, a feature can be re-picked and re-committed at
+            a later step instead of being excluded once changed (see
+            greedy.greedy_counterfactual's docstring). Pair with a larger
+            ``budget`` (e.g. 2x actionable count) — otherwise the loop still
+            stops after the same number of steps and repeats have no room to
+            occur.
+    """
     from experiments.zeroshot_cf.checkpoints import get_models
     from experiments.zeroshot_cf.data import get_actionable_immutable, load_dataset
     from experiments.zeroshot_cf.discriminator import train_discriminator
@@ -100,7 +119,9 @@ def generate_counterfactuals(
           f"{len(actionable_idx)} actionable, {len(immutable_idx)} immutable")
     print(f"Test set (capped): {n} points")
 
-    disc_model = train_discriminator(X_train, y_train, X_test, y_test, dataset_name)
+    disc_model = train_discriminator(
+        X_train, y_train, X_test, y_test, dataset_name, disc_type=disc_type
+    )
 
     y_pred = disc_model.predict(X_test)
     y_target = 1 - y_pred
@@ -115,6 +136,7 @@ def generate_counterfactuals(
     changed_per_point: List[List[int]] = [[] for _ in range(n)]
     flipped_per_point: List[bool] = [False] * n
     steps_per_point: List[int] = [0] * n
+    l0_per_point: List[int] = [0] * n
 
     # Batch by target class so context is fit at most twice.
     for target_cls in np.unique(y_target):
@@ -132,7 +154,7 @@ def generate_counterfactuals(
             append_target=True,
             n_permutations=n_permutations,
             temperature=temperature,
-            random_state=42 + target_cls,
+            random_state=base_seed + target_cls,
         )
         ctx_target = target_cls if context_type == "target_only" else None
         sampler.set_context(
@@ -151,11 +173,13 @@ def generate_counterfactuals(
                 tau=tau,
                 budget=eff_budget,
                 temperature=temperature,
+                allow_repeats=allow_repeats,
             )
             X_cf[i] = x_cf
             changed_per_point[i] = changed
             flipped_per_point[i] = gi["flipped"]
             steps_per_point[i] = gi["steps"]
+            l0_per_point[i] = gi["l0"]
             if k == 0:
                 per_pt = time.perf_counter() - t0
                 print(f"    [timing] first point: {per_pt:.1f}s "
@@ -175,9 +199,11 @@ def generate_counterfactuals(
         "temperature": temperature,
         "n_permutations": n_permutations,
         "max_context": max_context,
+        "allow_repeats": allow_repeats,
         "changed_per_point": changed_per_point,
         "flipped_per_point": flipped_per_point,
         "steps_per_point": steps_per_point,
+        "l0_per_point": l0_per_point,
     }
 
 
@@ -226,8 +252,10 @@ def evaluate_and_report(
     metrics["frac_oob"] = frac_oob
 
     # --- Greedy-specific keys ---
+    # l0 = distinct features changed (correct even with allow_repeats=True, where a
+    # feature can be re-picked, so len(changed_per_point[i]) alone would overcount).
     flipped = np.asarray(info["flipped_per_point"], dtype=bool)
-    l0_all = np.array([len(c) for c in info["changed_per_point"]], dtype=float)
+    l0_all = np.asarray(info["l0_per_point"], dtype=float)
     steps_all = np.asarray(info["steps_per_point"], dtype=float)
 
     # L0 / steps reported over VALID (flipped) CFs (matches the success criterion);
@@ -337,6 +365,7 @@ def run_dataset(
     n_permutations: int = N_PERMUTATIONS,
     max_context: int = MAX_CONTEXT,
     max_test: Optional[int] = None,
+    allow_repeats: bool = False,
 ) -> Dict[str, float]:
     X_test, y_test, X_cf, info = generate_counterfactuals(
         dataset_name,
@@ -347,6 +376,7 @@ def run_dataset(
         n_permutations=n_permutations,
         max_context=max_context,
         max_test=max_test,
+        allow_repeats=allow_repeats,
     )
     metrics = evaluate_and_report(dataset_name, X_test, y_test, X_cf, info)
     write_examples(dataset_name, X_test, X_cf, info)
@@ -382,6 +412,14 @@ def main() -> None:
     parser.add_argument("--max-test", type=int, default=None,
                         help="Number of test points (default: moons=100, heloc=50; "
                              "-1 for full split).")
+    parser.add_argument(
+        "--allow-repeats",
+        action="store_true",
+        help="Let a feature be re-picked and re-committed at a later step "
+             "instead of being excluded once changed. Pair with a larger "
+             "--budget (e.g. 2x actionable count) or the loop still stops "
+             "after the same number of steps.",
+    )
     args = parser.parse_args()
 
     datasets = ["moons", "heloc"] if args.dataset == "all" else [args.dataset]
@@ -401,6 +439,7 @@ def main() -> None:
             n_permutations=args.n_permutations,
             max_context=args.max_context,
             max_test=args.max_test,
+            allow_repeats=args.allow_repeats,
         )
 
     print("\nDone.")

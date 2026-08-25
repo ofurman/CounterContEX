@@ -190,6 +190,22 @@ uv run python experiments/zeroshot_cf/run_full_benchmark.py --max-test 1
 HF_HUB_OFFLINE=1 TABPFN_DEVICE=cuda uv run python experiments/zeroshot_cf/run_full_benchmark.py --max-test 256
 ```
 
+### Greedy (exp4) variant
+
+`run_greedy_benchmark.py` runs the same `BENCHMARK_CONFIG` (dataset ->
+classifier + metric suite) but generates CFs with `exp4_greedy_cf.py`'s
+classifier-in-the-loop greedy search instead of `exp2`'s one-shot joint
+imputation — the validity oracle actually picks and stops the search here,
+unlike `run_full_benchmark.py`. It's also far more expensive per point
+(exp4's default selector calls TabPFN once per remaining candidate at every
+step — worst case ~n_actionable²/2 unbatched calls per point), so
+`--max-test` defaults to 16, not 256. See `slurm/README.md`'s "greedy (exp4)
+variant" section for calibration numbers and cost details before scaling up.
+
+```bash
+uv run python experiments/zeroshot_cf/run_greedy_benchmark.py --dataset admission --max-test 1
+```
+
 ### Comparing against the CounterFlowNet paper
 
 `compare_with_paper.py` merges our W&B benchmark runs with the published

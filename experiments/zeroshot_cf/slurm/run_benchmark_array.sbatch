@@ -25,25 +25,22 @@
 # Single dataset only:  sbatch --array=0 run_benchmark_array.sbatch   (0=german)
 #
 #SBATCH --job-name=ccex
+#SBATCH --qos=batch
 #SBATCH --time=10:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:1
-#SBATCH --account=plgtabanomdet-gpu-a100
-#SBATCH --partition=plgrid-gpu-a100
-#SBATCH --mem=120G
+#SBATCH --partition=rtx4090_batch
+#SBATCH --mem=12G
 #SBATCH --array=0-9
 #SBATCH --output=logs/%x_%A_%a.out
 #SBATCH --error=logs/%x_%A_%a.err
 
 set -euo pipefail
 
-module load Miniconda3
-eval "$(conda shell.bash hook)"
-
-cd /net/pr2/projects/plgrid/plggtabrep/brinpow/CounterContEX
-conda activate /net/tscratch/people/plgbrinpow/envs/ccex
+cd /shared/results/marszale/CounterContEX
+source activate /shared/results/marszale/anaconda3/envs/ccex
 
 # Array index -> dataset name (must match run_full_benchmark.BENCHMARK_CONFIG's
 # key order: german, adult, admission, student, adult_dicoflex, bank, default,

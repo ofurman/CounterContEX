@@ -112,6 +112,7 @@ def greedy_counterfactual(
     tau: float = 0.5,
     budget: Optional[int] = None,
     temperature: float = 1e-9,
+    allow_repeats: bool = False,
 ) -> Tuple[np.ndarray, List[int], Dict]:
     """Greedily build a counterfactual for one factual point.
 
@@ -136,18 +137,34 @@ def greedy_counterfactual(
         Probability threshold for the flip: stop when ``predict == y_target``
         AND ``predict_proba[y_target] >= tau``. Default 0.5 ≡ hard flip.
     budget : int or None
-        Max number of features to change. Defaults to ``len(actionable_idx)``.
+        Max number of steps (candidate commits). Defaults to ``len(actionable_idx)``.
+        When ``allow_repeats=True``, pass a budget > ``len(actionable_idx)`` to
+        actually allow more steps than there are features to revisit.
     temperature : float
         Sampling temperature for the committed value. ``1e-9`` = near-MAP
         (deterministic single-column commit).
+    allow_repeats : bool
+        If False (default), each actionable feature is a candidate at most
+        once per trajectory — once picked, it's excluded from later steps'
+        candidate pools (the original behaviour). If True, every actionable
+        feature remains a candidate at every step, so the same feature can be
+        picked and re-committed multiple times (e.g. to refine an earlier
+        commit once other features have since moved, changing its conditional
+        distribution). ``changed`` may then contain duplicate indices, so it
+        is no longer a correct L0 (distinct-features-changed) count — see the
+        ``changed``/``l0`` note below.
 
     Returns
     -------
     (x_cf, changed, info)
         ``x_cf`` — the counterfactual (ndarray, shape (d,)).
-        ``changed`` — ordered list of changed column indices (L0 = ``len(changed)``).
+        ``changed`` — ordered list of committed column indices, one per step
+        (``len(changed)`` == ``info["steps"]``; may contain duplicates when
+        ``allow_repeats=True``, in which case L0 — the number of *distinct*
+        features touched — is ``len(set(changed))``, not ``len(changed)``).
         ``info`` — dict with ``flipped`` (bool), ``steps`` (int = len(changed)),
-        and ``history`` (per-step list of
+        ``l0`` (int = number of distinct features changed — equals ``steps``
+        when ``allow_repeats=False``), and ``history`` (per-step list of
         ``(feature_idx, value, p_target_after, selection_score)``).
     """
     x = np.asarray(x, dtype=np.float64).copy()
@@ -169,7 +186,7 @@ def greedy_counterfactual(
 
     flipped, _ = _flip_state(x_cf)
     while not flipped and len(changed) < budget:
-        candidates = [j for j in actionable if j not in changed]
+        candidates = actionable if allow_repeats else [j for j in actionable if j not in changed]
         if not candidates:
             break
 
@@ -212,5 +229,10 @@ def greedy_counterfactual(
             "immutables must be preserved exactly by construction."
         )
 
-    info = {"flipped": bool(flipped), "steps": len(changed), "history": history}
+    info = {
+        "flipped": bool(flipped),
+        "steps": len(changed),
+        "l0": len(set(changed)),
+        "history": history,
+    }
     return x_cf, changed, info
