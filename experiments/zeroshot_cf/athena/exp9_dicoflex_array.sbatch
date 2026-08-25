@@ -19,6 +19,8 @@ CASE_FILE="${CASE_FILE:-$PROJECT_DIR/experiments/zeroshot_cf/athena/exp9_dicofle
 RESULTS_DIR="${RESULTS_DIR:-$PROJECT_DIR/experiments/zeroshot_cf/results/athena/exp9_dicoflex}"
 TABICL_CACHE_DIR="${TABICL_CACHE_DIR:-$PROJECT_DIR/experiments/zeroshot_cf/models/tabicl}"
 MAX_VALIDITY_STEPS="${MAX_VALIDITY_STEPS:-100}"
+N_COUNTERFACTUALS="${N_COUNTERFACTUALS:-3}"
+DIVERSITY_BEAM_WIDTH="${DIVERSITY_BEAM_WIDTH:-8}"
 
 cd "$PROJECT_DIR"
 
@@ -66,6 +68,7 @@ fi
 echo "[$(date --iso-8601=seconds)] Starting Exp9 TabICL benchmark"
 echo "project=$PROJECT_DIR"
 echo "dataset=$DATASET max_test=$MAX_TEST n_estimators=$N_ESTIMATORS max_validity_steps=$MAX_VALIDITY_STEPS"
+echo "n_counterfactuals=$N_COUNTERFACTUALS diversity_beam_width=$DIVERSITY_BEAM_WIDTH"
 echo "split=64/16/20 seed=42 test_selection=stratified"
 echo "tag=$TAG results_dir=$RESULTS_DIR"
 echo "python=${PYTHON_CMD[*]}"
@@ -77,6 +80,8 @@ nvidia-smi
     --max-test "$MAX_TEST" \
     --n-estimators "$N_ESTIMATORS" \
     --max-validity-steps "$MAX_VALIDITY_STEPS" \
+    --n-counterfactuals "$N_COUNTERFACTUALS" \
+    --diversity-beam-width "$DIVERSITY_BEAM_WIDTH" \
     --tabicl-cache-dir "$TABICL_CACHE_DIR" \
     --results-dir "$RESULTS_DIR"
 

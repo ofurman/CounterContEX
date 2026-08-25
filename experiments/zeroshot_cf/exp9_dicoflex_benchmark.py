@@ -3,15 +3,16 @@
 
 """Single-split TabICL benchmark on the suitable DiCoFlex datasets.
 
-Each invocation evaluates exactly one dataset so the five runs can be
+Each invocation evaluates exactly one dataset so the four runs can be
 scheduled independently on Athena. Adult is intentionally excluded: its very
 wide categorical representation is not a good fit for the current iterative
 conditional-imputation search. HELOC is included as the established reference.
 
 The benchmark uses one fixed 64/16/20 train/validation/test split and selects
-up to 1,000 held-out factuals with a fixed stratified sample. It returns one
-counterfactual per factual and reports method-independent DiCoFlex metrics,
-grouped mixed-data costs, plausibility, and runtime diagnostics.
+up to 1,000 held-out factuals with a fixed stratified sample. It returns a
+configurable set of valid counterfactuals per factual and reports
+method-independent DiCoFlex metrics, grouped mixed-data costs, diversity, and
+runtime diagnostics.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from experiments.zeroshot_cf.exp8_tabicl_cf import (
     ATHENA_CONTEXT_SIZE,
     ATHENA_CONTEXT_STRATEGY,
     DEFAULT_TEMPERATURE,
+    evaluate_diverse_sets,
     generate_tabicl_counterfactuals,
 )
 from experiments.zeroshot_cf.metrics_harness import (
@@ -49,6 +51,12 @@ DEFAULT_JOINT_SHORTLIST_SIZE = 16
 DEFAULT_MAX_EXTRA_ACTIONS = 1
 DEFAULT_MIN_JOINT_LOG_GAIN = 0.0
 DEFAULT_TABICL_JOINT_PERMUTATIONS = 1
+DEFAULT_N_COUNTERFACTUALS = 3
+DEFAULT_DIVERSITY_BEAM_WIDTH = 8
+DEFAULT_DIVERSITY_ARCHIVE_SIZE = 64
+DEFAULT_DIVERSITY_MAX_EXTRA_ACTIONS = 2
+DEFAULT_DIVERSITY_MAX_GOWER_RATIO = 1.5
+DEFAULT_DIVERSITY_MAX_GOWER_INCREASE = 0.02
 DEFAULT_CANDIDATE_QUANTILES = tuple(i / 10 for i in range(1, 10))
 DEFAULT_CONFIDENCE_QUANTILES = (0.10, 0.25, 0.50, 0.75, 0.90)
 RESULTS_DIR = Path(__file__).parent / "results" / "athena" / "exp9_dicoflex"
@@ -92,6 +100,12 @@ def run_dataset(  # noqa: PLR0913
     joint_shortlist_size: int = DEFAULT_JOINT_SHORTLIST_SIZE,
     max_extra_actions: int = DEFAULT_MAX_EXTRA_ACTIONS,
     min_joint_log_gain: float = DEFAULT_MIN_JOINT_LOG_GAIN,
+    n_counterfactuals: int = DEFAULT_N_COUNTERFACTUALS,
+    diversity_beam_width: int = DEFAULT_DIVERSITY_BEAM_WIDTH,
+    diversity_archive_size: int = DEFAULT_DIVERSITY_ARCHIVE_SIZE,
+    diversity_max_extra_actions: int = DEFAULT_DIVERSITY_MAX_EXTRA_ACTIONS,
+    diversity_max_gower_ratio: float = DEFAULT_DIVERSITY_MAX_GOWER_RATIO,
+    diversity_max_gower_increase: float = DEFAULT_DIVERSITY_MAX_GOWER_INCREASE,
     validation_fraction: float = DEFAULT_VALIDATION_FRACTION,
     drop_heloc_all_minus9: bool = True,
     tabicl_cache_dir: Path | None = None,
@@ -117,6 +131,12 @@ def run_dataset(  # noqa: PLR0913
         joint_shortlist_size=joint_shortlist_size,
         max_extra_actions=max_extra_actions,
         min_joint_log_gain=min_joint_log_gain,
+        n_counterfactuals=n_counterfactuals,
+        diversity_beam_width=diversity_beam_width,
+        diversity_archive_size=diversity_archive_size,
+        diversity_max_extra_actions=diversity_max_extra_actions,
+        diversity_max_gower_ratio=diversity_max_gower_ratio,
+        diversity_max_gower_increase=diversity_max_gower_increase,
         validation_fraction=validation_fraction,
         test_selection="stratified",
         drop_heloc_all_minus9=(
@@ -138,6 +158,7 @@ def run_dataset(  # noqa: PLR0913
         categorical_groups=categorical_groups,
         sparsity_eps=0.05,
     )
+    diverse_metrics = evaluate_diverse_sets(X_test, info)
     print_metrics(common_metrics, prefix=f"{dataset_name}/DiCoFlex-common")
 
     posthoc_lof = LocalOutlierFactor(n_neighbors=20, novelty=True).fit(
@@ -261,7 +282,7 @@ def run_dataset(  # noqa: PLR0913
         "n_validation": 0 if bundle.X_val is None else len(bundle.X_val),
         "n_test_pool": len(bundle.X_test),
         "n_test": len(X_test),
-        "cf_per_factual": 1,
+        "cf_per_factual": n_counterfactuals,
         "target_classifier_validation_accuracy": validation_accuracy,
         "target_classifier_test_accuracy": float((info["y_pred"] == y_test).mean()),
         "context_strategy": ATHENA_CONTEXT_STRATEGY,
@@ -283,6 +304,11 @@ def run_dataset(  # noqa: PLR0913
         "joint_shortlist_size": joint_shortlist_size,
         "max_extra_actions": max_extra_actions,
         "min_joint_log_gain": min_joint_log_gain,
+        "diversity_beam_width": diversity_beam_width,
+        "diversity_archive_size": diversity_archive_size,
+        "diversity_max_extra_actions": diversity_max_extra_actions,
+        "diversity_max_gower_ratio": diversity_max_gower_ratio,
+        "diversity_max_gower_increase": diversity_max_gower_increase,
         "search_schedule": (
             "probability_ascent_until_valid_then_one_shot_joint_reranking"
             if cf_mode == "data_plausible"
@@ -301,6 +327,7 @@ def run_dataset(  # noqa: PLR0913
         ),
         "point_runtime_s_mean": float(np.asarray(info["point_runtime_s"]).mean()),
         **common_metrics,
+        **diverse_metrics,
         "sparsity_exact": float((X_test != X_cf).mean()),
         "true_actionability": common_metrics["actionability"],
         "proximity_all_features_euclidean": project_l2,
@@ -398,6 +425,8 @@ def run_dataset(  # noqa: PLR0913
         X_sparse=info["X_sparse"],
         y_test=y_test,
         X_cf=X_cf,
+        X_cf_sets=info["X_cf_sets"],
+        diverse_available_count=info["diverse_available_count_per_point"],
         y_pred=info["y_pred"],
         y_target=info["y_target"],
         y_cf_pred=y_cf_pred,
@@ -508,6 +537,36 @@ def main() -> None:
         help="Minimum raw joint-log-density gain over the sparse CFE.",
     )
     parser.add_argument(
+        "--n-counterfactuals",
+        type=int,
+        default=DEFAULT_N_COUNTERFACTUALS,
+    )
+    parser.add_argument(
+        "--diversity-beam-width",
+        type=int,
+        default=DEFAULT_DIVERSITY_BEAM_WIDTH,
+    )
+    parser.add_argument(
+        "--diversity-archive-size",
+        type=int,
+        default=DEFAULT_DIVERSITY_ARCHIVE_SIZE,
+    )
+    parser.add_argument(
+        "--diversity-max-extra-actions",
+        type=int,
+        default=DEFAULT_DIVERSITY_MAX_EXTRA_ACTIONS,
+    )
+    parser.add_argument(
+        "--diversity-max-gower-ratio",
+        type=float,
+        default=DEFAULT_DIVERSITY_MAX_GOWER_RATIO,
+    )
+    parser.add_argument(
+        "--diversity-max-gower-increase",
+        type=float,
+        default=DEFAULT_DIVERSITY_MAX_GOWER_INCREASE,
+    )
+    parser.add_argument(
         "--drop-heloc-all-minus9",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -538,6 +597,12 @@ def main() -> None:
         joint_shortlist_size=args.joint_shortlist_size,
         max_extra_actions=args.max_extra_actions,
         min_joint_log_gain=args.min_joint_log_gain,
+        n_counterfactuals=args.n_counterfactuals,
+        diversity_beam_width=args.diversity_beam_width,
+        diversity_archive_size=args.diversity_archive_size,
+        diversity_max_extra_actions=args.diversity_max_extra_actions,
+        diversity_max_gower_ratio=args.diversity_max_gower_ratio,
+        diversity_max_gower_increase=args.diversity_max_gower_increase,
         validation_fraction=args.validation_fraction,
         drop_heloc_all_minus9=args.drop_heloc_all_minus9,
         tabicl_cache_dir=args.tabicl_cache_dir,

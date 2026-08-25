@@ -11,21 +11,22 @@ from experiments.zeroshot_cf.exp9_dicoflex_benchmark import (
     DATASETS,
     DEFAULT_CANDIDATE_QUANTILES,
     DEFAULT_MAX_TEST,
+    DEFAULT_N_COUNTERFACTUALS,
     aggregate_results,
 )
 
 
 def test_exp9_excludes_adult_and_uses_larger_common_test_set() -> None:
-    """The fixed suite contains five suitable datasets and 1,000 factuals."""
+    """The fixed suite contains four suitable datasets and 1,000 factuals."""
     assert "adult" not in DATASETS
     assert DATASETS == (
         "heloc",
         "bank_marketing",
         "give_me_some_credit",
         "lending_club",
-        "credit_default",
     )
     assert DEFAULT_MAX_TEST == 1000
+    assert DEFAULT_N_COUNTERFACTUALS == 3
     assert DEFAULT_CANDIDATE_QUANTILES == tuple(i / 10 for i in range(1, 10))
 
 
@@ -43,4 +44,4 @@ def test_exp9_aggregates_independent_dataset_outputs(tmp_path: Path) -> None:
         rows = list(csv.DictReader(handle))
 
     assert [row["dataset"] for row in rows] == list(DATASETS)
-    assert len(rows) == 5
+    assert len(rows) == 4

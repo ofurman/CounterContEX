@@ -30,13 +30,12 @@ if the checkpoint directory is stored elsewhere.
 
 ## Exp9: DiCoFlex datasets with TabICL
 
-Exp9 evaluates TabICL on HELOC and four mixed DiCoFlex datasets: Bank
-Marketing, Give Me Some Credit, Lending Club, and Credit Default. Adult is
-excluded. Each dataset uses a fixed stratified 64/16/20
+Exp9 evaluates TabICL on HELOC, Bank Marketing, Give Me Some Credit, and
+Lending Club. Each dataset uses a fixed stratified 64/16/20
 train/validation/test split with seed 42, up to 1,000 held-out factuals, and
-one counterfactual per factual.
+three requested counterfactuals per factual by default.
 
-The five rows in `exp9_dicoflex_cases.tsv` run as independent Slurm array
+The four rows in `exp9_dicoflex_cases.tsv` run as independent Slurm array
 tasks:
 
 ```bash
