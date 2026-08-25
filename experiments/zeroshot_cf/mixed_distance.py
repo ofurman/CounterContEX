@@ -8,6 +8,46 @@ import numpy as np
 from experiments.zeroshot_cf.data import OneHotActionGroup
 
 
+def compact_gower_distance(
+    rows: np.ndarray,
+    reference: np.ndarray,
+    categorical_columns: Sequence[int] = (),
+) -> np.ndarray:
+    """Return Gower distance for a compact, MinMax-scaled mixed matrix.
+
+    Each categorical column contains one category identifier and contributes
+    zero or one. All remaining columns are numerical and contribute their
+    absolute difference, clipped to the unit interval. Every original feature
+    therefore receives equal weight regardless of its representation.
+    """
+    matrix = np.atleast_2d(np.asarray(rows, dtype=np.float64))
+    factual = np.asarray(reference, dtype=np.float64)
+    if factual.ndim == 1:
+        factual = np.broadcast_to(factual, matrix.shape)
+    if factual.shape != matrix.shape:
+        raise ValueError("reference must be one row or have the same shape as rows")
+
+    categorical = tuple(int(column) for column in categorical_columns)
+    if len(set(categorical)) != len(categorical):
+        raise ValueError("categorical_columns must be unique")
+    if any(column < 0 or column >= matrix.shape[1] for column in categorical):
+        raise IndexError("categorical column index is out of bounds")
+
+    numerical = tuple(
+        column for column in range(matrix.shape[1]) if column not in categorical
+    )
+    distances = np.zeros(len(matrix), dtype=np.float64)
+    if numerical:
+        distances += np.clip(
+            np.abs(matrix[:, numerical] - factual[:, numerical]),
+            0.0,
+            1.0,
+        ).sum(axis=1)
+    if categorical:
+        distances += (matrix[:, categorical] != factual[:, categorical]).sum(axis=1)
+    return distances / matrix.shape[1]
+
+
 def grouped_gower_distance(
     rows: np.ndarray,
     reference: np.ndarray,

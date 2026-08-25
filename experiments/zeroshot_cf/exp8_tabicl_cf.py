@@ -5,7 +5,8 @@
 This runner intentionally uses one fixed configuration:
 
 * selector: ``prob_ascent``
-* context: 512 nearest neighbours from both classes (``knn_both@512``)
+* context: 512 Gower-nearest neighbours from both classes
+  (``gower_knn_both@512``)
 * labels: predictions of the discriminator being explained
 * iterative greedy search; on mixed data, numerical proposals and atomic
   categorical swaps compete globally at every step
@@ -16,7 +17,7 @@ legal whole-category swap. While no proposal is valid, the search commits the
 largest target-probability improvement. Once valid proposals exist, it commits
 the lowest grouped-Gower row, with each categorical group counted once rather
 than by dummy-column width. The overall search remains iterative. Context
-remains per-factual because the kNN context is query-specific.
+remains per-factual because the Gower-kNN context is query-specific.
 """
 
 from __future__ import annotations
@@ -28,23 +29,40 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from experiments.zeroshot_cf.data import get_one_hot_groups
+from experiments.zeroshot_cf.data import (
+    get_grouped_categorical_action_space,
+    get_one_hot_groups,
+    load_dataset,
+)
+from experiments.zeroshot_cf.discriminator import train_discriminator
 from experiments.zeroshot_cf.exp4_greedy_cf import (
     _DATASET_PARAMS,
     TAU,
     evaluate_and_report,
 )
+from experiments.zeroshot_cf.greedy import infer_feature_domains
+from experiments.zeroshot_cf.grouped_categorical import (
+    CompactMixedSampler,
+    ConditionedCategoryDistribution,
+    GroupedCategoricalCodec,
+    greedy_mixed_counterfactual,
+)
 from experiments.zeroshot_cf.mixed_distance import (
     action_unit_change_count,
     grouped_gower_distance,
 )
+from experiments.zeroshot_cf.tabicl_checkpoints import TABICL_DEVICE
 from experiments.zeroshot_cf.tabicl_joint_plausibility import (
     TabICLJointScorer,
 )
+from experiments.zeroshot_cf.tabicl_sampler import (
+    TabICLConditionalDensitySampler,
+)
+from sklearn.model_selection import train_test_split
 
 RESULTS_DIR = Path(__file__).parent / "results"
 ATHENA_CONTEXT_SIZE = 512
-ATHENA_CONTEXT_STRATEGY = "knn_both"
+ATHENA_CONTEXT_STRATEGY = "gower_knn_both"
 CATEGORICAL_PROPOSAL_COUNT = 1
 DEFAULT_TEMPERATURE = 1e-9  # deterministic point estimate / categorical mode
 DEFAULT_N_ESTIMATORS = 4
@@ -98,8 +116,6 @@ def _select_test_rows(
         raise ValueError("max_test must be positive or -1 for the full test set")
     if selection == "first":
         return X_test[:limit], y_test[:limit]
-
-    from sklearn.model_selection import train_test_split
 
     if limit < len(np.unique(y_test)):
         rng = np.random.default_rng(42)
@@ -158,23 +174,6 @@ def generate_tabicl_counterfactuals(
         raise ValueError("min_joint_log_gain must be non-negative")
     if test_selection not in {"first", "stratified"}:
         raise ValueError("test_selection must be 'first' or 'stratified'")
-
-    from experiments.zeroshot_cf.data import (
-        get_grouped_categorical_action_space,
-        load_dataset,
-    )
-    from experiments.zeroshot_cf.discriminator import train_discriminator
-    from experiments.zeroshot_cf.greedy import infer_feature_domains
-    from experiments.zeroshot_cf.grouped_categorical import (
-        CompactMixedSampler,
-        ConditionedCategoryDistribution,
-        GroupedCategoricalCodec,
-        greedy_mixed_counterfactual,
-    )
-    from experiments.zeroshot_cf.tabicl_checkpoints import TABICL_DEVICE
-    from experiments.zeroshot_cf.tabicl_sampler import (
-        TabICLConditionalDensitySampler,
-    )
 
     limit = _resolve_max_test(dataset_name, max_test)
     bundle = load_dataset(
@@ -329,7 +328,7 @@ def generate_tabicl_counterfactuals(
     started = time.perf_counter()
     for i, (x, target) in enumerate(zip(X_test, y_target, strict=True)):
         point_started = time.perf_counter()
-        # Both-class pool with a per-factual 512-row kNN context.
+        # Both-class pool with a per-factual 512-row Gower-kNN context.
         sampler_query = (
             x if categorical_codec is None else categorical_codec.encode_row(x)
         )

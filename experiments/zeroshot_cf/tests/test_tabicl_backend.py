@@ -11,11 +11,11 @@ from __future__ import annotations
 import numpy as np
 import torch
 from experiments.zeroshot_cf.data import get_actionable_immutable
-from experiments.zeroshot_cf.greedy import greedy_counterfactual
 from experiments.zeroshot_cf.exp8_tabicl_cf import (
     _select_test_rows,
     empirical_confidence_grid,
 )
+from experiments.zeroshot_cf.greedy import greedy_counterfactual
 from experiments.zeroshot_cf.tabicl_sampler import (
     TabICLConditionalDensitySampler,
     _knn_indices,
@@ -165,6 +165,30 @@ def test_knn_both_context_is_selected_and_y_is_appended():
     np.testing.assert_array_equal(sampler.model.X_[:, -1], y[expected_idx])
     assert sampler.model.kwargs["categorical_features"] == [X.shape[1]]
     assert sampler.model.kwargs["estimator_params"]["kv_cache"] is True
+
+
+def test_knn_context_uses_gower_for_compact_categories():
+    X = np.array(
+        [
+            [0.0, 0.0, 100.0],
+            [0.6, 0.6, 0.0],
+            [1.0, 1.0, 0.0],
+        ]
+    )
+    y = np.array([0, 1, 1])
+    query = np.zeros(3)
+
+    sampler = _sampler(categorical_features=[2]).set_context(
+        X,
+        y_context=y,
+        max_context=1,
+        selection="knn",
+        query=query,
+    )
+
+    # A category mismatch contributes one unit, not the magnitude of its ID.
+    np.testing.assert_array_equal(sampler.selected_context_, X[[0]])
+    np.testing.assert_array_equal(sampler.selected_labels_, y[[0]])
 
 
 def test_context_update_reuses_loaded_model_weights():

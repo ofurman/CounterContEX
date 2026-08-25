@@ -31,7 +31,7 @@ HF_HUB_OFFLINE=1 uv run python experiments/zeroshot_cf/exp2_counterfactuals.py
 
 ### 4. Run the TabICL backend with the fixed context
 
-TabICL uses a fixed `prob_ascent + knn_both@512` configuration. It does not
+TabICL uses a fixed `prob_ascent + gower_knn_both@512` configuration. It does not
 repeat the context grid. Candidate feature
 interventions are batched into one TabICL imputation call per greedy step.
 Numerical imputations default to the densest interior quantile interval

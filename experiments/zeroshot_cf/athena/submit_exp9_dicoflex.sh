@@ -19,5 +19,5 @@ echo "sbatch_file=$SBATCH_FILE"
 
 sbatch --array="0-$((N_CASES - 1))" "$SBATCH_FILE"
 
-echo "After all five tasks finish, aggregate with:"
+echo "After all tasks finish, aggregate with:"
 echo ".venv/bin/python -m experiments.zeroshot_cf.exp9_dicoflex_benchmark --dataset aggregate"

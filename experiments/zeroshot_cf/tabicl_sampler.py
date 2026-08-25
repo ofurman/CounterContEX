@@ -23,6 +23,7 @@ from typing_extensions import override
 
 import numpy as np
 import torch
+from experiments.zeroshot_cf.mixed_distance import compact_gower_distance
 from experiments.zeroshot_cf.tabicl_checkpoints import require_checkpoints
 from tabicl import TabICLClassifier, TabICLRegressor
 from tabicl._model.quantile_dist import QuantileDistribution
@@ -73,12 +74,15 @@ def quantile_mode(dist: Any) -> np.ndarray:
     return mode.cpu().numpy()
 
 
-def _knn_indices(X: np.ndarray, query: np.ndarray, k: int) -> np.ndarray:
-    """Return sorted indices of the k Euclidean-nearest context rows."""
-    q = np.asarray(query, dtype=X.dtype).reshape(-1)
-    diff = X - q[None, :]
-    dist2 = np.einsum("ij,ij->i", diff, diff)
-    nearest = np.argpartition(dist2, k - 1)[:k]
+def _knn_indices(
+    X: np.ndarray,
+    query: np.ndarray,
+    k: int,
+    categorical_features: Sequence[int] = (),
+) -> np.ndarray:
+    """Return sorted indices of the k Gower-nearest context rows."""
+    distances = compact_gower_distance(X, query, categorical_features)
+    nearest = np.argpartition(distances, k - 1)[:k]
     return np.sort(nearest)
 
 
@@ -92,6 +96,7 @@ def _select_context(
     selection: str,
     query: np.ndarray | None,
     random_state: int,
+    categorical_features: Sequence[int] = (),
     return_indices: Literal[False] = False,
 ) -> tuple[np.ndarray, np.ndarray | None]: ...
 
@@ -106,6 +111,7 @@ def _select_context(
     selection: str,
     query: np.ndarray | None,
     random_state: int,
+    categorical_features: Sequence[int] = (),
     return_indices: Literal[True],
 ) -> tuple[np.ndarray, np.ndarray | None, np.ndarray]: ...
 
@@ -119,6 +125,7 @@ def _select_context(
     selection: str,
     query: np.ndarray | None,
     random_state: int,
+    categorical_features: Sequence[int] = (),
     return_indices: bool = False,
 ) -> tuple[np.ndarray, np.ndarray | None] | tuple[
     np.ndarray, np.ndarray | None, np.ndarray
@@ -152,7 +159,12 @@ def _select_context(
 
     if max_context is not None and len(X) > max_context:
         if selection == "knn":
-            idx = _knn_indices(X, np.asarray(query), max_context)
+            idx = _knn_indices(
+                X,
+                np.asarray(query),
+                max_context,
+                categorical_features,
+            )
         else:
             rng = np.random.default_rng(random_state)
             idx = rng.choice(len(X), size=max_context, replace=False)
@@ -425,6 +437,7 @@ class TabICLConditionalDensitySampler:
             selection=selection,
             query=query,
             random_state=self.random_state,
+            categorical_features=self.categorical_features,
             return_indices=True,
         )
         if y is None:

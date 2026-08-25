@@ -6,8 +6,24 @@ import numpy as np
 from experiments.zeroshot_cf.data import OneHotActionGroup
 from experiments.zeroshot_cf.mixed_distance import (
     action_unit_change_count,
+    compact_gower_distance,
     grouped_gower_distance,
 )
+
+
+def test_compact_gower_treats_category_identifiers_as_nominal() -> None:
+    rows = np.array(
+        [
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 100.0],
+            [0.6, 0.6, 0.0],
+        ]
+    )
+
+    np.testing.assert_allclose(
+        compact_gower_distance(rows, np.zeros(3), categorical_columns=[2]),
+        [1 / 3, 1 / 3, 0.4],
+    )
 
 
 def test_grouped_gower_counts_a_category_once_regardless_of_one_hot_width() -> None:

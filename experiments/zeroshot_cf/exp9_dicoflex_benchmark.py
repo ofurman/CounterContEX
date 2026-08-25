@@ -40,13 +40,7 @@ from experiments.zeroshot_cf.mixed_distance import (
 )
 from sklearn.neighbors import LocalOutlierFactor
 
-DATASETS = (
-    "heloc",
-    "bank_marketing",
-    "give_me_some_credit",
-    "lending_club",
-    "credit_default",
-)
+DATASETS = ("heloc", "bank_marketing", "give_me_some_credit", "lending_club")
 DEFAULT_MAX_TEST = 1000
 DEFAULT_VALIDATION_FRACTION = 0.2
 DEFAULT_N_ESTIMATORS = 1
@@ -433,7 +427,7 @@ def aggregate_results(results_dir: Path = RESULTS_DIR) -> Path:
 
 
 def main() -> None:
-    """Run one dataset or aggregate the five completed result rows."""
+    """Run one dataset or aggregate the completed result rows."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", choices=[*DATASETS, "aggregate"], required=True)
     parser.add_argument("--max-test", type=int, default=DEFAULT_MAX_TEST)
