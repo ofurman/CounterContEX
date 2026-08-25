@@ -122,6 +122,43 @@ def test_diverse_search_never_pads_with_invalid_or_duplicate_rows() -> None:
     assert result.target_probabilities[0] >= 0.5
 
 
+def test_diverse_search_prunes_an_overflowing_archive() -> None:
+    """Archive pruning compares states by identity, not NumPy row equality."""
+
+    class AnyActionDisc:
+        classes_ = np.array([0, 1])
+
+        def predict_proba(self, X):
+            p1 = np.clip(0.1 + 0.6 * np.asarray(X).sum(axis=1), 0.0, 0.99)
+            return np.column_stack([1.0 - p1, p1])
+
+    sampler = _OnesSampler()
+    disc = AnyActionDisc()
+    factual = np.zeros(4)
+    primary, _, primary_info = _primary(sampler, disc, factual, [0, 1, 2, 3])
+
+    result = generate_diverse_counterfactuals(
+        sampler,
+        disc,
+        factual,
+        y_target=1,
+        numerical_columns=[0, 1, 2, 3],
+        categorical_groups=[],
+        primary_counterfactual=primary,
+        primary_info=primary_info,
+        config=DiverseSearchConfig(
+            n_counterfactuals=2,
+            beam_width=4,
+            archive_size=2,
+        ),
+        candidate_quantiles=(0.5,),
+    )
+
+    assert result.available_count == 2
+    assert result.archive_count == 2
+    assert len({row.tobytes() for row in result.counterfactuals}) == 2
+
+
 def test_action_signature_counts_a_one_hot_group_once() -> None:
     group = OneHotActionGroup("job", (1, 2, 3))
     factual = np.array([0.0, 1.0, 0.0, 0.0])

@@ -566,7 +566,7 @@ def _select_diverse_set(
         if best is None:
             break
         selected.append(best)
-        remaining.remove(best)
+        remaining = [candidate for candidate in remaining if candidate is not best]
     return selected
 
 
