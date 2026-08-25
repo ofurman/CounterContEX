@@ -737,6 +737,18 @@ def generate_diverse_counterfactuals(  # noqa: C901, PLR0912, PLR0913
             groups,
             config,
         )
+        if len(archive) >= config.n_counterfactuals:
+            feasible = _select_diverse_set(
+                list(archive.values()),
+                primary,
+                primary_is_valid=primary_is_valid,
+                factual=factual,
+                numerical_columns=numerical,
+                categorical_groups=groups,
+                config=config,
+            )
+            if len(feasible) == config.n_counterfactuals:
+                break
         if len(archive) > config.archive_size:
             retained = _select_diverse_set(
                 list(archive.values()),

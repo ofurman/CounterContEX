@@ -129,10 +129,24 @@ def test_diverse_search_prunes_an_overflowing_archive() -> None:
         classes_ = np.array([0, 1])
 
         def predict_proba(self, X):
-            p1 = np.clip(0.1 + 0.6 * np.asarray(X).sum(axis=1), 0.0, 0.99)
+            p1 = np.clip(0.1 + np.asarray(X).sum(axis=1), 0.0, 0.99)
             return np.column_stack([1.0 - p1, p1])
 
-    sampler = _OnesSampler()
+    class UnequalSampler:
+        def sample_candidate_grid(
+            self,
+            _query,
+            columns,
+            *,
+            quantiles,
+            fixed_target,
+            confidences=None,
+        ):
+            del quantiles, fixed_target, confidences
+            values = (0.6, 0.8, 0.9, 1.0)
+            return np.asarray([[values[column]] for column in columns])
+
+    sampler = UnequalSampler()
     disc = AnyActionDisc()
     factual = np.zeros(4)
     primary, _, primary_info = _primary(sampler, disc, factual, [0, 1, 2, 3])
@@ -150,13 +164,15 @@ def test_diverse_search_prunes_an_overflowing_archive() -> None:
             n_counterfactuals=2,
             beam_width=4,
             archive_size=2,
+            max_gower_ratio=1.0,
+            max_gower_increase=0.0,
         ),
         candidate_quantiles=(0.5,),
     )
 
-    assert result.available_count == 2
+    assert result.available_count == 1
     assert result.archive_count == 2
-    assert len({row.tobytes() for row in result.counterfactuals}) == 2
+    np.testing.assert_array_equal(result.counterfactuals, [primary])
 
 
 def test_action_signature_counts_a_one_hot_group_once() -> None:
