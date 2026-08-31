@@ -6,7 +6,7 @@ import hashlib
 import platform
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
@@ -139,14 +139,32 @@ class GenericRunner:
             self._evaluators[key] = self.evaluator_factory(case, spec.evaluation)
         return self._evaluators[key]
 
+    @staticmethod
+    def _dicoflex_backend(spec: RunSpec) -> str | None:
+        if spec.method.name != "dicoflex":
+            return None
+        foundation = spec.method.params.get("foundation", {})
+        if not isinstance(foundation, Mapping):
+            raise ValueError("dicoflex foundation params must be a mapping")
+        backend = foundation.get("backend", "tabicl")
+        if backend not in {"tabicl", "empirical"}:
+            raise ValueError(f"unknown DiCoFlex proposal backend: {backend!r}")
+        return str(backend)
+
     def _versions(self, spec: RunSpec, case: BenchmarkCase) -> IdentityVersions:
         entry = self.registry.entry(spec.method.name)
         target_fingerprint = str(
             case.protocol.get("target_model_fingerprint", case.case_id)
         )
-        backend = "retained-tabicl-v1" if spec.method.name == "dicoflex" else "none-v1"
+        proposal_backend = self._dicoflex_backend(spec)
+        backend_versions = {
+            None: "none-v1",
+            "tabicl": "tabicl-proposal-v1",
+            "empirical": "empirical-reference-v1",
+        }
+        backend = backend_versions[proposal_backend]
         checkpoints: dict[str, str] = {}
-        if spec.method.name == "dicoflex":
+        if proposal_backend == "tabicl":
             if self._checkpoint_ids is None:
                 from experiments.zeroshot_cf import tabicl_checkpoints
 
@@ -171,7 +189,7 @@ class GenericRunner:
     def _method_params(self, spec: RunSpec) -> dict[str, Any]:
         """Add execution-only backend settings after scientific identity resolves."""
         params = deepcopy(dict(spec.method.params))
-        if spec.method.name != "dicoflex":
+        if self._dicoflex_backend(spec) != "tabicl":
             return params
         cache_dir = self.execution.cache_paths.get("tabicl")
         if cache_dir is not None:
@@ -182,7 +200,7 @@ class GenericRunner:
 
     @contextmanager
     def _runtime_environment(self, spec: RunSpec):
-        if spec.method.name != "dicoflex" or self.execution.device is None:
+        if self._dicoflex_backend(spec) != "tabicl" or self.execution.device is None:
             yield
             return
         # DiCoFlex loads this value lazily while preparing its TabICL backend.

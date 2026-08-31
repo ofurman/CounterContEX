@@ -117,6 +117,69 @@ Available retained CLI entry points:
 - `python -m experiments.zeroshot_cf.exp13_dice_baseline`
 - `python -m experiments.zeroshot_cf.exp14_face_baseline`
 
+The generic runner is the typed entry point for new experiment suites. Matrix
+files resolve every dataset, method variant, method parameter, evaluation
+setting, and seed before execution. The resulting run ID contains only those
+scientific inputs and the measured dataset, case, implementation, model, and
+checkpoint identities. Output paths, cache paths, devices, hosts, and resume
+settings stay in manifest execution metadata and do not change the run ID.
+
+```bash
+uv run python -m experiments.zeroshot_cf.cli list-methods
+uv run python -m experiments.zeroshot_cf.cli matrix \
+  --config experiments/zeroshot_cf/configs/matrices/one_factual_compat.yaml \
+  --dry-run
+uv run python -m experiments.zeroshot_cf.cli matrix \
+  --config experiments/zeroshot_cf/configs/matrices/one_factual_compat.yaml \
+  --resume
+uv run python -m experiments.zeroshot_cf.cli aggregate \
+  --config experiments/zeroshot_cf/configs/matrices/one_factual_compat.yaml
+```
+
+Each run directory is complete only after its `COMPLETE` marker is published.
+Resume validates the complete manifest against the resolved identity. Matrix
+aggregation reads the expected manifest set and rejects missing, extra,
+partial, duplicate, or identity-mismatched cells.
+
+## DiCoFlex proposal backends
+
+DiCoFlex search depends on the protocols in
+`methods/dicoflex/backends/base.py`. A backend declares whether it supplies
+numerical proposals, confidence conditioning, categorical distributions, and
+joint scoring. Preparation creates dataset-level state, and `for_factual()`
+creates a seeded proposal session. Unsupported search and backend combinations
+fail during validation instead of being discovered inside the search loop.
+
+The TabICL adapter owns compact categorical encoding, neighbor context,
+confidence anchors, checkpoint/cache and device handling, proposal sampling,
+and joint-density scoring. The search layer consumes only the proposal-session
+contract. This boundary keeps dataset preparation and common evaluation free of
+foundation-model imports.
+
+The deterministic `empirical` adapter supplies target-class numerical
+quantiles and categorical frequencies without checkpoints. It provides a
+runnable backend ablation and intentionally declares no confidence or joint
+scoring capability, so incompatible search settings fail before generation.
+
+To add a TabPFN or TabFM adapter:
+
+1. Implement `ProposalBackend.prepare()` and the prepared backend's
+   `for_factual()` method in a new module under `methods/dicoflex/backends/`.
+2. Translate the model's numerical, categorical, confidence, and joint-score
+   outputs into `ProposalSession`; keep model loading, caches, checkpoints, and
+   native representations inside the adapter.
+3. Declare only capabilities the adapter implements and add conformance tests
+   for every declared operation and every rejected unsupported combination.
+4. Register a stable backend identifier and implementation version so a backend
+   or model-content change creates a new run identity.
+5. Add a matrix variant that changes only the foundation/backend fields. Do not
+   modify datasets, the evaluator, or common artifact schemas for an ablation.
+
+See `configs/matrices/dicoflex_ablation_example.yaml` for independent search,
+diversity, backend-parameter, dataset, and seed variants. The tracked
+`full_reference.yaml` fixes the four retained datasets, all six methods, seed
+42, 1,000 factuals, and the recorded three-counterfactual DiCoFlex setup.
+
 Example offline runs:
 
 ```bash

@@ -82,8 +82,11 @@ class DiCoFlexFoundationConfig:
     confidence_quantiles: tuple[float, ...] | None = None
     tabicl_joint_permutations: int = 1
     cache_dir: Path | None = None
+    backend: str = "tabicl"
 
     def __post_init__(self) -> None:
+        if not self.backend:
+            raise ValueError("foundation backend must be non-empty")
         if self.n_estimators < 1:
             raise ValueError("n_estimators must be positive")
         if self.temperature < 0:

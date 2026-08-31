@@ -47,6 +47,12 @@ def test_registry_rejects_unknown_or_invalid_method_parameters() -> None:
     )
     sparse = DEFAULT_METHOD_REGISTRY.create("dicoflex", variant="tabicl_sparse")
     assert sparse.config.search.cf_mode == "sparse"
+    empirical = DEFAULT_METHOD_REGISTRY.create(
+        "dicoflex",
+        {"foundation": {"backend": "empirical"}},
+        variant="tabicl_sparse",
+    )
+    assert empirical.config.foundation.backend == "empirical"
     with pytest.raises(ValueError, match="requires cf_mode='sparse'"):
         DEFAULT_METHOD_REGISTRY.create(
             "dicoflex",

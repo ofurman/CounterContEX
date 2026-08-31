@@ -123,7 +123,7 @@ DEFAULT_METHOD_REGISTRY = MethodRegistry(
             "experiments.zeroshot_cf.methods.dicoflex",
             "DiCoFlexMethod",
             "DiCoFlexConfig",
-            "dicoflex-v1",
+            "dicoflex-v2",
             _dicoflex_factory,
             ("default", "tabicl_sparse"),
             _dicoflex_variant,

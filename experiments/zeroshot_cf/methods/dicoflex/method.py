@@ -14,21 +14,27 @@ from experiments.zeroshot_cf.core.contracts import (
 from experiments.zeroshot_cf.generator import (
     TabICLGeneratorInputs,
     TabICLGeneratorResult,
-    generate_counterfactual_batch,
 )
 from experiments.zeroshot_cf.methods.base import MethodCapabilities
 from experiments.zeroshot_cf.methods.dicoflex.backend import (
     DiCoFlexBackendInputs,
-    PreparedDiCoFlexBackend,
     prepare_backend,
 )
+from experiments.zeroshot_cf.methods.dicoflex.backends.base import (
+    PreparedBackend,
+    ProposalBackend,
+    validate_backend_capabilities,
+)
+from experiments.zeroshot_cf.methods.dicoflex.backends.empirical import EmpiricalBackend
 from experiments.zeroshot_cf.methods.dicoflex.config import DiCoFlexConfig
+from experiments.zeroshot_cf.methods.dicoflex.search import generate_with_backend
 
 
 def adapt_generator_result(
     result: TabICLGeneratorResult,
     *,
     seed: int,
+    proposal_backend: str = "conditional_density",
 ) -> GenerationResult:
     """Adapt retained search output without turning failures into padding."""
     diagnostics = result.diagnostics
@@ -84,7 +90,7 @@ def adapt_generator_result(
         point_diagnostics=tuple(point_diagnostics),
         run_diagnostics={
             "seed": seed,
-            "proposal_backend": "conditional_density",
+            "proposal_backend": proposal_backend,
             "joint_scoring": (
                 "one_shot" if diagnostics.cf_mode == "data_plausible" else "disabled"
             ),
@@ -101,6 +107,7 @@ def adapt_generator_result(
 @dataclass(frozen=True)
 class DiCoFlexMethod:
     config: DiCoFlexConfig = DiCoFlexConfig()
+    proposal_backend: ProposalBackend | None = None
     method_id = "dicoflex"
     capabilities = MethodCapabilities(
         supports_categorical=True,
@@ -114,16 +121,41 @@ class DiCoFlexMethod:
         return self.config.as_dict()
 
     def prepare(self, context: MethodContext) -> PreparedDiCoFlexMethod:
-        inputs = DiCoFlexBackendInputs(
-            X_reference=context.X_reference,
-            categorical_groups=context.feature_schema.categorical_groups,
-            actionable_groups=context.feature_schema.actionable_groups,
-            oracle=context.oracle,
+        if self.proposal_backend is None:
+            if self.config.foundation.backend == "tabicl":
+                inputs = DiCoFlexBackendInputs(
+                    X_reference=context.X_reference,
+                    categorical_groups=context.feature_schema.categorical_groups,
+                    actionable_groups=context.feature_schema.actionable_groups,
+                    oracle=context.oracle,
+                )
+                backend = prepare_backend(inputs, self.config)
+            elif self.config.foundation.backend == "empirical":
+                backend = EmpiricalBackend().prepare(context)
+            else:
+                raise ValueError(
+                    f"unknown DiCoFlex proposal backend: "
+                    f"{self.config.foundation.backend!r}"
+                )
+        else:
+            if self.config.foundation.backend not in {
+                "injected",
+                self.proposal_backend.backend_id,
+            }:
+                raise ValueError(
+                    "foundation backend does not match the injected proposal backend"
+                )
+            backend = self.proposal_backend.prepare(context)
+        validate_backend_capabilities(
+            backend.capabilities,
+            needs_confidence=self.config.foundation.confidence_quantiles is not None,
+            needs_categorical=bool(context.feature_schema.actionable_groups),
+            needs_joint=self.config.search.cf_mode == "data_plausible",
         )
         return PreparedDiCoFlexMethod(
             context=context,
             config=self.config,
-            backend=prepare_backend(inputs, self.config),
+            backend=backend,
         )
 
 
@@ -131,13 +163,13 @@ class DiCoFlexMethod:
 class PreparedDiCoFlexMethod:
     context: MethodContext
     config: DiCoFlexConfig
-    backend: PreparedDiCoFlexBackend
+    backend: PreparedBackend
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
         if request.factuals.shape[1] != self.context.X_reference.shape[1]:
             raise ValueError("request feature width does not match method context")
         schema = self.context.feature_schema
-        retained = generate_counterfactual_batch(
+        retained = generate_with_backend(
             TabICLGeneratorInputs(
                 factuals=request.factuals,
                 targets=request.targets,
@@ -151,7 +183,18 @@ class PreparedDiCoFlexMethod:
                 ),
             ),
             discriminator=self.context.oracle,
-            config=self.config.generator_config(request.n_counterfactuals),
-            point_backend_factory=self.backend.point_backend_factory(seed=request.seed),
+            config=self.config,
+            backend=self.backend,
+            seed=request.seed,
+            n_counterfactuals=request.n_counterfactuals,
         )
-        return adapt_generator_result(retained, seed=request.seed)
+        proposal_backend = (
+            "conditional_density"
+            if self.backend.backend_id == "tabicl"
+            else self.backend.backend_id
+        )
+        return adapt_generator_result(
+            retained,
+            seed=request.seed,
+            proposal_backend=proposal_backend,
+        )

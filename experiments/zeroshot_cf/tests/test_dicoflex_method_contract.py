@@ -26,6 +26,7 @@ from experiments.zeroshot_cf.methods.dicoflex.backend import (
     DiCoFlexBackendRuntime,
     prepare_backend,
 )
+from experiments.zeroshot_cf.methods.dicoflex.backends.base import ProposalCapabilities
 from experiments.zeroshot_cf.methods.dicoflex.config import (
     DiCoFlexConfig,
     DiCoFlexFoundationConfig,
@@ -211,7 +212,13 @@ def test_method_prepare_owns_portable_backend_setup(
     import experiments.zeroshot_cf.methods.dicoflex.method as method_module
 
     captured: dict[str, object] = {}
-    backend = object()
+    backend = SimpleNamespace(
+        capabilities=ProposalCapabilities(
+            confidence_conditioning=True,
+            categorical_distribution=True,
+            joint_scoring=True,
+        )
+    )
 
     def fake_prepare_backend(inputs, config):
         captured["inputs"] = inputs
@@ -237,20 +244,27 @@ def test_method_passes_request_k_seed_and_portable_domains_to_search(
     context = _context()
     captures: dict[str, object] = {}
 
-    class _Backend:
-        def point_backend_factory(self, *, seed):
-            captures["seed"] = seed
-            return object()
+    backend = SimpleNamespace(backend_id="tabicl")
 
-    def fake_generate(inputs, *, discriminator, config, point_backend_factory):
+    def fake_generate(
+        inputs,
+        *,
+        discriminator,
+        config,
+        backend,
+        seed,
+        n_counterfactuals,
+    ):
         captures["inputs"] = inputs
         captures["discriminator"] = discriminator
         captures["config"] = config
-        captures["factory"] = point_backend_factory
+        captures["backend"] = backend
+        captures["seed"] = seed
+        captures["n_counterfactuals"] = n_counterfactuals
         return _retained_result((1, 1), 3)
 
     monkeypatch.setattr(
-        "experiments.zeroshot_cf.methods.dicoflex.method.generate_counterfactual_batch",
+        "experiments.zeroshot_cf.methods.dicoflex.method.generate_with_backend",
         fake_generate,
     )
     request = GenerationRequest(
@@ -260,12 +274,13 @@ def test_method_passes_request_k_seed_and_portable_domains_to_search(
         seed=137,
     )
 
-    result = PreparedDiCoFlexMethod(context, DiCoFlexConfig(), _Backend()).generate(
+    result = PreparedDiCoFlexMethod(context, DiCoFlexConfig(), backend).generate(
         request
     )
 
     assert captures["seed"] == 137
-    assert captures["config"].n_counterfactuals == 3
+    assert captures["n_counterfactuals"] == 3
+    assert captures["backend"] is backend
     lower, upper, supports = captures["inputs"].feature_domains
     np.testing.assert_array_equal(lower, [0.0, 0.0])
     np.testing.assert_array_equal(upper, [1.0, 1.0])

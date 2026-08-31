@@ -252,7 +252,7 @@ def test_runner_routes_dicoflex_execution_settings_outside_identity(
                 "fake",
                 "Fake",
                 "Config",
-                "dicoflex-v1",
+                "dicoflex-v2",
                 factory,
             ),
         )
@@ -274,8 +274,8 @@ def test_runner_routes_dicoflex_execution_settings_outside_identity(
         lambda spec, case: IdentityVersions(
             dataset_fingerprint=case.dataset.provenance.fingerprint,
             case_fingerprint=case.case_id,
-            method_implementation="dicoflex-v1",
-            backend_implementation="retained-tabicl-v1",
+            method_implementation="dicoflex-v2",
+            backend_implementation="tabicl-proposal-v1",
             model_content_id="fixture-model",
         ),
     )
@@ -297,6 +297,40 @@ def test_runner_routes_dicoflex_execution_settings_outside_identity(
     assert outcome.stored.manifest["execution"]["cache_paths"] == {
         "tabicl": str(tmp_path / "tabicl-cache")
     }
+
+
+def test_empirical_dicoflex_identity_does_not_require_tabicl_checkpoints(
+    tmp_path, monkeypatch
+) -> None:
+    from experiments.zeroshot_cf import tabicl_checkpoints
+    from experiments.zeroshot_cf.methods.registry import DEFAULT_METHOD_REGISTRY
+
+    monkeypatch.setattr(
+        tabicl_checkpoints,
+        "require_checkpoints",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("empirical backend must not resolve TabICL checkpoints")
+        ),
+    )
+    spec = replace(
+        _spec("one", "dicoflex"),
+        method=MethodSpec(
+            "dicoflex",
+            "tabicl_sparse",
+            {"foundation": {"backend": "empirical"}},
+        ),
+    )
+    runner = GenericRunner(
+        ExecutionSpec(tmp_path),
+        registry=DEFAULT_METHOD_REGISTRY,
+        case_loader=lambda spec: _case(spec.dataset.name),
+    )
+
+    versions = runner._versions(spec, _case("one"))
+
+    assert versions.method_implementation == "dicoflex-v2"
+    assert versions.backend_implementation == "empirical-reference-v1"
+    assert dict(versions.checkpoint_content_ids) == {}
 
 
 @pytest.mark.parametrize("tamper", ("cell_id", "scientific_spec"))
@@ -546,8 +580,8 @@ def test_legacy_export_writes_frozen_files_and_resume_restores_without_generatio
             lambda spec, case: IdentityVersions(
                 dataset_fingerprint=case.dataset.provenance.fingerprint,
                 case_fingerprint=case.case_id,
-                method_implementation="dicoflex-v1",
-                backend_implementation="retained-tabicl-v1",
+                method_implementation="dicoflex-v2",
+                backend_implementation="tabicl-proposal-v1",
                 model_content_id="fixture-model",
             ),
         )

@@ -1,0 +1,86 @@
+schema_version: countercontex.matrix.v1
+suite: dicoflex_ablation_example
+output_root: experiments/zeroshot_cf/results/local/dicoflex_ablation_example
+datasets:
+  - heloc
+  - bank_marketing
+methods:
+  # Search ablation: bounded validity search versus joint-density refinement.
+  - name: dicoflex
+    variant: tabicl_sparse
+    params:
+      search:
+        cf_mode: sparse
+        max_validity_steps: 50
+      foundation:
+        backend: tabicl
+        n_estimators: 1
+  - name: dicoflex
+    variant: tabicl_sparse
+    params:
+      search:
+        cf_mode: sparse
+        max_validity_steps: 50
+      foundation:
+        backend: empirical
+        n_estimators: 1
+  - name: dicoflex
+    variant: default
+    params:
+      search:
+        cf_mode: data_plausible
+        max_validity_steps: 50
+        max_extra_actions: 1
+      foundation:
+        backend: tabicl
+        n_estimators: 1
+
+  # Diversity ablation: request three candidates with a smaller beam and pool.
+  - name: dicoflex
+    variant: tabicl_sparse
+    n_counterfactuals: 3
+    params:
+      search:
+        cf_mode: sparse
+      diversity:
+        beam_width: 4
+        candidate_pool_size: 8
+        max_extra_actions: 1
+      foundation:
+        backend: tabicl
+        n_estimators: 1
+
+  # Backend and backend-hyperparameter ablations remain inside foundation.
+  - name: dicoflex
+    variant: tabicl_sparse
+    params:
+      search:
+        cf_mode: sparse
+      foundation:
+        backend: tabicl
+        n_estimators: 2
+        temperature: 1.0e-9
+  - name: dicoflex
+    variant: tabicl_sparse
+    params:
+      search:
+        cf_mode: sparse
+        candidate_quantiles: [0.25, 0.5, 0.75]
+      foundation:
+        backend: tabicl
+        n_estimators: 1
+        temperature: 1.0e-6
+        confidence_quantiles: [0.25, 0.5, 0.75]
+seeds: [17, 42]
+protocol:
+  max_test: 100
+  test_selection: stratified
+target_model:
+  name: retained_logistic_regression
+  params:
+    C: 1.0
+    max_iter: 1000
+    seed: 42
+evaluation:
+  probability_threshold: 0.7
+legacy_export: false
