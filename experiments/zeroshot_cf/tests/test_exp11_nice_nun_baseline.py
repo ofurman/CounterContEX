@@ -18,6 +18,8 @@ from experiments.zeroshot_cf.exp11_nice_nun_baseline import (
 class _ToyClassifier:
     """Small deterministic classifier with an sklearn-like interface."""
 
+    classes_ = np.array([0, 1])
+
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         matrix = np.asarray(X)
         target_probability = 0.1 + 0.45 * matrix[:, 0] + 0.6 * matrix[:, 2]
@@ -80,6 +82,8 @@ def test_greedy_nice_copies_group_atomically_and_preserves_immutable() -> None:
 
 def test_greedy_nice_requires_tau_even_after_target_prediction_flips() -> None:
     class _ThresholdTrapClassifier:
+        classes_ = np.array([0, 1])
+
         def predict_proba(self, X: np.ndarray) -> np.ndarray:
             matrix = np.asarray(X)
             target_probability = 0.1 + 0.3 * matrix[:, 0] + 0.45 * matrix[:, 2]

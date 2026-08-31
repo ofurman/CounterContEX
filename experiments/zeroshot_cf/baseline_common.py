@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-
 from experiments.zeroshot_cf.action_space import OneHotActionGroup
+from experiments.zeroshot_cf.core.validation import target_probabilities
 from experiments.zeroshot_cf.retained_config import TAU
 
 
@@ -41,7 +41,11 @@ def _is_valid(
     tau: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     matrix = np.atleast_2d(rows)
-    probabilities = np.asarray(disc_model.predict_proba(matrix))[:, target]
+    probabilities = target_probabilities(
+        disc_model,
+        matrix,
+        np.full(len(matrix), target),
+    )
     predictions = np.asarray(disc_model.predict(matrix), dtype=int)
     return (predictions == target) & (probabilities >= tau), probabilities
 

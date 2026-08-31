@@ -14,6 +14,8 @@ from experiments.zeroshot_cf.exp14_face_baseline import (
 class ThresholdClassifier:
     """Small deterministic classifier used to test graph search."""
 
+    classes_ = np.array([0, 1])
+
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """Return class probabilities determined by the first feature."""
         probability = np.clip(np.asarray(X)[:, 0], 0.0, 1.0)

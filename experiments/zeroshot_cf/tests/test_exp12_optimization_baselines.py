@@ -18,6 +18,8 @@ from experiments.zeroshot_cf.exp12_optimization_baselines import (
 
 
 class _ToyClassifier:
+    classes_ = np.array([0, 1])
+
     def predict_proba(self, X):
         matrix = np.asarray(X)
         probability = np.clip(0.1 + 0.7 * matrix[:, 0] + 0.5 * matrix[:, 2], 0, 1)
@@ -93,6 +95,8 @@ def test_growing_spheres_is_reproducible_valid_and_actionable() -> None:
 
 def test_scalar_contraction_preserves_validity_while_reducing_distance() -> None:
     class _ScalarClassifier:
+        classes_ = np.array([0, 1])
+
         def predict_proba(self, X):
             matrix = np.asarray(X)
             probability = np.clip(0.1 + 0.7 * matrix[:, 0], 0.0, 1.0)
