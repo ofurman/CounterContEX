@@ -1,0 +1,88 @@
+#  Copyright (c) Prior Labs GmbH 2026.
+
+"""Tests for explicit HELOC sentinel-row cleaning."""
+
+from __future__ import annotations
+
+import numpy as np
+from experiments.zeroshot_cf.data import (
+    get_actionable_immutable,
+    get_grouped_categorical_action_space,
+    get_one_hot_groups,
+    load_dataset,
+)
+
+
+def test_heloc_all_minus9_rows_are_removed_before_split_and_scaling() -> None:
+    """Remove all-sentinel HELOC rows before splitting and MinMax scaling."""
+    original = load_dataset("heloc")
+    cleaned = load_dataset("heloc", drop_heloc_all_minus9=True)
+
+    original_size = len(original.X_train) + len(original.X_test)
+    cleaned_size = len(cleaned.X_train) + len(cleaned.X_test)
+
+    assert cleaned.n_dropped_rows == 588
+    assert cleaned_size == original_size - cleaned.n_dropped_rows
+    assert cleaned.preprocessing_variant == "drop_heloc_all_minus9"
+    assert not np.any(np.all(cleaned.method_dataset.X_train_raw == -9, axis=1))
+    assert not np.any(np.all(cleaned.method_dataset.X_test_raw == -9, axis=1))
+
+
+def test_heloc_cleaning_is_explicit_and_disabled_by_default() -> None:
+    """Keep historical dataset behavior unless the cleaning flag is enabled."""
+    original = load_dataset("heloc")
+
+    assert original.n_dropped_rows == 0
+    assert original.preprocessing_variant == "original"
+    assert np.any(np.all(original.method_dataset.X_train_raw == -9, axis=1))
+
+
+def test_german_credit_uses_continuous_only_action_space() -> None:
+    """Keep the historical numerical-only action space unless opted in."""
+    bundle = load_dataset("german_credit")
+    actionable, immutable = get_actionable_immutable("german_credit", bundle)
+
+    assert actionable == bundle.numerical_features_indices
+    assert len(actionable) == 7
+    assert len(immutable) == 50
+    assert set(actionable).isdisjoint(immutable)
+    assert sorted([*actionable, *immutable]) == list(range(len(bundle.feature_names)))
+
+
+def test_german_credit_grouped_action_space_preserves_protected_group() -> None:
+    """Expose allowed categories atomically and retain the protected group."""
+    bundle = load_dataset("german_credit")
+
+    scalar, groups, immutable = get_grouped_categorical_action_space(bundle)
+    all_groups = get_one_hot_groups(bundle)
+
+    assert scalar == bundle.numerical_features_indices
+    assert len(all_groups) == 11
+    assert len(groups) == 10
+    assert "personal_status_sex" not in {group.name for group in groups}
+    protected = next(
+        group for group in all_groups if group.name == "personal_status_sex"
+    )
+    assert immutable == list(protected.columns)
+
+
+def test_single_validation_split_is_fixed_64_16_20() -> None:
+    """Create one deterministic split instead of repeated CV folds."""
+    first = load_dataset("moons", validation_fraction=0.2)
+    second = load_dataset("moons", validation_fraction=0.2)
+
+    assert (len(first.X_train), len(first.X_val), len(first.X_test)) == (640, 160, 200)
+    assert first.split_variant == "train_val_test_0.64_0.16_0.20"
+    np.testing.assert_array_equal(first.X_train, second.X_train)
+    np.testing.assert_array_equal(first.X_val, second.X_val)
+    np.testing.assert_array_equal(first.y_val, second.y_val)
+
+    scaler = first.method_dataset.preprocessing_pipeline.get_step("minmax").scaler
+    np.testing.assert_allclose(
+        scaler.data_min_,
+        first.method_dataset.X_train_raw.min(axis=0),
+    )
+    np.testing.assert_allclose(
+        scaler.data_max_,
+        first.method_dataset.X_train_raw.max(axis=0),
+    )

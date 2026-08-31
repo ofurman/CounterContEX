@@ -1,0 +1,100 @@
+{
+  "plan": "tabicl-generator-cleanup",
+  "created": "2026-08-30",
+  "stages": [
+    {
+      "id": 1,
+      "title": "Freeze retained suite and benchmark contract",
+      "file": "stages/01-freeze-retained-contract.md",
+      "status": "DONE",
+      "depends_on": [],
+      "commit": "d4f1f09",
+      "note": "Pinned CEL contract and retained focused suite; root pytest still needs licensed v2.5 checkpoints (backlog #1).",
+      "blocked_by": []
+    },
+    {
+      "id": 2,
+      "title": "Extract dependency-neutral shared primitives",
+      "file": "stages/02-extract-shared-primitives.md",
+      "status": "DONE",
+      "depends_on": [
+        1
+      ],
+      "commit": "91a2284",
+      "note": "Extracted neutral action, candidate-domain, baseline, and retained-config helpers; stage gates passed, while root `uv run pytest` still hits licensed TabPFN v2.5/v2.6 downloads (backlog #1).",
+      "blocked_by": []
+    },
+    {
+      "id": 3,
+      "title": "Isolate TabICL generator and diversity APIs",
+      "file": "stages/03-isolate-generator-diversity.md",
+      "status": "DONE",
+      "depends_on": [
+        2
+      ],
+      "commit": "980b7ef",
+      "note": "Added stable generator and Exp8 APIs; focused gates passed. Root-only failures were tracked in backlog #1/#2 and later resolved by Stage 7.",
+      "blocked_by": []
+    },
+    {
+      "id": 4,
+      "title": "Normalize Exp9 and baseline protocol boundaries",
+      "file": "stages/04-normalize-benchmark-baselines.md",
+      "status": "DONE",
+      "depends_on": [
+        3
+      ],
+      "commit": "c1d3048",
+      "note": "Unified benchmark protocol and detached Exp9 from Exp8; retained suite gates passed with suite requirements, while root `uv run pytest` still reproduces licensed v2.5 download failures (backlog #1).",
+      "blocked_by": []
+    },
+    {
+      "id": 5,
+      "title": "Remove legacy TabPFN counterfactual experiments",
+      "file": "stages/05-remove-legacy-tabpfn-cf.md",
+      "status": "DONE",
+      "depends_on": [
+        4
+      ],
+      "commit": "a3d774e",
+      "note": "Removed legacy Exp1-6 TabPFN code, results, and tests; the retained 87-test manifest passed. Root-only license failures remained backlog #1 until Stage 7.",
+      "blocked_by": []
+    },
+    {
+      "id": 6,
+      "title": "Focused environment, docs, and operations",
+      "file": "stages/06-environment-docs-operations.md",
+      "status": "DONE",
+      "depends_on": [
+        5
+      ],
+      "commit": "c2df114",
+      "note": "Locked the suite-owned uv project, rewrote retained docs/Athena ops, and kept the root-suite failure scoped to licensed TabPFN v2.5 checkpoints (backlog #1).",
+      "blocked_by": []
+    },
+    {
+      "id": 7,
+      "title": "Remove upstream TabPFN and repurpose root",
+      "file": "stages/07-remove-upstream-tabpfn.md",
+      "status": "DONE",
+      "depends_on": [
+        6
+      ],
+      "commit": "2632e92",
+      "note": "Repointed the root at the retained TabICL suite, removed upstream TabPFN source/tests/examples/plans, and made root `uv run pytest -q` pass 87 retained tests with backlog #1/#2 resolved.",
+      "blocked_by": []
+    },
+    {
+      "id": 8,
+      "title": "Final boundary and behavior audit",
+      "file": "stages/08-final-boundary-audit.md",
+      "status": "DONE",
+      "depends_on": [
+        7
+      ],
+      "commit": "0e7f7d9",
+      "note": "Final audit passed after fixing suite-root paths and a stale plan comment; root/suite parity, offline checks, real-checkpoint smoke, and backlog sweep passed.",
+      "blocked_by": []
+    }
+  ]
+}

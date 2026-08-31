@@ -1,0 +1,35 @@
+[project]
+name = "tabicl-counterfactual-suite"
+version = "0.1.0"
+description = "Focused TabICL counterfactual generator, benchmark, and baseline suite."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "tabicl==2.1.1",
+  "torch>=2.5",
+  "numpy>=1.21.6",
+  "pandas>=1.4.0",
+  "scikit-learn>=1.2.0",
+  "scipy>=1.11.1",
+  "PyYAML>=6.0",
+  "joblib>=1.2.0",
+  "huggingface-hub>=0.23.0",
+  "typing_extensions>=4.12.0",
+  "dice-ml==0.12",
+  "raiutils>=0.4.0",
+  "cel-nflows",
+  "torchdiffeq",
+  "UMNN",
+  "omegaconf",
+  "hydra-core",
+  "pytest>=8.4.2",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+minversion = "8.0"
+xfail_strict = true
+addopts = "--durations=10"

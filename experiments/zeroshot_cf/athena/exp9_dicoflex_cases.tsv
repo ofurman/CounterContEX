@@ -1,0 +1,6 @@
+# dataset	max_test	n_estimators	tag
+# Four independent A100 tasks.
+heloc	1000	1	heloc_exp9_tabicl
+bank_marketing	1000	1	bank_exp9_tabicl
+give_me_some_credit	1000	1	gmc_exp9_tabicl
+lending_club	1000	1	lending_exp9_tabicl

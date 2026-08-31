@@ -1,0 +1,6 @@
+.venv/
+logs/
+models/
+vendor/
+results/local/
+results/athena/
