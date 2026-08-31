@@ -73,6 +73,25 @@ HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.tabicl_smoke_test
 The stable programmatic API is
 `experiments.zeroshot_cf.generator.generate_counterfactual_batch()`.
 
+The numbered commands are compatibility shims. New benchmark automation uses
+the typed matrix CLI:
+
+```bash
+uv run python -m experiments.zeroshot_cf.cli matrix \
+  --config experiments/zeroshot_cf/configs/matrices/one_factual_compat.yaml \
+  --resume
+uv run python -m experiments.zeroshot_cf.cli aggregate \
+  --config experiments/zeroshot_cf/configs/matrices/one_factual_compat.yaml
+```
+
+Canonical runs are content-addressed directories completed by a final
+`COMPLETE` marker. Scientific configuration and resolved data, model, method,
+backend, and checkpoint versions determine identity; output paths, devices,
+hosts, scheduler limits, and resume settings are execution metadata. See the
+[suite README](experiments/zeroshot_cf/README.md) for layer ownership, exact
+metric denominators, artifact layout, extension recipes, and the full-reference
+procedure.
+
 ## Repository Layout
 
 - `experiments/zeroshot_cf/`: retained runtime, tests, docs, Athena launchers, and suite-local lockfile
@@ -89,3 +108,5 @@ The stable programmatic API is
   intentionally ignored by git.
 - Athena launchers and the suite-local README remain under
   `experiments/zeroshot_cf/` for cluster execution.
+- Athena submission defaults to a configurable ten-hour walltime because the
+  measured DiCoFlex/Lending Club reference cell took 7.64 hours.

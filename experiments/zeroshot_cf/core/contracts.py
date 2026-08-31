@@ -165,6 +165,7 @@ class DatasetProvenance:
     preprocessing_id: str
     split_id: str
     fingerprint: str
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         for name in (
@@ -181,6 +182,7 @@ class DatasetProvenance:
             "source_hashes",
             frozen_mapping(self.source_hashes, name="source_hashes"),
         )
+        object.__setattr__(self, "metadata", deep_freeze(self.metadata))
 
 
 @dataclass(frozen=True)

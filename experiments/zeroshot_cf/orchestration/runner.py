@@ -76,19 +76,64 @@ def _default_case_loader(spec: RunSpec) -> BenchmarkCase:
     if cel_root not in sys.path:
         sys.path.insert(0, cel_root)
 
-    from experiments.zeroshot_cf.benchmark_protocol import prepare_benchmark_context
+    from experiments.zeroshot_cf.datasets.base import DatasetSpec as ProviderDatasetSpec
+    from experiments.zeroshot_cf.datasets.benchmark import build_benchmark_case
+    from experiments.zeroshot_cf.datasets.cel import CelDatasetProvider
+    from experiments.zeroshot_cf.discriminator import train_discriminator
 
-    params = dict(spec.dataset.params)
-    params.update(spec.protocol.params)
-    context = prepare_benchmark_context(
-        spec.dataset.name,
-        max_test=(-1 if spec.protocol.max_test is None else spec.protocol.max_test),
-        test_selection=spec.protocol.test_selection,
-        **params,
+    params = {
+        "validation_fraction": 0.2,
+        "drop_heloc_all_minus9": True,
+        "split_seed": 42,
+        **dict(spec.dataset.params),
+        **dict(spec.protocol.params),
+    }
+    unknown = set(params) - {
+        "validation_fraction",
+        "drop_heloc_all_minus9",
+        "split_seed",
+    }
+    if unknown:
+        raise ValueError(
+            f"unsupported default dataset/protocol params: {sorted(unknown)}"
+        )
+    provider_spec = ProviderDatasetSpec(spec.dataset.name, **params)
+    dataset = CelDatasetProvider().prepare(provider_spec)
+    metadata = dataset.provenance.metadata
+    cache_tag = (
+        f"{spec.dataset.name}_drop_all_minus9"
+        if metadata.get("preprocessing_variant") == "drop_heloc_all_minus9"
+        else spec.dataset.name
     )
-    if context.benchmark_case is None:
-        raise RuntimeError("generic runner requires a portable benchmark case")
-    return context.benchmark_case
+    if len(dataset.X_validation):
+        cache_tag = f"{cache_tag}_{metadata['split_variant']}"
+    evaluation_X = (
+        dataset.X_validation if len(dataset.X_validation) else dataset.X_test
+    )
+    evaluation_y = (
+        dataset.y_validation if len(dataset.y_validation) else dataset.y_test
+    )
+    oracle = train_discriminator(
+        dataset.X_train,
+        dataset.y_train,
+        evaluation_X,
+        evaluation_y,
+        cache_tag,
+    )
+    return build_benchmark_case(
+        dataset,
+        oracle,
+        max_test=spec.protocol.max_test,
+        test_selection=spec.protocol.test_selection,
+        seed=42,
+        target_model={
+            "kind": "logistic_regression",
+            "C": 1.0,
+            "max_iter": 1000,
+            "seed": 42,
+            "cache_tag": cache_tag,
+        },
+    )
 
 
 def _default_evaluator_factory(case: BenchmarkCase, evaluation_spec: Any):
@@ -336,6 +381,12 @@ class GenericRunner:
             return finalized
 
         write_started = time.perf_counter()
+        stored = self.store.write(
+            resolved_run_id,
+            manifest=manifest,
+            report=report,
+            manifest_finalizer=finalize_manifest,
+        )
         if self.execution.legacy_export:
             export_generic_v1(
                 self.execution.output_root,
@@ -344,14 +395,8 @@ class GenericRunner:
                 case=case,
                 report=report,
                 point_diagnostics=generated.point_diagnostics,
-                manifest=manifest,
+                manifest=stored.manifest,
             )
-        stored = self.store.write(
-            resolved_run_id,
-            manifest=manifest,
-            report=report,
-            manifest_finalizer=finalize_manifest,
-        )
         write_s = time.perf_counter() - write_started
         total_s = time.perf_counter() - total_started
         return RunOutcome(

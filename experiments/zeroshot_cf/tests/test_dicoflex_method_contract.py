@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import subprocess
 import sys
 from pathlib import Path
@@ -18,7 +17,6 @@ from experiments.zeroshot_cf.core.contracts import (
 )
 from experiments.zeroshot_cf.generator import (
     TabICLGeneratorResult,
-    generate_counterfactual_batch,
 )
 from experiments.zeroshot_cf.methods.base import CounterfactualMethod, PreparedMethod
 from experiments.zeroshot_cf.methods.dicoflex.backend import (
@@ -91,6 +89,47 @@ def _retained_result(counts: tuple[int, ...], k: int) -> TabICLGeneratorResult:
         validity_steps_per_point=tuple(1 if count else 0 for count in counts),
         refinement_steps_per_point=tuple(0 for _ in counts),
         accepted_refinement_count_per_point=tuple(0 for _ in counts),
+        history_per_point=tuple(
+            (
+                {
+                    "immediate_valid": bool(count),
+                    "action_sparsity": 0.25,
+                    "grouped_gower": 0.5,
+                    "action_type": "numerical",
+                },
+            )
+            if count
+            else ()
+            for count in counts
+        ),
+        attempt_history_per_point=tuple(({"attempt": 1},) for _ in counts),
+        diverse_histories_per_point=tuple(
+            (
+                (
+                    {
+                        "rank": np.int64(0),
+                        "scores": np.asarray([0.25, 0.75]),
+                    },
+                ),
+            )
+            if count
+            else ()
+            for count in counts
+        ),
+        initial_valid_step_per_point=tuple(1 if count else None for count in counts),
+        initial_sparse_action_count_per_point=np.asarray(
+            [1 if count else -1 for count in counts]
+        ),
+        final_action_count_per_point=np.asarray(
+            [1 if count else 0 for count in counts]
+        ),
+        initial_tabicl_joint_log_density_per_point=np.full(len(counts), np.nan),
+        final_tabicl_joint_log_density_per_point=np.full(len(counts), np.nan),
+        tabicl_joint_log_density_gain_per_point=np.full(len(counts), np.nan),
+        joint_scoring_batch_count_per_point=np.zeros(len(counts), dtype=int),
+        joint_rows_scored_per_point=np.zeros(len(counts), dtype=int),
+        extra_actions_per_point=np.zeros(len(counts), dtype=int),
+        refinement_stopping_reason_per_point=tuple("sparse_mode" for _ in counts),
         target_probability_per_point=np.asarray(
             [0.8 if count else 0.2 for count in counts]
         ),
@@ -148,46 +187,29 @@ def test_seed_42_adapter_is_exactly_equivalent_to_legacy_available_slots() -> No
         retained.counterfactuals,
     )
     assert canonical.run_diagnostics["seed"] == 42
-
-
-def test_legacy_runtime_resolves_seed_42_without_changing_public_signature(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import experiments.zeroshot_cf.tabicl_runtime as runtime
-
-    captured: dict[str, int] = {}
-
-    class _Backend:
-        def point_backend_factory(self, *, seed):
-            captured["seed"] = seed
-            return object()
-
-    monkeypatch.setattr(runtime, "prepare_backend", lambda *args, **kwargs: _Backend())
-    context = SimpleNamespace(
-        bundle=SimpleNamespace(X_train=np.zeros((2, 1))),
-        categorical_groups=(),
-        grouped_actionable=(),
-        disc_model=object(),
-    )
-
-    runtime._build_point_backend_factory(
-        context,
-        confidence_quantiles=None,
-        cf_mode="sparse",
-        tabicl_joint_permutations=1,
-        n_estimators=1,
-        temperature=0.0,
-        cache_dir=None,
-    )
-
-    assert captured["seed"] == 42
-    assert "seed" not in inspect.signature(runtime.run_tabicl_benchmark).parameters
-    assert tuple(inspect.signature(generate_counterfactual_batch).parameters) == (
-        "inputs",
-        "discriminator",
-        "config",
-        "point_backend_factory",
-    )
+    first = canonical.point_diagnostics[0]
+    assert [dict(item) for item in first["attempt_history"]] == [{"attempt": 1}]
+    assert [dict(item) for item in first["history"]] == [
+        {
+            "immediate_valid": True,
+            "action_sparsity": 0.25,
+            "grouped_gower": 0.5,
+            "action_type": "numerical",
+        }
+    ]
+    assert dict(first["diverse_histories"][0][0]) == {
+        "rank": 0,
+        "scores": (0.25, 0.75),
+    }
+    assert isinstance(first["diverse_histories"][0][0]["rank"], int)
+    with pytest.raises(TypeError):
+        first["history"][0]["new"] = "value"
+    assert first["attempt_steps"] == 1
+    assert first["initial_valid_step"] == 1
+    assert first["initial_valid_action_sparsity"] == 0.25
+    assert first["initial_valid_grouped_gower"] == 0.5
+    assert first["first_action_type"] == "numerical"
+    assert first["refinement_stopping_reason"] == "sparse_mode"
 
 
 def test_config_serialization_separates_search_diversity_and_foundation() -> None:
@@ -286,6 +308,8 @@ def test_method_passes_request_k_seed_and_portable_domains_to_search(
     np.testing.assert_array_equal(upper, [1.0, 1.0])
     assert supports == {}
     assert result.candidates.shape == (2, 3, 2)
+    assert result.run_diagnostics["actionable_idx"] == (0,)
+    assert result.run_diagnostics["immutable_idx"] == (1,)
 
 
 def test_nondefault_seed_reaches_proposal_and_joint_sampler_contexts() -> None:

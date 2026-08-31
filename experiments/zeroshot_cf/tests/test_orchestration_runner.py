@@ -20,6 +20,7 @@ from experiments.zeroshot_cf.datasets.benchmark import build_benchmark_case
 from experiments.zeroshot_cf.evaluation import EvaluationSpec, Evaluator
 from experiments.zeroshot_cf.methods.registry import MethodRegistry, RegistryEntry
 from experiments.zeroshot_cf.orchestration.artifacts import ArtifactStore
+from experiments.zeroshot_cf.orchestration.legacy import _legacy_method_id
 from experiments.zeroshot_cf.orchestration.runner import (
     GenericRunner,
     _default_case_loader,
@@ -33,6 +34,7 @@ from experiments.zeroshot_cf.orchestration.spec import (
     RunSpec,
     TargetModelSpec,
 )
+from experiments.zeroshot_cf.orchestration.v1_contract import V1_CONTRACT
 
 _V1_COMPATIBILITY = json.loads(
     (
@@ -72,7 +74,18 @@ def _case(name: str):
         y_test=np.array([0, 1]),
         schema=schema,
         provenance=DatasetProvenance(
-            "fixture", "v1", {"rows": name}, "identity", "fixed", f"fp-{name}"
+            "fixture",
+            "v1",
+            {"rows": name},
+            "identity",
+            "fixed",
+            f"fp-{name}",
+            metadata={
+                "split_variant": "fixture_split",
+                "split_seed": 13,
+                "preprocessing_variant": "fixture_clean",
+                "n_dropped_rows": 7,
+            },
         ),
     )
     return build_benchmark_case(
@@ -186,6 +199,16 @@ def test_runner_reuses_cases_and_evaluators_and_writes_four_complete_cells(tmp_p
     assert calls.count("generate:alpha") == 2
     rows = ArtifactStore(tmp_path).aggregate_expected([spec.cell_id for spec in specs])
     assert len(rows) == 4
+    identifiers = {
+        (row["dataset"], row["method"], row["method_variant"], row["seed"])
+        for row in rows
+    }
+    assert identifiers == {
+        (dataset, method, "default", 42)
+        for dataset in ("one", "two")
+        for method in ("alpha", "beta")
+    }
+    assert all(row["n_counterfactuals"] == 1 and row["backend"] is None for row in rows)
 
 
 def test_aggregation_rejects_missing_partial_extra_and_identity_drift(tmp_path):
@@ -252,7 +275,7 @@ def test_runner_routes_dicoflex_execution_settings_outside_identity(
                 "fake",
                 "Fake",
                 "Config",
-                "dicoflex-v2",
+                "dicoflex-v3",
                 factory,
             ),
         )
@@ -274,7 +297,7 @@ def test_runner_routes_dicoflex_execution_settings_outside_identity(
         lambda spec, case: IdentityVersions(
             dataset_fingerprint=case.dataset.provenance.fingerprint,
             case_fingerprint=case.case_id,
-            method_implementation="dicoflex-v2",
+            method_implementation="dicoflex-v3",
             backend_implementation="tabicl-proposal-v1",
             model_content_id="fixture-model",
         ),
@@ -328,7 +351,7 @@ def test_empirical_dicoflex_identity_does_not_require_tabicl_checkpoints(
 
     versions = runner._versions(spec, _case("one"))
 
-    assert versions.method_implementation == "dicoflex-v2"
+    assert versions.method_implementation == "dicoflex-v3"
     assert versions.backend_implementation == "empirical-reference-v1"
     assert dict(versions.checkpoint_content_ids) == {}
 
@@ -427,6 +450,42 @@ def test_default_case_loader_rejects_unexecuted_target_model_specs(target_model)
         _default_case_loader(spec)
 
 
+def test_default_case_loader_uses_portable_provider_without_benchmark_runner(
+    monkeypatch,
+):
+    from experiments.zeroshot_cf import discriminator as discriminator_module
+    from experiments.zeroshot_cf.datasets import cel as cel_module
+
+    source_case = _case("one")
+    captured = {}
+
+    def fake_prepare(self, provider_spec):
+        captured["provider_spec"] = provider_spec
+        return source_case.dataset
+
+    monkeypatch.setattr(cel_module.CelDatasetProvider, "prepare", fake_prepare)
+    monkeypatch.setattr(
+        discriminator_module,
+        "train_discriminator",
+        lambda *args, **kwargs: _Oracle(),
+    )
+    spec = replace(
+        _spec("one", "alpha"),
+        target_model=TargetModelSpec(
+            "retained_logistic_regression",
+            {"C": 1.0, "max_iter": 1000, "seed": 42},
+        ),
+    )
+
+    loaded = _default_case_loader(spec)
+
+    assert loaded.dataset is source_case.dataset
+    assert loaded.protocol["test_selection"] == "first"
+    assert captured["provider_spec"].validation_fraction == 0.2
+    assert captured["provider_spec"].drop_heloc_all_minus9
+    assert captured["provider_spec"].split_seed == 42
+
+
 def test_runner_passes_method_variant_to_registry(tmp_path):
     calls: list[str] = []
     registry = MethodRegistry(
@@ -451,6 +510,28 @@ def test_runner_passes_method_variant_to_registry(tmp_path):
     ).run(spec)
 
     assert outcome.stored.manifest["scientific_spec"]["method"]["variant"] == "tuned"
+
+
+@pytest.mark.parametrize(
+    ("n_counterfactuals", "cf_mode", "expected"),
+    (
+        (1, "sparse", "tabicl_v2_sparse"),
+        (1, "data_plausible", "tabicl_v2_data_plausible"),
+        (3, "sparse", "tabicl_v2_diverse_dpp"),
+    ),
+)
+def test_dicoflex_legacy_method_id_tracks_resolved_mode_and_k(
+    n_counterfactuals, cf_mode, expected
+):
+    assert (
+        _legacy_method_id(
+            "dicoflex",
+            V1_CONTRACT["dicoflex"],
+            {"search": {"cf_mode": cf_mode}},
+            n_counterfactuals,
+        )
+        == expected
+    )
 
 
 @pytest.mark.parametrize(
@@ -522,6 +603,11 @@ def test_legacy_export_writes_frozen_files_and_resume_restores_without_generatio
 
     @dataclass(frozen=True)
     class _LegacyMethod(_FakeMethod):
+        def config_dict(self):
+            if self.name == "dicoflex":
+                return {"foundation": {"backend": "tabicl"}}
+            return super().config_dict()
+
         def prepare(self, context):
             calls.append(f"prepare:{self.name}")
             return _LegacyPrepared(self.name, calls)
@@ -580,7 +666,7 @@ def test_legacy_export_writes_frozen_files_and_resume_restores_without_generatio
             lambda spec, case: IdentityVersions(
                 dataset_fingerprint=case.dataset.provenance.fingerprint,
                 case_fingerprint=case.case_id,
-                method_implementation="dicoflex-v2",
+                method_implementation="dicoflex-v3",
                 backend_implementation="tabicl-proposal-v1",
                 model_content_id="fixture-model",
             ),
@@ -596,9 +682,34 @@ def test_legacy_export_writes_frozen_files_and_resume_restores_without_generatio
     assert metrics.is_file() and points.is_file() and arrays.is_file()
     contract = _V1_COMPATIBILITY["methods"][method_name]
     with metrics.open(newline="") as handle:
-        assert next(csv.reader(handle)) == contract["summary_columns"]
+        reader = csv.DictReader(handle)
+        assert reader.fieldnames == contract["summary_columns"]
+        metrics_row = next(reader)
+    assert metrics_row["method"] == contract["legacy_method_ids"][0]
+    assert metrics_row["split_variant"] == "fixture_split"
+    assert metrics_row["split_seed"] == "13"
+    assert metrics_row["preprocessing_variant"] == "fixture_clean"
+    assert metrics_row["n_dropped_rows"] == "7"
+    assert float(metrics_row["runtime_generation_s"]) >= 0
+    assert float(metrics_row["runtime_total_s"]) > 0
+    expected_method_value = {
+        "dicoflex": ("cf_mode", "sparse"),
+        "nice": ("prototype_metric", "euclidean"),
+        "wachter": ("model_access", "predict_and_predict_proba"),
+        "growing_spheres": ("sphere_candidates", "512"),
+        "dice": ("max_iterations", "200"),
+        "face": ("graph", "symmetric_knn_actionable_space"),
+    }[method_name]
+    assert metrics_row[expected_method_value[0]] == expected_method_value[1]
     with points.open(newline="") as handle:
-        assert next(csv.reader(handle)) == contract["point_columns"]
+        reader = csv.DictReader(handle)
+        assert reader.fieldnames == contract["point_columns"]
+        point_row = next(reader)
+    assert point_row["factual_prediction"] == "0"
+    assert point_row["target"] == "1"
+    assert point_row["cf_prediction"] == "1"
+    assert point_row["valid"] == "True"
+    assert point_row["changed_columns"] == "1"
     with np.load(arrays, allow_pickle=False) as archive:
         assert set(archive.files) == expected_keys
     metrics.write_text("tampered\n")
@@ -620,4 +731,7 @@ def test_legacy_export_writes_frozen_files_and_resume_restores_without_generatio
 
     assert arrays.is_file()
     assert calls.count(f"generate:{method_name}") == 1
-    assert len(ArtifactStore(tmp_path).aggregate_expected([spec.cell_id])) == 1
+    aggregate_row = ArtifactStore(tmp_path).aggregate_expected([spec.cell_id])[0]
+    assert aggregate_row["backend"] == (
+        "tabicl" if method_name == "dicoflex" else None
+    )

@@ -124,6 +124,22 @@ scientific inputs and the measured dataset, case, implementation, model, and
 checkpoint identities. Output paths, cache paths, devices, hosts, and resume
 settings stay in manifest execution metadata and do not change the run ID.
 
+The production dependency direction is:
+
+```text
+core <- datasets
+core <- methods
+core <- evaluation
+datasets + methods + evaluation <- orchestration <- CLI and compatibility shims
+```
+
+Datasets own loading, preprocessing, schemas, factual selection, and target
+case construction. Methods own preparation, candidate generation, legal-action
+enforcement, and namespaced diagnostics. Evaluation derives every common
+metric only from the benchmark case and canonical candidates. Orchestration
+owns matrix expansion, lifecycle timing, manifests, persistence, resume,
+aggregation, and temporary v1 export.
+
 ```bash
 uv run python -m experiments.zeroshot_cf.cli list-methods
 uv run python -m experiments.zeroshot_cf.cli matrix \
@@ -140,6 +156,47 @@ Each run directory is complete only after its `COMPLETE` marker is published.
 Resume validates the complete manifest against the resolved identity. Matrix
 aggregation reads the expected manifest set and rejects missing, extra,
 partial, duplicate, or identity-mismatched cells.
+
+The directory contains `manifest.json`, `summary.csv`, `points.csv`,
+`candidates.csv`, `arrays.npz`, and the final `COMPLETE` marker. The manifest
+records the scientific spec, resolved dataset/case/method/backend/model and
+checkpoint identities, execution metadata, method diagnostics, and measured
+prepare/generate/evaluate/write/total phases. Execution-only settings such as
+output roots, checkpoint locations, devices, hosts, scheduler limits, and
+resume do not change run identity.
+
+## Metric semantics
+
+Availability and validity answer different questions:
+
+- `coverage` is the fraction of factuals with at least one returned candidate.
+- `validity_returned_class` is target-class candidates divided by returned
+  candidates.
+- `validity_returned_threshold` additionally requires the configured target
+  probability threshold.
+- `valid_success_rate_*_per_requested_slot` uses all requested candidate slots
+  as the denominator.
+- `valid_success_rate_*_per_factual` counts factuals with at least one success.
+- `primary_*` fields evaluate only the configured primary rank; `set_*` and
+  diversity fields evaluate the complete returned set.
+
+Proximity, sparsity, actionability, out-of-bounds, LOF, and Isolation Forest
+candidate metrics use valid returned candidates only. A failed best-effort row
+can be retained under `method.*` for diagnosis, but it is not a returned
+counterfactual and cannot enter common metric denominators.
+
+## Adding a counterfactual method
+
+1. Implement a frozen config plus `CounterfactualMethod.prepare()` and the
+   prepared method's `generate()` under `methods/`.
+2. Return a validated `GenerationResult`; unavailable slots contain NaN and
+   method-specific arrays use the `method.*` namespace.
+3. Register the lazy factory, supported variants, and implementation version
+   in `methods/registry.py`.
+4. Add deterministic contract tests for reversed class labels, request seeds,
+   action constraints, genuine failures, and optional-import safety.
+5. Add a matrix entry. No dataset loader, evaluator, artifact schema, or
+   numbered runner change is required.
 
 ## DiCoFlex proposal backends
 
@@ -179,6 +236,23 @@ See `configs/matrices/dicoflex_ablation_example.yaml` for independent search,
 diversity, backend-parameter, dataset, and seed variants. The tracked
 `full_reference.yaml` fixes the four retained datasets, all six methods, seed
 42, 1,000 factuals, and the recorded three-counterfactual DiCoFlex setup.
+
+Run the cheap compatibility matrix before the full reference workload. The
+full matrix requires staged TabICL checkpoints and optional baseline
+dependencies. Its recorded runtime was about 9.42 hours, including 7.64 hours
+for DiCoFlex on Lending Club. Use `--resume` with a scheduler limit above that
+longest cell, and publish completeness, named availability/validity metrics,
+phase timings, and stable artifact hashes. If a cell is unavailable, record
+its exact run ID rather than substituting a value.
+
+## Compatibility-shim lifetime
+
+`exp8_tabicl_cf.py`, `exp9_dicoflex_benchmark.py`, and Exp11-14 retain their
+CLI flags and flat v1 CSV/NPZ filenames for existing local and Athena
+workflows. They are translation shims into the generic runner; new automation
+should use `experiments.zeroshot_cf.cli` and matrix configs. Keep the shims
+until downstream jobs have migrated, then remove them in a separately reviewed
+compatibility change.
 
 Example offline runs:
 

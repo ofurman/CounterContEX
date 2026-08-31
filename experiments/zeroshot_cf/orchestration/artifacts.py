@@ -406,6 +406,29 @@ class ArtifactStore:
             {
                 "run_id": by_cell[cell].run_id,
                 "cell_id": cell,
+                "dataset": by_cell[cell].manifest["scientific_spec"]["dataset"][
+                    "name"
+                ],
+                "method": by_cell[cell].manifest["scientific_spec"]["method"][
+                    "name"
+                ],
+                "method_variant": by_cell[cell].manifest["scientific_spec"][
+                    "method"
+                ]["variant"],
+                "n_counterfactuals": by_cell[cell].manifest["scientific_spec"][
+                    "method"
+                ]["n_counterfactuals"],
+                "backend": by_cell[cell]
+                .manifest.get("resolved_method_config", {})
+                .get("foundation", {})
+                .get(
+                    "backend",
+                    by_cell[cell].manifest["scientific_spec"]["method"]
+                    .get("params", {})
+                    .get("foundation", {})
+                    .get("backend"),
+                ),
+                "seed": by_cell[cell].manifest["scientific_spec"]["seed"],
                 **dict(by_cell[cell].report.summary.values),
             }
             for cell in expected

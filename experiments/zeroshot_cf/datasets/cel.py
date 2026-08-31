@@ -319,6 +319,12 @@ class CelDatasetProvider:
             preprocessing_id=preprocessing_id,
             split_id=split_id,
             fingerprint=fingerprint,
+            metadata={
+                "split_variant": split_variant,
+                "split_seed": spec.split_seed,
+                "preprocessing_variant": preprocessing_variant,
+                "n_dropped_rows": n_dropped_rows,
+            },
         )
         prepared = PreparedDataset(
             name=spec.name,

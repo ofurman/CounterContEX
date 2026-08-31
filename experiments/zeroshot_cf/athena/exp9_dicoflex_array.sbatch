@@ -7,7 +7,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --time=06:00:00
+#SBATCH --time=10:00:00
 #SBATCH --array=0-3
 #SBATCH --output=slurm-%x-%A_%a.out
 #SBATCH --error=slurm-%x-%A_%a.err
@@ -22,6 +22,8 @@ TABICL_CACHE_DIR="${TABICL_CACHE_DIR:-$SUITE_DIR/models/tabicl}"
 MAX_VALIDITY_STEPS="${MAX_VALIDITY_STEPS:-100}"
 N_COUNTERFACTUALS="${N_COUNTERFACTUALS:-3}"
 DIVERSITY_BEAM_WIDTH="${DIVERSITY_BEAM_WIDTH:-8}"
+COUNTERCONTEX_SLURM_WALLTIME="${COUNTERCONTEX_SLURM_WALLTIME:-10:00:00}"
+export COUNTERCONTEX_SLURM_WALLTIME
 
 cd "$PROJECT_DIR"
 
@@ -71,6 +73,7 @@ echo "project=$PROJECT_DIR"
 echo "suite=$SUITE_DIR"
 echo "dataset=$DATASET max_test=$MAX_TEST n_estimators=$N_ESTIMATORS max_validity_steps=$MAX_VALIDITY_STEPS"
 echo "n_counterfactuals=$N_COUNTERFACTUALS diversity_beam_width=$DIVERSITY_BEAM_WIDTH"
+echo "requested_walltime=$COUNTERCONTEX_SLURM_WALLTIME"
 echo "split=64/16/20 seed=42 test_selection=stratified"
 echo "tag=$TAG results_dir=$RESULTS_DIR"
 echo "python=${PYTHON_CMD[*]}"

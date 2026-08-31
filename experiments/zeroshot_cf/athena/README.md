@@ -51,11 +51,28 @@ requested counterfactuals unless you override the launcher environment.
 - `HF_HUB_OFFLINE`: defaults to `1`.
 - `TABICL_DEVICE`: defaults to `cuda`.
 - `UV_CACHE_DIR`: optional shared uv cache directory. If unset and `SCRATCH` exists, the job uses `$SCRATCH/uv-cache`.
+- `WALLTIME`: Slurm time limit passed by the submit script. It defaults to
+  `10:00:00`, which covers the measured 7.64-hour DiCoFlex/Lending Club
+  reference cell with some operational margin.
+
+The submit script exports the selected limit to the array task as
+`COUNTERCONTEX_SLURM_WALLTIME`. The Exp9 compatibility shim passes that value
+into the generic runner's execution metadata, so each canonical manifest
+records the requested scheduler limit without making it part of scientific
+run identity. Direct `sbatch` use retains the static ten-hour fallback in the
+batch file.
 
 ## Submit and aggregate
 
 ```bash
 bash experiments/zeroshot_cf/athena/submit_exp9_dicoflex.sh
+```
+
+Override the limit when queue policy or an ablation requires it:
+
+```bash
+WALLTIME=12:00:00 \
+  bash experiments/zeroshot_cf/athena/submit_exp9_dicoflex.sh
 ```
 
 Outputs land under `experiments/zeroshot_cf/results/athena/exp9_dicoflex/`.
@@ -68,6 +85,31 @@ uv run --project experiments/zeroshot_cf \
   python -m experiments.zeroshot_cf.exp9_dicoflex_benchmark \
   --dataset aggregate
 ```
+
+Each task writes a content-addressed canonical run directory and the retained
+flat Exp9 CSV/NPZ files. A run is resumable only after its `COMPLETE` marker is
+published. Aggregation validates the expected completed cells and rejects
+missing, partial, duplicate, or identity-mismatched results.
+
+The full six-method reference matrix is intentionally separate from the
+four-task Exp9 launcher. Run it from a host with the staged checkpoints and
+all optional baseline dependencies:
+
+```bash
+uv run --project experiments/zeroshot_cf \
+  python -m experiments.zeroshot_cf.cli matrix \
+  --config experiments/zeroshot_cf/configs/matrices/full_reference.yaml \
+  --resume
+
+uv run --project experiments/zeroshot_cf \
+  python -m experiments.zeroshot_cf.cli aggregate \
+  --config experiments/zeroshot_cf/configs/matrices/full_reference.yaml
+```
+
+The recorded reference workload took about 9.42 hours in total. Do not treat
+quality-point variation as an architecture failure; record completeness,
+availability and validity denominators, phase timings, and stable artifact
+hashes. Report any missing cell with its exact run ID.
 
 For a direct offline TabICL run on Athena outside the array launcher:
 

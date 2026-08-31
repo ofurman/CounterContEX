@@ -6,6 +6,11 @@ V1_CONTRACT = {
     "dicoflex": {
         "stem": "exp9_tabicl",
         "method_id": "tabicl_v2_sparse",
+        "method_ids": {
+            "sparse": "tabicl_v2_sparse",
+            "data_plausible": "tabicl_v2_data_plausible",
+            "diverse": "tabicl_v2_diverse_dpp",
+        },
         "npz_keys": (
             "X_test",
             "X_sparse",
