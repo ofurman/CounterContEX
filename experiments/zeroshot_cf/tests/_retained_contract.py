@@ -10,7 +10,6 @@ from typing import Any
 
 import numpy as np
 import yaml
-
 from experiments.zeroshot_cf.data import (
     get_actionable_immutable,
     get_grouped_categorical_action_space,
@@ -18,7 +17,11 @@ from experiments.zeroshot_cf.data import (
     load_dataset,
 )
 from experiments.zeroshot_cf.retained_config import TAU
-from experiments.zeroshot_cf.vendor_setup import CEL_GIT_URL, CEL_REPO, PINNED_CEL_REVISION
+from experiments.zeroshot_cf.vendor_setup import (
+    CEL_GIT_URL,
+    CEL_REPO,
+    PINNED_CEL_REVISION,
+)
 
 ATHENA_CONTEXT_SIZE = 512
 ATHENA_CONTEXT_STRATEGY = "gower_knn_both"
@@ -89,7 +92,9 @@ def _row_count(path: Path) -> int:
 
 def _label_counts(labels: np.ndarray) -> dict[str, int]:
     values, counts = np.unique(np.asarray(labels, dtype=np.int64), return_counts=True)
-    return {str(int(value)): int(count) for value, count in zip(values, counts, strict=True)}
+    return {
+        str(int(value)): int(count) for value, count in zip(values, counts, strict=True)
+    }
 
 
 def _dataset_input_paths(dataset_name: str) -> tuple[Path, Path]:
@@ -131,12 +136,24 @@ def _dataset_contract(dataset_name: str) -> dict[str, Any]:
     else:
         actionable_idx, immutable_idx = get_actionable_immutable(dataset_name, bundle)
     scaler = bundle.method_dataset.preprocessing_pipeline.get_step("minmax").scaler
+    if bundle.prepared is None:
+        raise AssertionError(
+            "retained CEL bundle is missing PreparedDataset provenance"
+        )
+    provenance = bundle.prepared.provenance
 
     return {
         "config_path": _relative(config_path),
         "config_sha256": _sha256_file(config_path),
         "raw_data_path": _relative(raw_data_path),
         "raw_data_sha256": _sha256_file(raw_data_path),
+        "prepared_provenance": {
+            "fingerprint": provenance.fingerprint,
+            "source_revision": provenance.source_revision,
+            "source_hashes": dict(provenance.source_hashes),
+            "preprocessing_id": provenance.preprocessing_id,
+            "split_id": provenance.split_id,
+        },
         "raw_row_count": _row_count(raw_data_path),
         "cel_row_count": int(len(cel_dataset.X)),
         "usable_row_count": int(usable_row_count),
@@ -150,13 +167,17 @@ def _dataset_contract(dataset_name: str) -> dict[str, Any]:
             {
                 "name": group.name,
                 "columns": list(group.columns),
-                "feature_names": [bundle.feature_names[index] for index in group.columns],
+                "feature_names": [
+                    bundle.feature_names[index] for index in group.columns
+                ],
             }
             for group in one_hot_groups
         ],
         "actionable_indices": list(actionable_idx),
         "immutable_indices": list(immutable_idx),
-        "immutable_feature_names": [bundle.feature_names[index] for index in immutable_idx],
+        "immutable_feature_names": [
+            bundle.feature_names[index] for index in immutable_idx
+        ],
         "clean_label_counts": _label_counts(usable_y),
         "split_sizes": {
             "train": int(len(bundle.X_train)),

@@ -378,6 +378,16 @@
           "name": "poutcome"
         }
       ],
+      "prepared_provenance": {
+        "fingerprint": "a3ac75c48c8485d24a74f01ddd0ac43db920d0c77347d45d6308aae99c0779fd",
+        "preprocessing_id": "minmax_train_only:original",
+        "source_hashes": {
+          "config": "672b052c68ba43e08cb9a6e53f96abc82804d1e7566ea413a06898369c482bf9",
+          "raw_data": "8417bb5fe894dc21f1ead3049cacc8aef16d7d2aaabedb7600cbfa6c535bb5de"
+        },
+        "source_revision": "3587f943826f6b087a0d198c8c4aa4373712c7ee",
+        "split_id": "train_val_test_0.64_0.16_0.20:seed=42"
+      },
       "preprocessing_variant": "original",
       "raw_data_path": "experiments/zeroshot_cf/vendor/counterfactuals/data/bank_marketing.csv",
       "raw_data_sha256": "8417bb5fe894dc21f1ead3049cacc8aef16d7d2aaabedb7600cbfa6c535bb5de",
@@ -678,6 +688,16 @@
           "name": "NumberOfDependents"
         }
       ],
+      "prepared_provenance": {
+        "fingerprint": "8ed89b4fb6e7ebcd48bcddcd156f39fc5654b0fbe35aa5e2adb3857fec57cdb5",
+        "preprocessing_id": "minmax_train_only:original",
+        "source_hashes": {
+          "config": "9e6d414752b9eb5a7907e0d78c469fcfd2e32dadaf775f9029e126aa8df3c93b",
+          "raw_data": "1bd46da486a5708c58c7b01a034fae2a13b327f6f7b62ea7ba4fe3b5824b24ac"
+        },
+        "source_revision": "3587f943826f6b087a0d198c8c4aa4373712c7ee",
+        "split_id": "train_val_test_0.64_0.16_0.20:seed=42"
+      },
       "preprocessing_variant": "original",
       "raw_data_path": "experiments/zeroshot_cf/vendor/counterfactuals/data/give_me_some_credit.csv",
       "raw_data_sha256": "1bd46da486a5708c58c7b01a034fae2a13b327f6f7b62ea7ba4fe3b5824b24ac",
@@ -826,6 +846,17 @@
         22
       ],
       "one_hot_groups": [],
+      "prepared_provenance": {
+        "fingerprint": "46e8421bbc16165e26616282575e6c94e99bb4519ee2f24d96579635da818349",
+        "preprocessing_id": "minmax_train_only:drop_heloc_all_minus9",
+        "source_hashes": {
+          "actionability": "0e954c42534bf950d66ae82065c8c88224c51140dc990b904cae0980ad3fd3c5",
+          "config": "d1c62cc404ac3c1f4853ce6b03996f2ff03d9b52b92ec7a4e3d18a36889d22da",
+          "raw_data": "3ac25654f80c5ce724e2a9528e3cf3bd3f9369e44b4a5f7723eff46c330c2dfb"
+        },
+        "source_revision": "3587f943826f6b087a0d198c8c4aa4373712c7ee",
+        "split_id": "train_val_test_0.64_0.16_0.20:seed=42"
+      },
       "preprocessing_variant": "drop_heloc_all_minus9",
       "raw_data_path": "experiments/zeroshot_cf/vendor/counterfactuals/data/heloc.csv",
       "raw_data_sha256": "3ac25654f80c5ce724e2a9528e3cf3bd3f9369e44b4a5f7723eff46c330c2dfb",
@@ -1103,6 +1134,16 @@
           "name": "home_ownership"
         }
       ],
+      "prepared_provenance": {
+        "fingerprint": "78af68c5ff118055e6d5b43b8aec7f9fd28de1dfe5e0039ba35ffae45d173c04",
+        "preprocessing_id": "minmax_train_only:original",
+        "source_hashes": {
+          "config": "8cbb6f2cff3e413807c717f8e40fa9d937ea0cf9dfc670c8181e88bdc5b88f29",
+          "raw_data": "b475ef26bd2ce662127fed5c2ddf84d014cf31dcfe7f37f76d9536d35fe5598d"
+        },
+        "source_revision": "3587f943826f6b087a0d198c8c4aa4373712c7ee",
+        "split_id": "train_val_test_0.64_0.16_0.20:seed=42"
+      },
       "preprocessing_variant": "original",
       "raw_data_path": "experiments/zeroshot_cf/vendor/counterfactuals/data/lending_club.csv",
       "raw_data_sha256": "b475ef26bd2ce662127fed5c2ddf84d014cf31dcfe7f37f76d9536d35fe5598d",

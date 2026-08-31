@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 import csv
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 import numpy as np
-from sklearn.model_selection import train_test_split
-
 from experiments.zeroshot_cf.action_space import OneHotActionGroup
+from experiments.zeroshot_cf.core.contracts import BenchmarkCase
 from experiments.zeroshot_cf.data import (
     DatasetBundle,
     get_grouped_categorical_action_space,
     get_one_hot_groups,
     load_dataset,
+)
+from experiments.zeroshot_cf.datasets.benchmark import (
+    build_benchmark_case,
+    select_factual_indices,
 )
 from experiments.zeroshot_cf.discriminator import train_discriminator
 
@@ -31,7 +35,7 @@ TARGET_CLASSIFIER_LABELS = "target_classifier"
 
 @dataclass(frozen=True)
 class BenchmarkDatasetContext:
-    """Protocol-owned dataset, classifier, and target state for one run."""
+    """Deprecated compatibility view over a portable ``BenchmarkCase``."""
 
     dataset_name: str
     bundle: DatasetBundle
@@ -45,6 +49,15 @@ class BenchmarkDatasetContext:
     immutable_idx: tuple[int, ...]
     categorical_groups: tuple[OneHotActionGroup, ...]
     test_selection: str = DEFAULT_TEST_SELECTION
+    benchmark_case: BenchmarkCase | None = None
+
+    @property
+    def factual_source_indices(self) -> np.ndarray:
+        if self.benchmark_case is not None:
+            return self.benchmark_case.factuals.indices
+        indices = np.arange(len(self.X_test), dtype=np.int64)
+        indices.setflags(write=False)
+        return indices
 
     @property
     def validation_accuracy(self) -> float:
@@ -79,28 +92,13 @@ def select_benchmark_test_rows(
     limit: int | None,
     selection: str = DEFAULT_TEST_SELECTION,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Select the deterministic held-out factual subset for the benchmark."""
-    if selection not in {"first", "stratified"}:
-        raise ValueError("test_selection must be 'first' or 'stratified'")
-    if limit is None or limit >= len(X_test):
-        return X_test, y_test
-    if limit <= 0:
-        raise ValueError("max_test must be positive or -1 for the full test set")
-    if selection == "first":
-        return X_test[:limit], y_test[:limit]
-
-    if limit < len(np.unique(y_test)):
-        rng = np.random.default_rng(DEFAULT_PROTOCOL_SEED)
-        selected = np.sort(rng.choice(len(X_test), size=limit, replace=False))
-        return X_test[selected], y_test[selected]
-
-    selected, _ = train_test_split(
-        np.arange(len(X_test)),
-        train_size=limit,
-        random_state=DEFAULT_PROTOCOL_SEED,
-        stratify=y_test,
+    """Compatibility delegate for deterministic factual selection."""
+    selected = select_factual_indices(
+        y_test,
+        limit,
+        selection,
+        seed=DEFAULT_PROTOCOL_SEED,
     )
-    selected.sort()
     return X_test[selected], y_test[selected]
 
 
@@ -140,7 +138,7 @@ def prepare_benchmark_context(
     test_selection: str = DEFAULT_TEST_SELECTION,
     drop_heloc_all_minus9: bool = DEFAULT_DROP_HELOC_ALL_MINUS9,
 ) -> BenchmarkDatasetContext:
-    """Load one benchmark dataset, train the classifier, and derive targets."""
+    """Compatibility delegate that exposes the reusable portable case."""
     if dataset_name not in DATASETS:
         raise ValueError(f"Unsupported benchmark dataset: {dataset_name!r}")
 
@@ -151,17 +149,11 @@ def prepare_benchmark_context(
         ),
         validation_fraction=validation_fraction,
     )
-    X_test, y_test = select_benchmark_test_rows(
-        bundle.X_test,
-        bundle.y_test,
-        resolve_max_test_limit(max_test),
-        test_selection,
-    )
     scalar_actionable, grouped_actionable, immutable_idx = (
         get_grouped_categorical_action_space(bundle)
     )
-    X_disc_eval = bundle.X_val if bundle.X_val is not None else X_test
-    y_disc_eval = bundle.y_val if bundle.y_val is not None else y_test
+    X_disc_eval = bundle.X_val if bundle.X_val is not None else bundle.X_test
+    y_disc_eval = bundle.y_val if bundle.y_val is not None else bundle.y_test
     disc_model = train_discriminator(
         bundle.X_train,
         bundle.y_train,
@@ -169,20 +161,36 @@ def prepare_benchmark_context(
         y_disc_eval,
         build_discriminator_cache_tag(dataset_name, bundle),
     )
-    y_pred, y_target = build_classifier_targets(disc_model, X_test)
+    if bundle.prepared is None:
+        raise RuntimeError("CEL compatibility bundle is missing its PreparedDataset")
+    case = build_benchmark_case(
+        bundle.prepared,
+        disc_model,
+        max_test=resolve_max_test_limit(max_test),
+        test_selection=test_selection,
+        seed=DEFAULT_PROTOCOL_SEED,
+        target_model={
+            "kind": "logistic_regression",
+            "C": 1.0,
+            "max_iter": 1000,
+            "seed": DEFAULT_PROTOCOL_SEED,
+            "cache_tag": build_discriminator_cache_tag(dataset_name, bundle),
+        },
+    )
     return BenchmarkDatasetContext(
         dataset_name=dataset_name,
         bundle=bundle,
-        X_test=X_test,
-        y_test=y_test,
+        X_test=case.factuals.values,
+        y_test=case.factuals.true_labels,
         disc_model=disc_model,
-        y_pred=y_pred,
-        y_target=y_target,
+        y_pred=case.factual_predictions,
+        y_target=case.targets,
         scalar_actionable=tuple(int(column) for column in scalar_actionable),
         grouped_actionable=tuple(grouped_actionable),
         immutable_idx=tuple(int(column) for column in immutable_idx),
         categorical_groups=tuple(get_one_hot_groups(bundle)),
         test_selection=test_selection,
+        benchmark_case=case,
     )
 
 
@@ -201,7 +209,9 @@ def build_common_result_row(
         "split_seed": DEFAULT_PROTOCOL_SEED,
         "test_selection": context.test_selection,
         "n_train": len(context.bundle.X_train),
-        "n_validation": 0 if context.bundle.X_val is None else len(context.bundle.X_val),
+        "n_validation": 0
+        if context.bundle.X_val is None
+        else len(context.bundle.X_val),
         "n_test_pool": len(context.bundle.X_test),
         "n_test": len(context.X_test),
         "cf_per_factual": cf_per_factual,

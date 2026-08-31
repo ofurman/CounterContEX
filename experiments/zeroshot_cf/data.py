@@ -8,11 +8,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Tuple
+from typing import TYPE_CHECKING
 
 import numpy as np
 import yaml
 from experiments.zeroshot_cf.action_space import OneHotActionGroup
+from experiments.zeroshot_cf.core.contracts import PreparedDataset
+from experiments.zeroshot_cf.datasets.base import DatasetSpec
+from experiments.zeroshot_cf.datasets.cel import CelDatasetProvider
 
 if TYPE_CHECKING:
     from cel.datasets.method_dataset import MethodDataset
@@ -23,28 +26,29 @@ CONFIGS_DIR = Path(__file__).parent / "configs"
 
 @dataclass
 class DatasetBundle:
-    """All data and metadata for one experiment dataset."""
+    """Deprecated CEL compatibility view; use ``PreparedDataset`` in new code."""
 
     name: str
     X_train: np.ndarray
     X_test: np.ndarray
     y_train: np.ndarray
     y_test: np.ndarray
-    feature_names: List[str]
-    numerical_features_indices: List[int]
-    categorical_features_indices: List[int]
+    feature_names: list[str]
+    numerical_features_indices: list[int]
+    categorical_features_indices: list[int]
     method_dataset: MethodDataset  # for inverse_transform back to original space
     X_val: np.ndarray | None = None
     y_val: np.ndarray | None = None
     split_variant: str = "train_test_80_20"
     n_dropped_rows: int = 0
     preprocessing_variant: str = "original"
+    prepared: PreparedDataset | None = None
 
     def inverse_transform(self, X: np.ndarray) -> np.ndarray:
         return self.method_dataset.inverse_transform(X)
 
 
-def get_one_hot_groups(dataset: DatasetBundle) -> List[OneHotActionGroup]:
+def get_one_hot_groups(dataset: DatasetBundle) -> list[OneHotActionGroup]:
     """Resolve every metadata-defined one-hot group to transformed columns."""
     raw_groups = getattr(
         dataset.method_dataset.file_dataset,
@@ -63,7 +67,7 @@ def get_one_hot_groups(dataset: DatasetBundle) -> List[OneHotActionGroup]:
 
 def get_grouped_categorical_action_space(
     dataset: DatasetBundle,
-) -> Tuple[List[int], List[OneHotActionGroup], List[int]]:
+) -> tuple[list[int], list[OneHotActionGroup], list[int]]:
     """Return scalar actions, atomic one-hot actions, and true immutables.
 
     A one-hot group is actionable only when *every* member column is declared
@@ -83,7 +87,7 @@ def get_grouped_categorical_action_space(
 
     declared_actionable = set(method_dataset.actionable_features)
     grouped_columns: set[int] = set()
-    actionable_groups: List[OneHotActionGroup] = []
+    actionable_groups: list[OneHotActionGroup] = []
 
     for group in all_groups:
         grouped_columns.update(group.columns)
@@ -111,30 +115,10 @@ def select_test_rows(
     limit: int | None,
     selection: str,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Select a deterministic held-out evaluation subset."""
-    from sklearn.model_selection import train_test_split
+    """Compatibility delegate for deterministic held-out factual selection."""
+    from experiments.zeroshot_cf.datasets.benchmark import select_factual_indices
 
-    if selection not in {"first", "stratified"}:
-        raise ValueError("test_selection must be 'first' or 'stratified'")
-    if limit is None or limit >= len(X_test):
-        return X_test, y_test
-    if limit <= 0:
-        raise ValueError("max_test must be positive or -1 for the full test set")
-    if selection == "first":
-        return X_test[:limit], y_test[:limit]
-
-    if limit < len(np.unique(y_test)):
-        rng = np.random.default_rng(42)
-        selected = np.sort(rng.choice(len(X_test), size=limit, replace=False))
-        return X_test[selected], y_test[selected]
-
-    selected, _ = train_test_split(
-        np.arange(len(X_test)),
-        train_size=limit,
-        random_state=42,
-        stratify=y_test,
-    )
-    selected.sort()
+    selected = select_factual_indices(y_test, limit, selection, seed=42)
     return X_test[selected], y_test[selected]
 
 
@@ -144,7 +128,7 @@ def load_dataset(
     drop_heloc_all_minus9: bool = False,
     validation_fraction: float = 0.0,
 ) -> DatasetBundle:
-    """Load a supported cel classification dataset, MinMax-scaled.
+    """Compatibility delegate to the provider-neutral CEL adapter.
 
     Split is 80/20 stratified with random_state=42 (cel default).
     Scaling is fit on X_train only.
@@ -157,117 +141,37 @@ def load_dataset(
     training partition with a second fixed, stratified split. A value of 0.2
     therefore produces one reproducible 64%/16%/20% train/validation/test split.
     """
-    from cel.datasets.file_dataset import FileDataset
-    from cel.datasets.method_dataset import MethodDataset
-    from cel.preprocessing.base import PreprocessingContext
-    from cel.preprocessing.pipeline import PreprocessingPipeline
-    from cel.preprocessing.scalers import MinMaxScalingStep
-    from sklearn.model_selection import train_test_split
-
-    if not 0.0 <= validation_fraction < 1.0:
-        raise ValueError("validation_fraction must be in [0, 1)")
-    config_path = CEL_REPO / "config" / "datasets" / f"{name}.yaml"
-    if not config_path.exists():
-        raise FileNotFoundError(f"Dataset config not found: {config_path}")
-
-    file_dataset = FileDataset(config_path=config_path)
-    n_dropped_rows = 0
-    preprocessing_variant = "original"
-    if name == "heloc" and drop_heloc_all_minus9:
-        # FICO uses -9 as a symbolic "No Bureau Record or No Investigation"
-        # code. Rows containing -9 in every predictor have no usable factual
-        # profile and cannot support individualized counterfactual recourse.
-        # Remove them before the train/test split and before MinMax scaling.
-        all_minus9 = np.all(np.asarray(file_dataset.X) == -9, axis=1)
-        n_dropped_rows = int(all_minus9.sum())
-        keep = ~all_minus9
-        file_dataset.X = file_dataset.X[keep]
-        file_dataset.y = file_dataset.y[keep]
-        file_dataset.raw_data = file_dataset.raw_data.loc[keep].reset_index(drop=True)
-        preprocessing_variant = "drop_heloc_all_minus9"
-    preprocessing = PreprocessingPipeline(
-        [
-            ("minmax", MinMaxScalingStep()),
-        ]
+    adapter = CelDatasetProvider().prepare_adapter(
+        DatasetSpec(
+            name=name,
+            validation_fraction=validation_fraction,
+            drop_heloc_all_minus9=drop_heloc_all_minus9,
+        )
     )
-    md = MethodDataset(
-        file_dataset,
-        preprocessing_pipeline=(
-            preprocessing if validation_fraction == 0 else None
-        ),
-    )
-
-    X_val = None
-    y_val = None
-    split_variant = "train_test_80_20"
-    if validation_fraction > 0:
-        X_train_raw, X_val_raw, y_train, y_val = train_test_split(
-            md.X_train_raw,
-            md.y_train,
-            test_size=validation_fraction,
-            random_state=42,
-            stratify=md.y_train,
-        )
-        n_val = len(X_val_raw)
-        evaluation_raw = np.concatenate([X_val_raw, md.X_test_raw], axis=0)
-        evaluation_y = np.concatenate([y_val, md.y_test], axis=0)
-        context = PreprocessingContext(
-            X_train=X_train_raw,
-            X_test=evaluation_raw,
-            y_train=y_train,
-            y_test=evaluation_y,
-            categorical_indices=file_dataset.categorical_features_indices,
-            continuous_indices=file_dataset.numerical_features_indices,
-        )
-        preprocessing.fit(context)
-        transformed = preprocessing.transform(context)
-        X_train = transformed.X_train.astype(np.float64)
-        X_val = transformed.X_test[:n_val].astype(np.float64)
-        X_test = transformed.X_test[n_val:].astype(np.float64)
-        y_train = np.asarray(y_train, dtype=np.int64)
-        y_val = np.asarray(y_val, dtype=np.int64)
-        y_test = md.y_test.astype(np.int64)
-
-        # Preserve MethodDataset's inverse-transform API using the scaler that
-        # was fitted exclusively on the final training partition.
-        md.preprocessing_pipeline = preprocessing
-        md.X_train_raw = X_train_raw.copy()
-        md.X_test_raw = md.X_test_raw.copy()
-        md.X_train = X_train
-        md.X_test = X_test
-        md.y_train = y_train
-        md.y_test = y_test
-        split_variant = (
-            f"train_val_test_{0.8 * (1 - validation_fraction):.2f}_"
-            f"{0.8 * validation_fraction:.2f}_0.20"
-        )
-    else:
-        X_train = md.X_train.astype(np.float64)
-        X_test = md.X_test.astype(np.float64)
-        y_train = md.y_train.astype(np.int64)
-        y_test = md.y_test.astype(np.int64)
-
+    prepared = adapter.prepared
+    has_validation = bool(len(prepared.X_validation))
     return DatasetBundle(
         name=name,
-        X_train=X_train,
-        X_test=X_test,
-        y_train=y_train,
-        y_test=y_test,
-        feature_names=list(md.features),
-        numerical_features_indices=list(md.numerical_features_indices),
-        categorical_features_indices=list(md.categorical_features_indices),
-        method_dataset=md,
-        X_val=X_val,
-        y_val=y_val,
-        split_variant=split_variant,
-        n_dropped_rows=n_dropped_rows,
-        preprocessing_variant=preprocessing_variant,
+        X_train=prepared.X_train,
+        X_test=prepared.X_test,
+        y_train=prepared.y_train,
+        y_test=prepared.y_test,
+        feature_names=list(prepared.schema.names),
+        numerical_features_indices=list(adapter.numerical_features_indices),
+        categorical_features_indices=list(adapter.categorical_features_indices),
+        method_dataset=adapter.method_dataset,
+        X_val=prepared.X_validation if has_validation else None,
+        y_val=prepared.y_validation if has_validation else None,
+        split_variant=adapter.split_variant,
+        n_dropped_rows=adapter.n_dropped_rows,
+        preprocessing_variant=adapter.preprocessing_variant,
+        prepared=prepared,
     )
 
 
 def get_actionable_immutable(
     name: str, dataset: DatasetBundle | None = None
-) -> Tuple[List[int], List[int]]:
+) -> tuple[list[int], list[int]]:
     """Return (actionable_idx, immutable_idx) in the scaled feature matrix column order.
 
     For 'heloc': uses configs/heloc_actionability.yaml (Decision #2).
@@ -302,7 +206,7 @@ def get_actionable_immutable(
         cfg_path = CONFIGS_DIR / "heloc_actionability.yaml"
         with open(cfg_path) as f:
             cfg = yaml.safe_load(f)
-        immutable_names: List[str] = cfg["immutable_features"]
+        immutable_names: list[str] = cfg["immutable_features"]
 
         if dataset is None:
             dataset = load_dataset("heloc")
