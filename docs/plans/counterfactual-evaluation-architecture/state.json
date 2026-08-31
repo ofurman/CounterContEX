@@ -4,7 +4,7 @@
   "stages": [
     {"id": 1, "title": "Freeze contracts and compatibility evidence", "file": "stages/01-freeze-contracts.md", "status": "DONE", "depends_on": [], "commit": "pending", "note": "Frozen source-bound v1 compatibility, semantic fixtures, and offline CLI contracts; 117-test suite passed.", "blocked_by": []},
     {"id": 2, "title": "Separate portable data and benchmark cases", "file": "stages/02-separate-data-cases.md", "status": "DONE", "depends_on": [1], "commit": "pending", "note": "Portable CEL-free contracts and source-bound benchmark cases added; 125-test suite passed.", "blocked_by": []},
-    {"id": 3, "title": "Extract evaluation and artifact ownership", "file": "stages/03-extract-evaluation-artifacts.md", "status": "PENDING", "depends_on": [2], "commit": null, "note": null, "blocked_by": []},
+    {"id": 3, "title": "Extract evaluation and artifact ownership", "file": "stages/03-extract-evaluation-artifacts.md", "status": "DONE", "depends_on": [2], "commit": "pending", "note": "Canonical method-blind evaluation, portable artifact storage, and retained v1 delegates added; 159-test suite passed.", "blocked_by": []},
     {"id": 4, "title": "Encapsulate all reference methods", "file": "stages/04-encapsulate-baselines.md", "status": "PENDING", "depends_on": [3], "commit": null, "note": null, "blocked_by": []},
     {"id": 5, "title": "Encapsulate DiCoFlex", "file": "stages/05-encapsulate-dicoflex.md", "status": "PENDING", "depends_on": [3], "commit": null, "note": null, "blocked_by": []},
     {"id": 6, "title": "Add the generic runner and static registry", "file": "stages/06-generic-runner-registry.md", "status": "PENDING", "depends_on": [4, 5], "commit": null, "note": null, "blocked_by": []},

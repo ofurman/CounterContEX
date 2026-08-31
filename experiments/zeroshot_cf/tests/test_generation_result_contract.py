@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from experiments.zeroshot_cf.core.contracts import GenerationResult
 
 FIXTURE = Path(__file__).parent / "fixtures" / "architecture_v1" / "semantic_cases.json"
 
@@ -21,30 +22,17 @@ def _arrays(case: dict[str, object]) -> tuple[np.ndarray, np.ndarray]:
     return candidates, available
 
 
-def _validate_generation_result(candidates: np.ndarray, available: np.ndarray) -> None:
-    """Reference validation required of the future production validator."""
-    if candidates.ndim != 3:
-        raise ValueError("candidates must have shape (n_factuals, k, n_features)")
-    if available.shape != candidates.shape[:2]:
-        raise ValueError("available must have shape (n_factuals, k)")
-    if np.any(~np.isfinite(candidates[available])):
-        raise ValueError("available slots must be finite")
-    if np.any(~np.isnan(candidates[~available])):
-        raise ValueError("unavailable slots must contain only NaN")
-
-    # Missing diverse results must remain unavailable instead of being represented by
-    # repeated returned rows. A duplicate in k>1 is therefore invalid padding.
-    for rows, row_available in zip(candidates, available, strict=True):
-        returned = rows[row_available]
-        if len(returned) > 1 and len(np.unique(returned, axis=0)) != len(returned):
-            raise ValueError("available candidates must not duplicate padding")
-
-
 @pytest.mark.parametrize("case", _cases()["cases"], ids=lambda case: case["id"])
 def test_reasoned_generation_results_obey_canonical_shape_and_padding(case) -> None:
     candidates, available = _arrays(case)
-
-    _validate_generation_result(candidates, available)
+    GenerationResult(
+        candidates,
+        available,
+        artifacts={
+            name: np.asarray(value, dtype=float)
+            for name, value in case.get("artifacts", {}).items()
+        },
+    )
 
     assert candidates.ndim == 3
     assert available.shape == candidates.shape[:2]
@@ -62,7 +50,44 @@ def test_invalid_or_duplicate_padding_is_rejected(case) -> None:
     candidates, available = _arrays(case)
 
     with pytest.raises(ValueError, match=case["error"]):
-        _validate_generation_result(candidates, available)
+        GenerationResult(candidates, available)
+
+
+def test_factual_padding_is_rejected_when_bound_to_generation_request() -> None:
+    result = GenerationResult(np.array([[[0.1, 0.2]]]), np.array([[True]]))
+    with pytest.raises(ValueError, match="factual padding"):
+        result.validate_for_factuals(np.array([[0.1, 0.2]]))
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "best_effort",
+        "common.shadow",
+        "common.candidates",
+        "common.available",
+        "candidate.shadow",
+        "candidate.grouped_gower",
+    ],
+)
+def test_method_artifacts_cannot_claim_evaluator_owned_namespaces(name) -> None:
+    with pytest.raises(ValueError, match=r"method\.\* namespace"):
+        GenerationResult(
+            np.array([[[np.nan, np.nan]]]),
+            np.array([[False]]),
+            artifacts={name: np.array([[0.2, 0.3]])},
+        )
+
+
+def test_method_best_effort_artifact_is_accepted() -> None:
+    result = GenerationResult(
+        np.array([[[np.nan, np.nan]]]),
+        np.array([[False]]),
+        artifacts={"method.best_effort": np.array([[0.2, 0.3]])},
+    )
+    np.testing.assert_array_equal(
+        result.artifacts["method.best_effort"], np.array([[0.2, 0.3]])
+    )
 
 
 def test_fixture_covers_every_required_generation_state() -> None:

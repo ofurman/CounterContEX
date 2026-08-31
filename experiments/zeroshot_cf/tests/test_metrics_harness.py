@@ -243,6 +243,19 @@ def test_dicoflex_common_metrics_match_reference_definitions():
     assert np.isfinite(metrics["isolation_forest_scores_test"])
 
 
+def test_dicoflex_common_metrics_reject_negative_sparsity_epsilon() -> None:
+    with pytest.raises(ValueError, match="sparsity_eps must be non-negative"):
+        compute_dicoflex_common_metrics(
+            _MockDisc(np.array([1])),
+            X_cf=np.array([[0.2, 0.3]]),
+            X_test=np.array([[0.1, 0.3]]),
+            X_train=np.array([[0.0, 0.0], [1.0, 1.0]]),
+            y_target=np.array([1]),
+            numerical_idx=[0, 1],
+            sparsity_eps=-0.01,
+        )
+
+
 def test_dicoflex_grouped_gower_treats_one_hot_group_as_one_feature() -> None:
     X_test = np.array([[0.0, 1.0, 0.0, 0.0]])
     X_cf = np.array([[0.2, 0.0, 0.0, 1.0]])

@@ -2,46 +2,502 @@
   "fixture_version": 1,
   "cases": [
     {
-      "id": "returned_valid_k1", "tau": 0.7, "targets": [1],
-      "candidates": [[[0.8, 0.2]]], "available": [[true]],
-      "predictions": [[1]], "target_probabilities": [[0.8]],
-      "expected": {"coverage": 1.0, "validity_returned_class": 1.0, "validity_returned_threshold": 1.0, "valid_success_rate_class_per_requested_slot": 1.0, "valid_success_rate_threshold_per_requested_slot": 1.0}
+      "id": "returned_valid_k1",
+      "tau": 0.7,
+      "targets": [
+        1
+      ],
+      "candidates": [
+        [
+          [
+            0.8,
+            0.2
+          ]
+        ]
+      ],
+      "available": [
+        [
+          true
+        ]
+      ],
+      "predictions": [
+        [
+          1
+        ]
+      ],
+      "target_probabilities": [
+        [
+          0.8
+        ]
+      ],
+      "expected": {
+        "coverage": 1.0,
+        "validity_returned_class": 1.0,
+        "validity_returned_threshold": 1.0,
+        "valid_success_rate_class_per_requested_slot": 1.0,
+        "valid_success_rate_threshold_per_requested_slot": 1.0
+      }
     },
     {
-      "id": "returned_invalid", "tau": 0.7, "targets": [1],
-      "candidates": [[[0.3, 0.2]]], "available": [[true]],
-      "predictions": [[0]], "target_probabilities": [[0.3]],
-      "expected": {"coverage": 1.0, "validity_returned_class": 0.0, "validity_returned_threshold": 0.0, "valid_success_rate_class_per_requested_slot": 0.0, "valid_success_rate_threshold_per_requested_slot": 0.0}
+      "id": "returned_invalid",
+      "tau": 0.7,
+      "targets": [
+        1
+      ],
+      "candidates": [
+        [
+          [
+            0.3,
+            0.2
+          ]
+        ]
+      ],
+      "available": [
+        [
+          true
+        ]
+      ],
+      "predictions": [
+        [
+          0
+        ]
+      ],
+      "target_probabilities": [
+        [
+          0.3
+        ]
+      ],
+      "expected": {
+        "coverage": 1.0,
+        "validity_returned_class": 0.0,
+        "validity_returned_threshold": 0.0,
+        "valid_success_rate_class_per_requested_slot": 0.0,
+        "valid_success_rate_threshold_per_requested_slot": 0.0
+      }
     },
     {
-      "id": "unavailable", "tau": 0.7, "targets": [1],
-      "candidates": [[[null, null]]], "available": [[false]],
-      "predictions": [[null]], "target_probabilities": [[null]],
-      "expected": {"coverage": 0.0, "validity_returned_class": null, "validity_returned_threshold": null, "valid_success_rate_class_per_requested_slot": 0.0, "valid_success_rate_threshold_per_requested_slot": 0.0}
+      "id": "unavailable",
+      "tau": 0.7,
+      "targets": [
+        1
+      ],
+      "candidates": [
+        [
+          [
+            null,
+            null
+          ]
+        ]
+      ],
+      "available": [
+        [
+          false
+        ]
+      ],
+      "predictions": [
+        [
+          null
+        ]
+      ],
+      "target_probabilities": [
+        [
+          null
+        ]
+      ],
+      "expected": {
+        "coverage": 0.0,
+        "validity_returned_class": null,
+        "validity_returned_threshold": null,
+        "valid_success_rate_class_per_requested_slot": 0.0,
+        "valid_success_rate_threshold_per_requested_slot": 0.0
+      }
     },
     {
-      "id": "best_effort_only", "tau": 0.7, "targets": [1],
-      "candidates": [[[null, null]]], "available": [[false]],
-      "predictions": [[null]], "target_probabilities": [[null]],
-      "artifacts": {"method.best_effort": [[0.4, 0.2]]},
-      "expected": {"coverage": 0.0, "validity_returned_class": null, "validity_returned_threshold": null, "valid_success_rate_class_per_requested_slot": 0.0, "valid_success_rate_threshold_per_requested_slot": 0.0}
+      "id": "best_effort_only",
+      "tau": 0.7,
+      "targets": [
+        1
+      ],
+      "candidates": [
+        [
+          [
+            null,
+            null
+          ]
+        ]
+      ],
+      "available": [
+        [
+          false
+        ]
+      ],
+      "predictions": [
+        [
+          null
+        ]
+      ],
+      "target_probabilities": [
+        [
+          null
+        ]
+      ],
+      "artifacts": {
+        "method.best_effort": [
+          [
+            0.4,
+            0.2
+          ]
+        ]
+      },
+      "expected": {
+        "coverage": 0.0,
+        "validity_returned_class": null,
+        "validity_returned_threshold": null,
+        "valid_success_rate_class_per_requested_slot": 0.0,
+        "valid_success_rate_threshold_per_requested_slot": 0.0
+      }
     },
     {
-      "id": "target_class_below_threshold", "tau": 0.7, "targets": [1],
-      "candidates": [[[0.6, 0.2]]], "available": [[true]],
-      "predictions": [[1]], "target_probabilities": [[0.6]],
-      "expected": {"coverage": 1.0, "validity_returned_class": 1.0, "validity_returned_threshold": 0.0, "valid_success_rate_class_per_requested_slot": 1.0, "valid_success_rate_threshold_per_requested_slot": 0.0}
+      "id": "target_class_below_threshold",
+      "tau": 0.7,
+      "targets": [
+        1
+      ],
+      "candidates": [
+        [
+          [
+            0.6,
+            0.2
+          ]
+        ]
+      ],
+      "available": [
+        [
+          true
+        ]
+      ],
+      "predictions": [
+        [
+          1
+        ]
+      ],
+      "target_probabilities": [
+        [
+          0.6
+        ]
+      ],
+      "expected": {
+        "coverage": 1.0,
+        "validity_returned_class": 1.0,
+        "validity_returned_threshold": 0.0,
+        "valid_success_rate_class_per_requested_slot": 1.0,
+        "valid_success_rate_threshold_per_requested_slot": 0.0
+      }
     },
     {
-      "id": "partial_k3", "tau": 0.7, "targets": [1],
-      "candidates": [[[0.8, 0.2], [0.4, 0.6], [null, null]]], "available": [[true, true, false]],
-      "predictions": [[1, 0, null]], "target_probabilities": [[0.8, 0.4, null]],
-      "expected": {"coverage": 1.0, "validity_returned_class": 0.5, "validity_returned_threshold": 0.5, "valid_success_rate_class_per_requested_slot": 0.3333333333333333, "valid_success_rate_threshold_per_requested_slot": 0.3333333333333333}
+      "id": "partial_k3",
+      "tau": 0.7,
+      "targets": [
+        1
+      ],
+      "candidates": [
+        [
+          [
+            0.8,
+            0.2
+          ],
+          [
+            0.2,
+            0.3
+          ],
+          [
+            null,
+            null
+          ]
+        ]
+      ],
+      "available": [
+        [
+          true,
+          true,
+          false
+        ]
+      ],
+      "predictions": [
+        [
+          1,
+          0,
+          null
+        ]
+      ],
+      "target_probabilities": [
+        [
+          0.8,
+          0.2,
+          null
+        ]
+      ],
+      "expected": {
+        "coverage": 1.0,
+        "validity_returned_class": 0.5,
+        "validity_returned_threshold": 0.5,
+        "valid_success_rate_class_per_requested_slot": 0.3333333333333333,
+        "valid_success_rate_threshold_per_requested_slot": 0.3333333333333333
+      }
     }
   ],
   "invalid_results": [
-    {"id": "unavailable_payload_not_nan", "candidates": [[[0.2, 0.1], [0.2, 0.1]]], "available": [[true, false]], "error": "unavailable slots must contain only NaN"},
-    {"id": "available_payload_nonfinite", "candidates": [[[null, 0.1]]], "available": [[true]], "error": "available slots must be finite"},
-    {"id": "duplicate_padding", "candidates": [[[0.8, 0.2], [0.8, 0.2], [null, null]]], "available": [[true, true, false]], "error": "available candidates must not duplicate padding"}
+    {
+      "id": "unavailable_payload_not_nan",
+      "candidates": [
+        [
+          [
+            0.2,
+            0.1
+          ],
+          [
+            0.2,
+            0.1
+          ]
+        ]
+      ],
+      "available": [
+        [
+          true,
+          false
+        ]
+      ],
+      "error": "unavailable slots must contain only NaN"
+    },
+    {
+      "id": "available_payload_nonfinite",
+      "candidates": [
+        [
+          [
+            null,
+            0.1
+          ]
+        ]
+      ],
+      "available": [
+        [
+          true
+        ]
+      ],
+      "error": "available slots must be finite"
+    },
+    {
+      "id": "duplicate_padding",
+      "candidates": [
+        [
+          [
+            0.8,
+            0.2
+          ],
+          [
+            0.8,
+            0.2
+          ],
+          [
+            null,
+            null
+          ]
+        ]
+      ],
+      "available": [
+        [
+          true,
+          true,
+          false
+        ]
+      ],
+      "error": "available candidates must not duplicate padding"
+    }
+  ],
+  "evaluator_cases": [
+    {
+      "id": "multi_factual_partial_k3",
+      "tau": 0.7,
+      "primary_rank": 1,
+      "targets": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "candidates": [
+        [
+          [
+            0.8,
+            0.1
+          ],
+          [
+            0.3,
+            0.2
+          ],
+          [
+            0.4,
+            0.4
+          ]
+        ],
+        [
+          [
+            0.2,
+            0.8
+          ],
+          [
+            0.3,
+            0.8
+          ],
+          [
+            null,
+            null
+          ]
+        ],
+        [
+          [
+            null,
+            null
+          ],
+          [
+            0.7,
+            0.2
+          ],
+          [
+            null,
+            null
+          ]
+        ],
+        [
+          [
+            null,
+            null
+          ],
+          [
+            null,
+            null
+          ],
+          [
+            0.2,
+            0.6
+          ]
+        ],
+        [
+          [
+            null,
+            null
+          ],
+          [
+            null,
+            null
+          ],
+          [
+            null,
+            null
+          ]
+        ]
+      ],
+      "available": [
+        [
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          false
+        ],
+        [
+          false,
+          true,
+          false
+        ],
+        [
+          false,
+          false,
+          true
+        ],
+        [
+          false,
+          false,
+          false
+        ]
+      ],
+      "predictions": [
+        [
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          null
+        ],
+        [
+          null,
+          1,
+          null
+        ],
+        [
+          null,
+          null,
+          0
+        ],
+        [
+          null,
+          null,
+          null
+        ]
+      ],
+      "target_probabilities": [
+        [
+          0.8,
+          0.2,
+          0.2
+        ],
+        [
+          0.3,
+          0.2,
+          null
+        ],
+        [
+          null,
+          0.6,
+          null
+        ],
+        [
+          null,
+          null,
+          0.2
+        ],
+        [
+          null,
+          null,
+          null
+        ]
+      ],
+      "expected": {
+        "n_factuals": 5,
+        "n_requested_slots": 15,
+        "n_returned_candidates": 7,
+        "coverage": 0.8,
+        "validity_returned_class": 0.2857142857142857,
+        "validity_returned_threshold": 0.14285714285714285,
+        "valid_success_rate_class_per_requested_slot": 0.13333333333333333,
+        "valid_success_rate_threshold_per_requested_slot": 0.06666666666666667,
+        "valid_success_rate_class_per_factual": 0.4,
+        "valid_success_rate_threshold_per_factual": 0.2,
+        "primary_coverage": 0.6,
+        "primary_validity_returned_class": 0.3333333333333333,
+        "primary_validity_returned_threshold": 0.0,
+        "set_coverage_at_k": 0.2,
+        "set_returned_count_mean": 1.4,
+        "set_validity_returned_class": 0.2857142857142857,
+        "set_validity_returned_threshold": 0.14285714285714285
+      }
+    }
   ]
 }

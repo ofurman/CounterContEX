@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Protocol, runtime_checkable
 
@@ -326,3 +326,102 @@ class GenerationRequest:
             raise ValueError("seed must be non-negative")
         object.__setattr__(self, "factuals", factuals)
         object.__setattr__(self, "targets", targets)
+
+
+def _validate_json_value(value: Any, *, path: str) -> None:
+    """Reject diagnostics that cannot be represented in a manifest."""
+    if value is None or isinstance(value, str | bool | int | float):
+        return
+    if isinstance(value, np.generic):
+        _validate_json_value(value.item(), path=path)
+        return
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError(f"{path} keys must be strings")
+            _validate_json_value(item, path=f"{path}.{key}")
+        return
+    if isinstance(value, list | tuple):
+        for index, item in enumerate(value):
+            _validate_json_value(item, path=f"{path}[{index}]")
+        return
+    raise TypeError(f"{path} must contain only JSON-serializable values")
+
+
+@dataclass(frozen=True)
+class GenerationResult:
+    """Canonical, method-neutral counterfactual generation output."""
+
+    candidates: np.ndarray
+    available: np.ndarray
+    point_diagnostics: tuple[Mapping[str, Any], ...] = ()
+    run_diagnostics: Mapping[str, Any] = field(default_factory=dict)
+    artifacts: Mapping[str, np.ndarray] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        candidates = readonly_array(
+            self.candidates,
+            dtype=np.float64,
+            ndim=3,
+            name="candidates",
+        )
+        available = readonly_array(
+            self.available,
+            dtype=np.bool_,
+            ndim=2,
+            name="available",
+        )
+        if available.shape != candidates.shape[:2]:
+            raise ValueError("available must have shape (n_factuals, k)")
+        if candidates.shape[1] <= 0 or candidates.shape[2] <= 0:
+            raise ValueError("candidates must have positive k and feature dimensions")
+        if np.any(~np.isfinite(candidates[available])):
+            raise ValueError("available slots must be finite")
+        if np.any(~np.isnan(candidates[~available])):
+            raise ValueError("unavailable slots must contain only NaN")
+        for rows, row_available in zip(candidates, available, strict=True):
+            returned = rows[row_available]
+            if len(returned) > 1 and len(np.unique(returned, axis=0)) != len(returned):
+                raise ValueError("available candidates must not duplicate padding")
+
+        diagnostics = tuple(dict(item) for item in self.point_diagnostics)
+        if diagnostics and len(diagnostics) != len(candidates):
+            raise ValueError("point diagnostics must match the factual row count")
+        for index, item in enumerate(diagnostics):
+            _validate_json_value(item, path=f"point_diagnostics[{index}]")
+        run_diagnostics = dict(self.run_diagnostics)
+        _validate_json_value(run_diagnostics, path="run_diagnostics")
+
+        artifacts: dict[str, np.ndarray] = {}
+        for name, value in self.artifacts.items():
+            if not isinstance(name, str) or not name.startswith("method."):
+                raise ValueError(
+                    "artifact names must use the method.* namespace, "
+                    "for example method.best_effort"
+                )
+            artifact = readonly_array(value, name=f"artifacts[{name!r}]")
+            if artifact.dtype.hasobject:
+                raise TypeError(f"artifacts[{name!r}] must not use object dtype")
+            artifacts[name] = artifact
+
+        object.__setattr__(self, "candidates", candidates)
+        object.__setattr__(self, "available", available)
+        object.__setattr__(
+            self, "point_diagnostics", tuple(deep_freeze(item) for item in diagnostics)
+        )
+        object.__setattr__(self, "run_diagnostics", deep_freeze(run_diagnostics))
+        object.__setattr__(self, "artifacts", MappingProxyType(artifacts))
+
+    def validate_for_factuals(self, factuals: np.ndarray) -> None:
+        """Validate dimensions and reject factual rows represented as candidates."""
+        values = np.asarray(factuals, dtype=np.float64)
+        if values.ndim != 2 or values.shape != (
+            self.candidates.shape[0],
+            self.candidates.shape[2],
+        ):
+            raise ValueError("factuals must match candidate n and feature dimensions")
+        factual_padding = self.available & np.all(
+            self.candidates == values[:, None, :], axis=2
+        )
+        if factual_padding.any():
+            raise ValueError("available candidates must not contain factual padding")

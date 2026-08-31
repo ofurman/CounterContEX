@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import csv
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +21,13 @@ from experiments.zeroshot_cf.datasets.benchmark import (
     select_factual_indices,
 )
 from experiments.zeroshot_cf.discriminator import train_discriminator
+from experiments.zeroshot_cf.orchestration.legacy import (
+    aggregate_v1_metrics,
+    write_v1_dataset_outputs,
+)
+from experiments.zeroshot_cf.orchestration.legacy import (
+    write_result_table as write_v1_result_table,
+)
 
 DATASETS = ("heloc", "bank_marketing", "give_me_some_credit", "lending_club")
 DEFAULT_MAX_TEST = 1000
@@ -247,20 +253,7 @@ def aggregate_metrics_path(results_dir: Path, stem: str) -> Path:
 
 def write_result_table(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
     """Write a CSV result table with stable first-seen column ordering."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not rows:
-        raise ValueError("cannot write an empty result table")
-    columns: list[str] = []
-    normalized_rows = [dict(row) for row in rows]
-    for row in normalized_rows:
-        for key in row:
-            if key not in columns:
-                columns.append(key)
-    with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns)
-        writer.writeheader()
-        writer.writerows(normalized_rows)
-    print(f"Wrote {path}")
+    write_v1_result_table(path, rows)
 
 
 def write_dataset_outputs(
@@ -271,12 +264,14 @@ def write_dataset_outputs(
     arrays: Mapping[str, Any] | None = None,
 ) -> None:
     """Write one dataset's metrics/points CSVs and optional NPZ arrays."""
-    write_result_table(paths.metrics_csv, [metrics_row])
-    write_result_table(paths.points_csv, point_rows)
-    if arrays is not None:
-        paths.arrays_npz.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(paths.arrays_npz, **arrays)
-        print(f"Wrote {paths.arrays_npz}")
+    write_v1_dataset_outputs(
+        paths.metrics_csv,
+        paths.points_csv,
+        paths.arrays_npz,
+        metrics_row,
+        point_rows,
+        arrays=arrays,
+    )
 
 
 def aggregate_dataset_metrics(
@@ -286,22 +281,16 @@ def aggregate_dataset_metrics(
     datasets: Sequence[str] = DATASETS,
 ) -> Path:
     """Combine completed per-dataset metrics in protocol dataset order."""
-    rows: list[dict[str, Any]] = []
-    missing: list[str] = []
-    for dataset_name in datasets:
-        path = dataset_result_paths(results_dir, stem, dataset_name).metrics_csv
-        if not path.exists():
-            missing.append(dataset_name)
-            continue
-        with path.open(newline="") as handle:
-            rows.extend(csv.DictReader(handle))
-    if missing:
-        raise FileNotFoundError(
-            "Missing per-dataset benchmark results for: " + ", ".join(missing)
-        )
-    output = aggregate_metrics_path(results_dir, stem)
-    write_result_table(output, rows)
-    return output
+    return aggregate_v1_metrics(
+        [
+            (
+                dataset_name,
+                dataset_result_paths(results_dir, stem, dataset_name).metrics_csv,
+            )
+            for dataset_name in datasets
+        ],
+        aggregate_metrics_path(results_dir, stem),
+    )
 
 
 def mean_on_valid(values: Sequence[float] | np.ndarray, valid: np.ndarray) -> float:

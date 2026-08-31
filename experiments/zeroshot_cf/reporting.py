@@ -7,17 +7,9 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from experiments.zeroshot_cf.data import get_grouped_categorical_action_space
-from experiments.zeroshot_cf.diverse_search import (
-    action_set_jaccard_distance,
-    action_unit_signature,
-)
+from experiments.zeroshot_cf.evaluation.metrics import compute_legacy_diverse_metrics
 from experiments.zeroshot_cf.metrics_harness import compute_metrics, print_metrics
-from experiments.zeroshot_cf.mixed_distance import (
-    action_unit_change_count,
-    grouped_gower_distance,
-)
 
 
 def evaluate_counterfactuals(
@@ -66,7 +58,9 @@ def evaluate_counterfactuals(
     metrics["frac_oob"] = frac_oob
 
     flipped = np.asarray(info["flipped_per_point"], dtype=bool)
-    l0_all = np.array([len(changed) for changed in info["changed_per_point"]], dtype=float)
+    l0_all = np.array(
+        [len(changed) for changed in info["changed_per_point"]], dtype=float
+    )
     steps_all = np.asarray(info["steps_per_point"], dtype=float)
     if flipped.any():
         l0_valid = l0_all[flipped]
@@ -130,93 +124,14 @@ def evaluate_diverse_counterfactual_sets(
     tau: float,
 ) -> dict[str, float]:
     """Evaluate validity, coverage, and pairwise diversity of returned sets."""
-    requested = int(X_cf_sets.shape[1]) if X_cf_sets.ndim >= 2 else 0
-    metrics = {
-        "diverse_coverage_at_k": float(np.mean(counts >= requested)),
-        "diverse_returned_count_mean": float(np.mean(counts)),
-    }
-    if requested == 1:
-        return metrics
-
     numerical, groups, _ = get_grouped_categorical_action_space(bundle)
-    classifier = disc_model
-    targets = np.asarray(y_target, dtype=int)
-    sets = np.asarray(X_cf_sets)
-    validity: list[bool] = []
-    action_distances: list[float] = []
-    value_distances: list[float] = []
-    factual_distances: list[float] = []
-    action_counts: list[int] = []
-    for index, count in enumerate(counts):
-        rows = sets[index, :count]
-        if not len(rows):
-            continue
-        probabilities = np.asarray(classifier.predict_proba(rows))
-        predictions = np.asarray(classifier.predict(rows))
-        validity.extend(
-            (
-                (predictions == targets[index])
-                & (probabilities[:, targets[index]] >= tau)
-            ).tolist()
-        )
-        factual_distances.extend(
-            grouped_gower_distance(
-                rows,
-                X_test[index],
-                numerical,
-                groups,
-            ).tolist()
-        )
-        action_counts.extend(
-            action_unit_change_count(
-                rows,
-                X_test[index],
-                numerical,
-                groups,
-            ).tolist()
-        )
-        signatures = [
-            action_unit_signature(row, X_test[index], numerical, groups) for row in rows
-        ]
-        for left in range(len(rows)):
-            for right in range(left + 1, len(rows)):
-                action_distances.append(
-                    action_set_jaccard_distance(signatures[left], signatures[right])
-                )
-                value_distances.append(
-                    float(
-                        grouped_gower_distance(
-                            rows[left],
-                            rows[right],
-                            numerical,
-                            groups,
-                        )[0]
-                    )
-                )
-
-    metrics.update(
-        {
-            "diverse_returned_validity": (
-                float(np.mean(validity)) if validity else float("nan")
-            ),
-            "diverse_action_jaccard_mean": (
-                float(np.mean(action_distances)) if action_distances else float("nan")
-            ),
-            "diverse_action_jaccard_min": (
-                float(np.min(action_distances)) if action_distances else float("nan")
-            ),
-            "diverse_pairwise_gower_mean": (
-                float(np.mean(value_distances)) if value_distances else float("nan")
-            ),
-            "diverse_pairwise_gower_min": (
-                float(np.min(value_distances)) if value_distances else float("nan")
-            ),
-            "diverse_factual_gower_mean": (
-                float(np.mean(factual_distances)) if factual_distances else float("nan")
-            ),
-            "diverse_action_count_mean": (
-                float(np.mean(action_counts)) if action_counts else float("nan")
-            ),
-        }
+    return compute_legacy_diverse_metrics(
+        factuals=X_test,
+        oracle=disc_model,
+        targets=y_target,
+        candidates=X_cf_sets,
+        counts=counts,
+        probability_threshold=tau,
+        numerical=numerical,
+        categorical_groups=groups,
     )
-    return metrics
