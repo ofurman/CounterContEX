@@ -1,0 +1,9 @@
+{
+  "fixture_version": 1,
+  "monitored_sources": ["reporting", "tabicl_runtime"],
+  "forbidden_targets": ["data", "benchmark_protocol"],
+  "known_forbidden_edges": [
+    {"source": "reporting", "target": "data", "reason": "evaluation/reporting reaches into dataset loading for grouped action metadata"},
+    {"source": "tabicl_runtime", "target": "benchmark_protocol", "reason": "the TabICL backend receives the combined dataset/protocol context"}
+  ]
+}

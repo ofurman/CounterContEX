@@ -1,0 +1,70 @@
+{
+  "fixture_version": 1,
+  "generator_import": "experiments.zeroshot_cf.generator.generate_counterfactual_batch",
+  "common_summary_columns": [
+    "dataset", "method", "split_variant", "split_seed", "test_selection",
+    "n_train", "n_validation", "n_test_pool", "n_test", "cf_per_factual",
+    "target_classifier_validation_accuracy", "target_classifier_test_accuracy",
+    "preprocessing_variant", "n_dropped_rows", "coverage", "validity",
+    "actionability", "sparsity", "action_unit_sparsity_mean",
+    "proximity_grouped_gower", "proximity_continuous_manhattan",
+    "proximity_continuous_euclidean", "lof_scores_cf", "lof_scores_test",
+    "isolation_forest_scores_cf", "isolation_forest_scores_test",
+    "runtime_generation_s", "sparsity_exact", "true_actionability",
+    "proximity_all_features_euclidean", "failure_rate", "l0_count_mean",
+    "factual_oob_fraction", "cf_oob_fraction", "runtime_total_s"
+  ],
+  "common_point_columns": [
+    "point", "factual_label", "factual_prediction", "target", "cf_prediction",
+    "valid", "target_probability", "changed_columns"
+  ],
+  "methods": {
+    "dicoflex": {
+      "source_module": "exp9_dicoflex_benchmark",
+      "legacy_method_ids": ["tabicl_v2_sparse", "tabicl_v2_data_plausible", "tabicl_v2_diverse_dpp"],
+      "filename_stem": "exp9_tabicl",
+      "required_npz_keys": ["X_test", "X_sparse", "y_test", "X_cf", "X_cf_sets", "diverse_available_count", "y_pred", "y_target", "y_cf_pred"]
+    },
+    "nice": {
+      "source_module": "exp11_nice_nun_baseline",
+      "legacy_method_ids": ["nice_nun_greedy_lof"],
+      "filename_stem": "exp11_nice_nun",
+      "required_npz_keys": ["X_test", "y_test", "X_cf", "y_pred", "y_target", "y_cf_pred", "prototypes", "prototype_indices"]
+    },
+    "wachter": {
+      "source_module": "exp12_optimization_baselines",
+      "legacy_method_ids": ["wachter"],
+      "filename_stem": "exp12_wachter",
+      "required_npz_keys": ["X_test", "y_test", "X_cf", "y_pred", "y_target", "y_cf_pred"]
+    },
+    "growing_spheres": {
+      "source_module": "exp12_optimization_baselines",
+      "legacy_method_ids": ["growing_spheres"],
+      "filename_stem": "exp12_growing_spheres",
+      "required_npz_keys": ["X_test", "y_test", "X_cf", "y_pred", "y_target", "y_cf_pred"]
+    },
+    "dice": {
+      "source_module": "exp13_dice_baseline",
+      "legacy_method_ids": ["dice_genetic_atomic_pruned"],
+      "filename_stem": "exp13_dice_genetic",
+      "required_npz_keys": ["X_test", "y_test", "X_cf", "y_pred", "y_target", "y_cf_pred", "X_cf_raw"]
+    },
+    "face": {
+      "source_module": "exp14_face_baseline",
+      "legacy_method_ids": ["face_knn_density_weighted"],
+      "filename_stem": "exp14_face_knn",
+      "required_npz_keys": ["X_test", "y_test", "X_cf", "y_pred", "y_target", "y_cf_pred"]
+    }
+  },
+  "cli_commands": [
+    {"module": "experiments.zeroshot_cf.exp8_tabicl_cf", "help_tokens": ["--dataset", "--cf-mode", "--n-counterfactuals"]},
+    {"module": "experiments.zeroshot_cf.exp9_dicoflex_benchmark", "help_tokens": ["--dataset", "--results-dir", "--n-counterfactuals"]},
+    {"module": "experiments.zeroshot_cf.exp11_nice_nun_baseline", "help_tokens": ["--dataset", "--results-dir"]},
+    {"module": "experiments.zeroshot_cf.exp12_optimization_baselines", "help_tokens": ["--dataset", "--method", "--results-dir"]},
+    {"module": "experiments.zeroshot_cf.exp13_dice_baseline", "help_tokens": ["--dataset", "--stopping-threshold", "--results-dir"]},
+    {"module": "experiments.zeroshot_cf.exp14_face_baseline", "help_tokens": ["--dataset", "--n-neighbors", "--results-dir"]},
+    {"module": "experiments.zeroshot_cf.tabicl_checkpoints", "help_tokens": ["--cache-dir", "Stage local TabICLv2 checkpoints"]},
+    {"module": "experiments.zeroshot_cf.tabicl_smoke_test", "help_tokens": ["--cache-dir", "--device"]}
+  ],
+  "optional_model_imports": ["tabicl", "tabpfn", "dice_ml", "counterfactual_explanation"]
+}

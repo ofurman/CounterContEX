@@ -2,7 +2,7 @@
   "plan": "counterfactual-evaluation-architecture",
   "created": "2026-08-31",
   "stages": [
-    {"id": 1, "title": "Freeze contracts and compatibility evidence", "file": "stages/01-freeze-contracts.md", "status": "PENDING", "depends_on": [], "commit": null, "note": null, "blocked_by": []},
+    {"id": 1, "title": "Freeze contracts and compatibility evidence", "file": "stages/01-freeze-contracts.md", "status": "DONE", "depends_on": [], "commit": "pending", "note": "Frozen source-bound v1 compatibility, semantic fixtures, and offline CLI contracts; 117-test suite passed.", "blocked_by": []},
     {"id": 2, "title": "Separate portable data and benchmark cases", "file": "stages/02-separate-data-cases.md", "status": "PENDING", "depends_on": [1], "commit": null, "note": null, "blocked_by": []},
     {"id": 3, "title": "Extract evaluation and artifact ownership", "file": "stages/03-extract-evaluation-artifacts.md", "status": "PENDING", "depends_on": [2], "commit": null, "note": null, "blocked_by": []},
     {"id": 4, "title": "Encapsulate all reference methods", "file": "stages/04-encapsulate-baselines.md", "status": "PENDING", "depends_on": [3], "commit": null, "note": null, "blocked_by": []},
