@@ -1,0 +1,32 @@
+schema_version: countercontex.matrix.v1
+suite: architecture_one_factual
+output_root: experiments/zeroshot_cf/results/local/architecture_one_factual
+datasets:
+  - heloc
+  - bank_marketing
+  - give_me_some_credit
+  - lending_club
+methods:
+  - name: dicoflex
+    variant: tabicl_sparse
+    params:
+      foundation:
+        n_estimators: 1
+  - nice
+  - wachter
+  - growing_spheres
+  - dice
+  - face
+seeds: [42]
+protocol:
+  max_test: 1
+  test_selection: stratified
+target_model:
+  name: retained_logistic_regression
+  params:
+    C: 1.0
+    max_iter: 1000
+    seed: 42
+evaluation:
+  probability_threshold: 0.7
+legacy_export: true

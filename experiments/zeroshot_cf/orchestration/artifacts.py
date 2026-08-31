@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import os
 import shutil
+import time
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -193,6 +195,8 @@ class ArtifactStore:
         *,
         manifest: Mapping[str, Any],
         report: EvaluationReport,
+        manifest_finalizer: Callable[[Mapping[str, Any], float], Mapping[str, Any]]
+        | None = None,
     ) -> StoredRun:
         if not run_id or run_id in {".", ".."} or Path(run_id).name != run_id:
             raise ValueError("run_id must be one safe path component")
@@ -203,6 +207,7 @@ class ArtifactStore:
         temporary = self.root / f".{run_id}.{uuid.uuid4().hex}.partial"
         temporary.mkdir()
         published = False
+        write_started = time.perf_counter()
         try:
             summary_rows = [dict(report.summary.values)]
             point_rows = [{"point": row.point, **row.values} for row in report.points]
@@ -226,11 +231,17 @@ class ArtifactStore:
                 for name, value in report.arrays.values.items()
             }
             np.savez_compressed(temporary / "arrays.npz", **arrays)
+            payload_write_s = time.perf_counter() - write_started
+            finalized_manifest = (
+                manifest
+                if manifest_finalizer is None
+                else manifest_finalizer(manifest, payload_write_s)
+            )
             payload = {
                 "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
                 "evaluation_schema_version": report.schema_version,
                 "run_id": run_id,
-                "config": _json_value(manifest),
+                "config": _json_value(finalized_manifest),
                 "report_metadata": _json_value(report.metadata),
                 "table_types": table_types,
             }
@@ -331,3 +342,75 @@ class ArtifactStore:
 
     def aggregate_summary(self) -> tuple[dict[str, Any], ...]:
         return tuple(dict(run.report.summary.values) for run in self.completed_runs())
+
+    def aggregate_expected(
+        self,
+        expected_cells: Sequence[str],
+        *,
+        output: Path | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        """Aggregate exactly the declared complete cells from validated manifests."""
+        from experiments.zeroshot_cf.orchestration.spec import canonical_json
+
+        expected = tuple(expected_cells)
+        if len(set(expected)) != len(expected):
+            raise ValueError("expected matrix contains duplicate cell identities")
+        if self.root.exists():
+            partial = [
+                path.name
+                for path in self.root.iterdir()
+                if path.is_dir()
+                and not path.name.startswith(".")
+                and not (path / "COMPLETE").is_file()
+            ]
+            if partial:
+                raise ValueError(
+                    f"partial run directories are not aggregateable: {partial}"
+                )
+        runs = self.completed_runs()
+        by_cell: dict[str, StoredRun] = {}
+        for stored in runs:
+            cell_id = stored.manifest.get("cell_id")
+            identity = stored.manifest.get("identity")
+            if not isinstance(cell_id, str) or not isinstance(identity, dict):
+                raise ValueError("run manifest is missing matrix identity")
+            derived = hashlib.sha256(canonical_json(identity).encode()).hexdigest()
+            if (
+                derived != stored.run_id
+                or stored.manifest.get("run_id") != stored.run_id
+            ):
+                raise ValueError("run manifest identity does not match its run_id")
+            identity_scientific = identity.get("scientific_spec")
+            manifest_scientific = stored.manifest.get("scientific_spec")
+            if not isinstance(identity_scientific, dict):
+                raise ValueError("run manifest identity is missing scientific_spec")
+            derived_cell = hashlib.sha256(
+                canonical_json(identity_scientific).encode()
+            ).hexdigest()
+            if derived_cell != cell_id:
+                raise ValueError(
+                    "run manifest scientific identity does not match cell_id"
+                )
+            if manifest_scientific != identity_scientific:
+                raise ValueError(
+                    "run manifest scientific_spec does not match identity"
+                )
+            if cell_id in by_cell:
+                raise ValueError(f"duplicate completed matrix cell: {cell_id}")
+            by_cell[cell_id] = stored
+        missing = sorted(set(expected) - set(by_cell))
+        extra = sorted(set(by_cell) - set(expected))
+        if missing or extra:
+            raise ValueError(f"matrix cell mismatch: missing={missing}, extra={extra}")
+        rows = tuple(
+            {
+                "run_id": by_cell[cell].run_id,
+                "cell_id": cell,
+                **dict(by_cell[cell].report.summary.values),
+            }
+            for cell in expected
+        )
+        if output is not None:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            _write_csv(output, rows)
+        return rows
