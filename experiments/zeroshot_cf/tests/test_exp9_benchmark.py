@@ -8,12 +8,10 @@ import csv
 from pathlib import Path
 from types import SimpleNamespace
 
-import numpy as np
-import pytest
-
 import experiments.zeroshot_cf.benchmark_protocol as protocol
 import experiments.zeroshot_cf.exp9_dicoflex_benchmark as benchmark
-
+import numpy as np
+import pytest
 from experiments.zeroshot_cf.benchmark_protocol import BenchmarkDatasetContext
 from experiments.zeroshot_cf.exp9_dicoflex_benchmark import (
     DATASETS,
@@ -32,8 +30,8 @@ from experiments.zeroshot_cf.exp9_dicoflex_benchmark import (
     DEFAULT_N_COUNTERFACTUALS,
     DEFAULT_N_ESTIMATORS,
     DEFAULT_TABICL_JOINT_PERMUTATIONS,
-    DEFAULT_VALIDATION_FRACTION,
     DEFAULT_TEMPERATURE,
+    DEFAULT_VALIDATION_FRACTION,
     TAU,
     aggregate_results,
     run_dataset,
@@ -116,6 +114,7 @@ def _stub_run_dataset(
     monkeypatch: pytest.MonkeyPatch,
     *,
     n_counterfactuals: int = DEFAULT_N_COUNTERFACTUALS,
+    portable_case: bool = False,
 ) -> tuple[dict[str, object], dict[str, object]]:
     captures: dict[str, object] = {}
     written: dict[str, object] = {}
@@ -132,9 +131,7 @@ def _stub_run_dataset(
         X_train=X_train,
         X_val=X_val,
         y_val=y_val,
-        X_test=np.array(
-            [[0.1, 0.1], [0.2, 0.2], [0.3, 0.3], [0.4, 0.4], [0.5, 0.5]]
-        ),
+        X_test=np.array([[0.1, 0.1], [0.2, 0.2], [0.3, 0.3], [0.4, 0.4], [0.5, 0.5]]),
         split_variant="train_val_test_0.64_0.16_0.20",
         numerical_features_indices=[0, 1],
         preprocessing_variant="drop_heloc_all_minus9",
@@ -153,6 +150,7 @@ def _stub_run_dataset(
         grouped_actionable=(),
         immutable_idx=(1,),
         categorical_groups=(),
+        benchmark_case=object() if portable_case else None,
     )
 
     diagnostics = SimpleNamespace(
@@ -229,6 +227,7 @@ def _stub_run_dataset(
             sparse_counterfactuals=X_test.copy(),
             counterfactual_sets=np.repeat(X_cf[:, None, :], n_counterfactuals, axis=1),
             diagnostics=diagnostics,
+            result=object(),
         )
 
     def fake_write_outputs(paths, row, point_rows, *, arrays=None):
@@ -241,14 +240,16 @@ def _stub_run_dataset(
         def __init__(self, *args, **kwargs) -> None:
             del args, kwargs
 
-        def fit(self, X: np.ndarray) -> "FakeLocalOutlierFactor":
+        def fit(self, X: np.ndarray) -> FakeLocalOutlierFactor:
             del X
             return self
 
         def score_samples(self, X: np.ndarray) -> np.ndarray:
             return -np.ones(len(X))
 
-    monkeypatch.setattr(benchmark, "prepare_benchmark_context", fake_prepare_benchmark_context)
+    monkeypatch.setattr(
+        benchmark, "prepare_benchmark_context", fake_prepare_benchmark_context
+    )
     monkeypatch.setattr(benchmark, "run_tabicl_benchmark", fake_run_tabicl_benchmark)
     monkeypatch.setattr(benchmark, "get_one_hot_groups", lambda bundle: [])
     monkeypatch.setattr(
@@ -270,7 +271,11 @@ def _stub_run_dataset(
     )
     monkeypatch.setattr(benchmark, "print_metrics", lambda *args, **kwargs: None)
     monkeypatch.setattr(benchmark, "LocalOutlierFactor", FakeLocalOutlierFactor)
-    monkeypatch.setattr(benchmark, "grouped_gower_distance", lambda *args, **kwargs: np.array([0.2, 0.3, 0.4]))
+    monkeypatch.setattr(
+        benchmark,
+        "grouped_gower_distance",
+        lambda *args, **kwargs: np.array([0.2, 0.3, 0.4]),
+    )
     monkeypatch.setattr(benchmark, "write_dataset_outputs", fake_write_outputs)
     return captures, written
 
@@ -311,7 +316,9 @@ def test_exp9_run_dataset_uses_protocol_outputs_and_cache_dir(
 
     assert captures["dataset_name"] == "heloc"
     assert captures["prepare_kwargs"]["max_test"] == DEFAULT_MAX_TEST
-    assert captures["prepare_kwargs"]["validation_fraction"] == DEFAULT_VALIDATION_FRACTION
+    assert (
+        captures["prepare_kwargs"]["validation_fraction"] == DEFAULT_VALIDATION_FRACTION
+    )
     assert captures["prepare_kwargs"]["test_selection"] == "stratified"
     assert forwarded["n_estimators"] == DEFAULT_N_ESTIMATORS
     assert forwarded["temperature"] == DEFAULT_TEMPERATURE
@@ -356,11 +363,95 @@ def test_exp9_run_dataset_uses_protocol_outputs_and_cache_dir(
     assert point_rows[2]["valid"] is False
 
 
+def test_exp9_portable_case_uses_canonical_evaluator_and_stage3_set_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captures, _ = _stub_run_dataset(monkeypatch, portable_case=True)
+    canonical = object()
+    report = SimpleNamespace(
+        summary=SimpleNamespace(
+            values={
+                "primary_coverage": 2 / 3,
+                "primary_validity_returned_class": 1 / 2,
+            }
+        )
+    )
+    calls: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        benchmark,
+        "compute_dicoflex_common_metrics",
+        lambda *args, **kwargs: pytest.fail("legacy common evaluator was used"),
+    )
+    monkeypatch.setattr(
+        benchmark,
+        "evaluate_diverse_counterfactual_sets",
+        lambda *args, **kwargs: pytest.fail("legacy diverse evaluator was used"),
+    )
+    monkeypatch.setattr(
+        benchmark,
+        "adapt_generator_result",
+        lambda result, *, seed: calls.update(result=result, seed=seed) or canonical,
+    )
+    monkeypatch.setattr(
+        benchmark,
+        "evaluate_result",
+        lambda context, result, *, probability_threshold: (
+            calls.update(
+                context=context,
+                canonical=result,
+                probability_threshold=probability_threshold,
+            )
+            or report
+        ),
+    )
+    monkeypatch.setattr(
+        benchmark,
+        "legacy_common_metrics",
+        lambda actual_report: {
+            "coverage": 99.0,
+            "validity": 99.0,
+            "actionability": 0.75,
+        },
+    )
+    monkeypatch.setattr(
+        benchmark,
+        "compute_legacy_diverse_metrics",
+        lambda **kwargs: (
+            calls.update(set_kwargs=kwargs)
+            or {
+                "diverse_coverage_at_k": 1 / 3,
+                "diverse_returned_count_mean": 4 / 3,
+            }
+        ),
+    )
+
+    row = run_dataset("heloc")
+
+    assert calls["seed"] == 42
+    assert calls["canonical"] is canonical
+    assert calls["probability_threshold"] == TAU
+    assert calls["context"] is captures["runtime_context"]
+    assert row["coverage"] == pytest.approx(2 / 3)
+    assert row["validity"] == pytest.approx(1 / 2)
+    assert row["diverse_returned_count_mean"] == pytest.approx(4 / 3)
+
+
 @pytest.mark.parametrize(
     ("n_counterfactuals", "cf_mode", "expected_method", "expected_schedule"),
     [
-        (1, "sparse", "tabicl_v2_sparse", "probability_ascent_until_valid_then_min_grouped_gower"),
-        (1, "data_plausible", "tabicl_v2_data_plausible", "probability_ascent_until_valid_then_one_shot_joint_reranking"),
+        (
+            1,
+            "sparse",
+            "tabicl_v2_sparse",
+            "probability_ascent_until_valid_then_min_grouped_gower",
+        ),
+        (
+            1,
+            "data_plausible",
+            "tabicl_v2_data_plausible",
+            "probability_ascent_until_valid_then_one_shot_joint_reranking",
+        ),
     ],
 )
 def test_exp9_single_counterfactual_modes_keep_distinct_objectives(
@@ -408,7 +499,9 @@ def test_exp9_incomplete_common_coverage_raises_instead_of_fabricating_metrics(
         categorical_groups=(),
     )
 
-    monkeypatch.setattr(benchmark, "prepare_benchmark_context", lambda *args, **kwargs: context)
+    monkeypatch.setattr(
+        benchmark, "prepare_benchmark_context", lambda *args, **kwargs: context
+    )
     monkeypatch.setattr(
         benchmark,
         "run_tabicl_benchmark",

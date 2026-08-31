@@ -38,12 +38,13 @@ from experiments.zeroshot_cf.benchmark_protocol import (
     write_dataset_outputs,
 )
 from experiments.zeroshot_cf.data import get_one_hot_groups
+from experiments.zeroshot_cf.evaluation.metrics import compute_legacy_diverse_metrics
 from experiments.zeroshot_cf.generator import (
     ATHENA_CONTEXT_SIZE,
     ATHENA_CONTEXT_STRATEGY,
-    DEFAULT_N_ESTIMATORS,
     DEFAULT_TEMPERATURE,
 )
+from experiments.zeroshot_cf.methods.dicoflex.method import adapt_generator_result
 from experiments.zeroshot_cf.metrics_harness import (
     compute_dicoflex_common_metrics,
     print_metrics,
@@ -53,6 +54,7 @@ from experiments.zeroshot_cf.mixed_distance import (
 )
 from experiments.zeroshot_cf.reporting import evaluate_diverse_counterfactual_sets
 from experiments.zeroshot_cf.retained_config import TAU
+from experiments.zeroshot_cf.runner_compat import evaluate_result, legacy_common_metrics
 from experiments.zeroshot_cf.tabicl_runtime import run_tabicl_benchmark
 from sklearn.neighbors import LocalOutlierFactor
 
@@ -144,26 +146,51 @@ def run_dataset(  # noqa: PLR0913
     X_cf = run.counterfactuals
     diagnostics = run.diagnostics
     categorical_groups = get_one_hot_groups(bundle)
-    common_metrics = compute_dicoflex_common_metrics(
-        context.disc_model,
-        X_cf,
-        X_test,
-        bundle.X_train,
-        context.y_target,
-        bundle.numerical_features_indices,
-        list(context.immutable_idx),
-        categorical_groups=categorical_groups,
-        sparsity_eps=DEFAULT_SPARSITY_EPS,
-    )
-    diverse_metrics = evaluate_diverse_counterfactual_sets(
-        X_test=X_test,
-        bundle=bundle,
-        disc_model=context.disc_model,
-        y_target=context.y_target,
-        X_cf_sets=run.counterfactual_sets,
-        counts=diagnostics.diverse_available_count_per_point,
-        tau=tau,
-    )
+    if context.benchmark_case is None:
+        # Source-bound test fixtures and third-party compatibility contexts retain
+        # the v1 metric seam. Normal benchmark runs always carry a portable case.
+        common_metrics = compute_dicoflex_common_metrics(
+            context.disc_model,
+            X_cf,
+            X_test,
+            bundle.X_train,
+            context.y_target,
+            bundle.numerical_features_indices,
+            list(context.immutable_idx),
+            categorical_groups=categorical_groups,
+            sparsity_eps=DEFAULT_SPARSITY_EPS,
+        )
+        diverse_metrics = evaluate_diverse_counterfactual_sets(
+            X_test=X_test,
+            bundle=bundle,
+            disc_model=context.disc_model,
+            y_target=context.y_target,
+            X_cf_sets=run.counterfactual_sets,
+            counts=diagnostics.diverse_available_count_per_point,
+            tau=tau,
+        )
+    else:
+        canonical_result = adapt_generator_result(run.result, seed=42)
+        report = evaluate_result(
+            context,
+            canonical_result,
+            probability_threshold=tau,
+        )
+        common_metrics = legacy_common_metrics(report)
+        common_metrics["coverage"] = float(report.summary.values["primary_coverage"])
+        common_metrics["validity"] = float(
+            report.summary.values["primary_validity_returned_class"]
+        )
+        diverse_metrics = compute_legacy_diverse_metrics(
+            factuals=X_test,
+            oracle=context.disc_model,
+            targets=context.y_target,
+            candidates=run.counterfactual_sets,
+            counts=diagnostics.diverse_available_count_per_point,
+            probability_threshold=tau,
+            numerical=bundle.numerical_features_indices,
+            categorical_groups=categorical_groups,
+        )
     print_metrics(common_metrics, prefix=f"{dataset_name}/DiCoFlex-common")
 
     posthoc_lof = LocalOutlierFactor(n_neighbors=20, novelty=True).fit(bundle.X_train)
@@ -236,7 +263,9 @@ def run_dataset(  # noqa: PLR0913
     initial_action_counts = np.asarray(
         diagnostics.initial_sparse_action_count_per_point, dtype=float
     )
-    final_action_counts = np.asarray(diagnostics.final_action_count_per_point, dtype=float)
+    final_action_counts = np.asarray(
+        diagnostics.final_action_count_per_point, dtype=float
+    )
     l0_count_mean = mean_on_valid(final_action_counts, valid)
     steps_mean = mean_on_valid(steps, valid)
     validity_steps_mean = float(validity_steps.mean())
@@ -265,9 +294,7 @@ def run_dataset(  # noqa: PLR0913
     row: dict[str, Any] = build_common_result_row(
         context,
         method=(
-            "tabicl_v2_diverse_dpp"
-            if n_counterfactuals > 1
-            else f"tabicl_v2_{cf_mode}"
+            "tabicl_v2_diverse_dpp" if n_counterfactuals > 1 else f"tabicl_v2_{cf_mode}"
         ),
         cf_per_factual=n_counterfactuals,
         extra_fields={
@@ -283,7 +310,9 @@ def run_dataset(  # noqa: PLR0913
             "max_validity_steps": diagnostics.max_validity_steps,
             "allow_revisits": allow_revisits,
             "categorical_proposal_count": diagnostics.categorical_proposal_count,
-            "categorical_confidence_batching": diagnostics.categorical_confidence_batching,
+            "categorical_confidence_batching": (
+                diagnostics.categorical_confidence_batching
+            ),
             "conditional_estimator_cache": diagnostics.conditional_estimator_cache,
             "tabicl_kv_cache": diagnostics.tabicl_kv_cache,
             "joint_shortlist_size": joint_shortlist_size,
@@ -306,9 +335,7 @@ def run_dataset(  # noqa: PLR0913
                 )
             ),
             "valid_candidate_objective": (
-                "quality_constrained_dpp"
-                if n_counterfactuals > 1
-                else "grouped_gower"
+                "quality_constrained_dpp" if n_counterfactuals > 1 else "grouped_gower"
             ),
             "n_estimators": n_estimators,
             "temperature": temperature,
@@ -319,7 +346,9 @@ def run_dataset(  # noqa: PLR0913
             "joint_scoring_runtime_s": float(
                 np.asarray(diagnostics.joint_scoring_runtime_s_per_point).sum()
             ),
-            "point_runtime_s_mean": float(np.asarray(diagnostics.point_runtime_s).mean()),
+            "point_runtime_s_mean": float(
+                np.asarray(diagnostics.point_runtime_s).mean()
+            ),
             **common_metrics,
             **diverse_metrics,
             "sparsity_exact": float((X_test != X_cf).mean()),
@@ -395,7 +424,9 @@ def run_dataset(  # noqa: PLR0913
             ),
             "joint_rows_scored": int(diagnostics.joint_rows_scored_per_point[i]),
             "extra_actions": int(diagnostics.extra_actions_per_point[i]),
-            "refinement_stopping_reason": diagnostics.refinement_stopping_reason_per_point[i],
+            "refinement_stopping_reason": (
+                diagnostics.refinement_stopping_reason_per_point[i]
+            ),
             "initial_valid_action_sparsity": float(initial_valid_sparsity[i]),
             "initial_valid_grouped_gower": float(initial_valid_gower[i]),
             "final_grouped_gower": float(grouped_gower_per_point[i]),
