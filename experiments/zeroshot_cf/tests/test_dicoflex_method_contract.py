@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import subprocess
 import sys
 from pathlib import Path
@@ -35,6 +36,16 @@ from experiments.zeroshot_cf.methods.dicoflex.method import (
     PreparedDiCoFlexMethod,
     adapt_generator_result,
 )
+
+
+def test_public_tabicl_runtime_compatibility_signature_is_preserved() -> None:
+    from experiments.zeroshot_cf.tabicl_runtime import (
+        TabICLBenchmarkRun,
+        run_tabicl_benchmark,
+    )
+
+    assert TabICLBenchmarkRun.__name__ == "TabICLBenchmarkRun"
+    assert "seed" not in inspect.signature(run_tabicl_benchmark).parameters
 
 
 class _Oracle:
@@ -210,6 +221,9 @@ def test_seed_42_adapter_is_exactly_equivalent_to_legacy_available_slots() -> No
     assert first["initial_valid_grouped_gower"] == 0.5
     assert first["first_action_type"] == "numerical"
     assert first["refinement_stopping_reason"] == "sparse_mode"
+    assert first["initial_tabicl_joint_log_density"] is None
+    assert first["final_tabicl_joint_log_density"] is None
+    assert first["tabicl_joint_log_density_gain"] is None
 
 
 def test_config_serialization_separates_search_diversity_and_foundation() -> None:

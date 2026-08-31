@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
@@ -49,6 +50,21 @@ def require_single_counterfactual(request: GenerationRequest) -> None:
         raise ValueError("method supports exactly one counterfactual per factual")
 
 
+def json_diagnostic(value: Any) -> Any:
+    """Convert method diagnostics to strict, portable JSON values."""
+    if isinstance(value, np.ndarray):
+        return json_diagnostic(value.tolist())
+    if isinstance(value, np.generic):
+        return json_diagnostic(value.item())
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, Mapping):
+        return {str(key): json_diagnostic(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [json_diagnostic(item) for item in value]
+    return value
+
+
 def canonical_single_result(
     raw_candidates: np.ndarray,
     available: np.ndarray,
@@ -70,7 +86,9 @@ def canonical_single_result(
     return GenerationResult(
         candidates=candidates,
         available=mask[:, None],
-        point_diagnostics=point_diagnostics,
-        run_diagnostics=run_diagnostics,
+        point_diagnostics=tuple(
+            json_diagnostic(dict(values)) for values in point_diagnostics
+        ),
+        run_diagnostics=json_diagnostic(dict(run_diagnostics)),
         artifacts=artifacts,
     )

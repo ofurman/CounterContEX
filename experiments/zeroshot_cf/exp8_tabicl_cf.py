@@ -13,7 +13,7 @@ import numpy as np
 from experiments.zeroshot_cf.generator import DEFAULT_N_ESTIMATORS, DEFAULT_TEMPERATURE
 from experiments.zeroshot_cf.orchestration.compat_cli import (
     legacy_run_spec,
-    run_legacy_dataset_with_stored,
+    run_legacy_dataset_with_context,
 )
 from experiments.zeroshot_cf.orchestration.exp8_compat import (
     export_exp8_result,
@@ -24,6 +24,7 @@ from experiments.zeroshot_cf.retained_config import DATASET_PARAMS, TAU
 
 RESULTS_DIR = Path(__file__).parent / "results"
 CF_MODES = ("sparse", "data_plausible")
+
 
 def _resolve_max_test(dataset_name: str, max_test: int | None) -> int | None:
     if max_test is not None and max_test < 0:
@@ -77,9 +78,7 @@ def _spec(  # noqa: PLR0913
     spec = legacy_run_spec(
         dataset_name,
         "dicoflex",
-        method_variant=(
-            "tabicl_sparse" if normalized_mode == "sparse" else "default"
-        ),
+        method_variant=("tabicl_sparse" if normalized_mode == "sparse" else "default"),
         method_params={
             "search": {
                 "tau": tau,
@@ -113,7 +112,6 @@ def _spec(  # noqa: PLR0913
         probability_threshold=tau,
     )
     return replace(spec, protocol=replace(spec.protocol, test_selection=test_selection))
-
 
 
 def generate_tabicl_counterfactuals(  # noqa: PLR0913
@@ -169,7 +167,7 @@ def generate_tabicl_counterfactuals(  # noqa: PLR0913
         test_selection=test_selection,
         drop_heloc_all_minus9=drop_heloc_all_minus9,
     )
-    metrics, stored = run_legacy_dataset_with_stored(
+    metrics, stored, runtime_context = run_legacy_dataset_with_context(
         spec,
         results_dir=RESULTS_DIR,
         tabicl_cache_dir=cache_dir,
@@ -179,8 +177,8 @@ def generate_tabicl_counterfactuals(  # noqa: PLR0913
         metrics,
         stored=stored,
         results_dir=RESULTS_DIR,
+        runtime_context=runtime_context,
     )
-
 
 
 def run_and_report(dataset_name: str, **kwargs: Any) -> dict[str, float]:
@@ -262,9 +260,7 @@ def main(argv: Sequence[str] | None = None) -> None:  # noqa: PLR0915
     args = parser.parse_args(argv)
 
     datasets = (
-        ["moons", "heloc", "german_credit"]
-        if args.dataset == "all"
-        else [args.dataset]
+        ["moons", "heloc", "german_credit"] if args.dataset == "all" else [args.dataset]
     )
     for dataset_name in datasets:
         run_and_report(

@@ -66,6 +66,16 @@ class ProposalSession(Protocol):
         temperature: float,
     ) -> np.ndarray: ...
 
+    def propose_numerical_batch(
+        self,
+        rows: np.ndarray,
+        columns: Sequence[int],
+        *,
+        quantiles: Sequence[float] | None,
+        confidences: float | Sequence[float] | np.ndarray | None,
+        temperature: float,
+    ) -> np.ndarray: ...
+
     def categorical_distribution(
         self,
         row: np.ndarray,

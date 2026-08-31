@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from experiments.zeroshot_cf.evaluation import EvaluationSpec
+from experiments.zeroshot_cf.orchestration.legacy import generic_legacy_paths
 from experiments.zeroshot_cf.orchestration.spec import (
     DatasetSpec,
     ExecutionSpec,
@@ -18,6 +19,12 @@ from experiments.zeroshot_cf.orchestration.spec import (
 )
 
 MATRIX_SCHEMA_VERSION = "countercontex.matrix.v1"
+
+
+def _integer(value: Any, *, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"matrix {field} must be an integer")
+    return value
 
 
 @dataclass(frozen=True)
@@ -118,11 +125,21 @@ def load_matrix_config(path: Path | str) -> MatrixConfig:
                 name=name,
                 variant=str(mapping.get("variant", "default")),
                 params=params,
-                n_counterfactuals=int(mapping.get("n_counterfactuals", 1)),
+                n_counterfactuals=_integer(
+                    mapping.get("n_counterfactuals", 1),
+                    field="method n_counterfactuals",
+                ),
             )
         )
     runs = tuple(
-        RunSpec(dataset, protocol, target_model, method, evaluation, int(seed))
+        RunSpec(
+            dataset,
+            protocol,
+            target_model,
+            method,
+            evaluation,
+            _integer(seed, field="seed"),
+        )
         for dataset, method, seed in product(dataset_specs, method_specs, seeds)
     )
     if len({run.cell_id for run in runs}) != len(runs):
@@ -139,4 +156,17 @@ def load_matrix_config(path: Path | str) -> MatrixConfig:
         device=payload.get("device"),
         legacy_export=bool(payload.get("legacy_export", False)),
     )
+    if execution.legacy_export:
+        destinations = [
+            generic_legacy_paths(
+                execution.output_root,
+                run.method.name,
+                run.dataset.name,
+            ).metrics_csv
+            for run in runs
+        ]
+        if len(set(destinations)) != len(destinations):
+            raise ValueError(
+                "legacy_export requires at most one run per method and dataset"
+            )
     return MatrixConfig(suite=suite, runs=runs, execution=execution, source=source)

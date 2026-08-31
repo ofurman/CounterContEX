@@ -44,9 +44,7 @@ def _execution_only_param_paths(
             paths.extend(_execution_only_param_paths(item, prefix=path))
     elif isinstance(value, tuple | list):
         for index, item in enumerate(value):
-            paths.extend(
-                _execution_only_param_paths(item, prefix=f"{prefix}[{index}]")
-            )
+            paths.extend(_execution_only_param_paths(item, prefix=f"{prefix}[{index}]"))
     return tuple(paths)
 
 
@@ -86,6 +84,10 @@ class ProtocolSpec:
     params: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if self.max_test is not None and (
+            isinstance(self.max_test, bool) or not isinstance(self.max_test, int)
+        ):
+            raise TypeError("max_test must be an integer or null")
         if self.max_test is not None and self.max_test <= 0:
             raise ValueError("max_test must be positive or null")
         if self.test_selection not in {"first", "stratified"}:
@@ -116,6 +118,10 @@ class MethodSpec:
     def __post_init__(self) -> None:
         if not self.name or not self.variant:
             raise ValueError("method name and variant must be non-empty")
+        if isinstance(self.n_counterfactuals, bool) or not isinstance(
+            self.n_counterfactuals, int
+        ):
+            raise TypeError("n_counterfactuals must be an integer")
         if self.n_counterfactuals <= 0:
             raise ValueError("n_counterfactuals must be positive")
         _reject_execution_only_params(self.params, kind="method")
@@ -132,6 +138,8 @@ class RunSpec:
     seed: int
 
     def __post_init__(self) -> None:
+        if isinstance(self.seed, bool) or not isinstance(self.seed, int):
+            raise TypeError("seed must be an integer")
         if self.seed < 0:
             raise ValueError("seed must be non-negative")
 

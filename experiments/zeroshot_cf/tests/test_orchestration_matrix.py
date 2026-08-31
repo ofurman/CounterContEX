@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from experiments.zeroshot_cf.orchestration.matrix import load_matrix_config
 
 
@@ -100,3 +101,48 @@ version = "one"
     assert len(config.runs) == 2
     assert {run.dataset.name for run in config.runs} == {"one", "two"}
     assert all(run.protocol.test_selection == "first" for run in config.runs)
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("seeds: [7]", "seeds: [7.5]"),
+        (
+            "methods: [alpha]",
+            "methods: [{name: alpha, n_counterfactuals: 1.5}]",
+        ),
+    ],
+)
+def test_matrix_rejects_fractional_integer_fields(tmp_path, field, replacement) -> None:
+    path = tmp_path / "matrix.yaml"
+    path.write_text(
+        """\
+schema_version: countercontex.matrix.v1
+suite: fixture
+output_root: results
+datasets: [one]
+methods: [alpha]
+seeds: [7]
+""".replace(field, replacement)
+    )
+
+    with pytest.raises(ValueError, match="must be an integer"):
+        load_matrix_config(path)
+
+
+def test_matrix_rejects_colliding_legacy_exports(tmp_path) -> None:
+    path = tmp_path / "matrix.yaml"
+    path.write_text(
+        """\
+schema_version: countercontex.matrix.v1
+suite: fixture
+output_root: results
+datasets: [heloc]
+methods: [dicoflex]
+seeds: [7, 8]
+legacy_export: true
+"""
+    )
+
+    with pytest.raises(ValueError, match="at most one run"):
+        load_matrix_config(path)

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 from types import SimpleNamespace
 
 import numpy as np
@@ -18,6 +21,10 @@ from experiments.zeroshot_cf.evaluation.result import (
 )
 from experiments.zeroshot_cf.orchestration import artifacts as artifact_module
 from experiments.zeroshot_cf.orchestration.artifacts import ArtifactStore
+
+
+def _payload_entries(path):
+    return [entry for entry in path.iterdir() if entry.name != ".locks"]
 
 
 def _report():
@@ -149,7 +156,7 @@ def test_publish_failure_removes_destination_and_hidden_temporaries(
     with pytest.raises(OSError, match="marker failure"):
         store.write("run", manifest={}, report=_report())
     assert not (tmp_path / "run").exists()
-    assert list(tmp_path.iterdir()) == []
+    assert _payload_entries(tmp_path) == []
 
 
 def test_write_failure_cleans_hidden_temporary_directory(tmp_path, monkeypatch):
@@ -161,7 +168,7 @@ def test_write_failure_cleans_hidden_temporary_directory(tmp_path, monkeypatch):
     monkeypatch.setattr(artifact_module.np, "savez_compressed", fail_arrays)
     with pytest.raises(OSError, match="array failure"):
         store.write("run", manifest={}, report=_report())
-    assert list(tmp_path.iterdir()) == []
+    assert _payload_entries(tmp_path) == []
 
 
 @pytest.mark.parametrize(
@@ -250,9 +257,57 @@ def test_object_arrays_are_rejected_on_contract_write_and_read(tmp_path):
     store = ArtifactStore(tmp_path)
     with pytest.raises(TypeError, match="object dtype"):
         store.write("write-object", manifest={}, report=fake_report)
-    assert not any(tmp_path.iterdir())
+    assert _payload_entries(tmp_path) == []
 
     run = store.write("read-object", manifest={}, report=report)
     np.savez_compressed(run.path / "arrays.npz", bad=np.array([None], dtype=object))
     with pytest.raises(ValueError, match="object arrays"):
         store.read("read-object")
+
+
+def test_manifest_writer_rejects_non_standard_json_numbers(tmp_path):
+    store = ArtifactStore(tmp_path)
+
+    with pytest.raises(ValueError, match="JSON compliant"):
+        store.write("run", manifest={"score": float("nan")}, report=_report())
+
+    assert _payload_entries(tmp_path) == []
+
+
+def test_concurrent_same_run_writers_cannot_delete_each_other(tmp_path):
+    store = ArtifactStore(tmp_path)
+    first_finalizing = Event()
+    allow_first_publish = Event()
+
+    def pause_first(manifest, _write_s):
+        first_finalizing.set()
+        assert allow_first_publish.wait(timeout=5)
+        return manifest
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(
+            store.write,
+            "run",
+            manifest={"writer": 1},
+            report=_report(),
+            manifest_finalizer=pause_first,
+        )
+        assert first_finalizing.wait(timeout=5)
+        second = executor.submit(
+            store.write,
+            "run",
+            manifest={"writer": 2},
+            report=_report(),
+        )
+        time.sleep(0.05)
+        assert not second.done()
+        allow_first_publish.set()
+        assert first.result(timeout=5).manifest["writer"] == 1
+        with pytest.raises(FileExistsError, match="completed run"):
+            second.result(timeout=5)
+
+    stored = store.read("run")
+    assert stored.manifest["writer"] == 1
+    assert {name for name in artifact_module._REQUIRED_FILES} <= {
+        path.name for path in stored.path.iterdir()
+    }

@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -30,13 +31,19 @@ from experiments.zeroshot_cf.methods.dicoflex.backends.base import (
 from experiments.zeroshot_cf.methods.dicoflex.backends.empirical import (
     EmpiricalBackend,
 )
+from experiments.zeroshot_cf.methods.dicoflex.backends.tabicl import (
+    TabICLProposalSession,
+)
 from experiments.zeroshot_cf.methods.dicoflex.config import (
     DiCoFlexConfig,
     DiCoFlexFoundationConfig,
     DiCoFlexSearchConfig,
 )
 from experiments.zeroshot_cf.methods.dicoflex.method import DiCoFlexMethod
-from experiments.zeroshot_cf.methods.dicoflex.search import generate_with_backend
+from experiments.zeroshot_cf.methods.dicoflex.search import (
+    _SessionSampler,
+    generate_with_backend,
+)
 from experiments.zeroshot_cf.orchestration.matrix import load_matrix_config
 
 
@@ -87,6 +94,20 @@ class _FakeSession:
         if quantiles is None:
             return np.full(len(columns), 0.9)
         return np.full((len(columns), len(quantiles)), 0.9)
+
+    def propose_numerical_batch(
+        self,
+        rows,
+        columns,
+        *,
+        quantiles,
+        confidences,
+        temperature,
+    ):
+        del rows, confidences, temperature
+        if quantiles is None:
+            return np.full(len(columns), 0.9)
+        return np.full((len(columns), 1, len(quantiles)), 0.9)
 
     def categorical_distribution(self, row, group, *, confidence):
         del row, confidence
@@ -202,6 +223,36 @@ def test_fake_backend_conforms_to_explicit_protocols() -> None:
         [[0.9, 0.9]],
     )
     np.testing.assert_array_equal(session.score_joint(np.array([[0.2]]), 1), [0.2])
+
+
+def test_tabicl_beam_grid_uses_one_native_batch_call() -> None:
+    calls = []
+
+    class NativeSampler:
+        def sample_candidate_grid_batch(self, rows, columns, **kwargs):
+            calls.append((np.asarray(rows).copy(), tuple(columns), kwargs))
+            return np.full((len(columns), 2, 3), 0.9)
+
+    session = TabICLProposalSession(
+        SimpleNamespace(
+            sampler=NativeSampler(),
+            candidate_confidences=(0.4, 0.8),
+            metadata={},
+        ),
+        target=1,
+    )
+    sampler = _SessionSampler(session)
+
+    values = sampler.sample_candidate_grid_batch(
+        np.array([[0.1, 0.2], [0.3, 0.4]]),
+        [0, 1],
+        quantiles=(0.25, 0.5, 0.75),
+        fixed_target=1,
+        confidences=(0.4, 0.8),
+    )
+
+    assert values.shape == (2, 2, 3)
+    assert len(calls) == 1
 
 
 def test_empirical_backend_is_deterministic_and_conforms() -> None:

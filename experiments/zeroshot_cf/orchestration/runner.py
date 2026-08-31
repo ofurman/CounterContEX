@@ -7,9 +7,8 @@ import platform
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
-from contextlib import contextmanager
-from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any
 
 from experiments.zeroshot_cf.core.contracts import BenchmarkCase, GenerationRequest
@@ -18,11 +17,13 @@ from experiments.zeroshot_cf.evaluation import EvaluationReport, Evaluator
 from experiments.zeroshot_cf.methods.registry import (
     DEFAULT_METHOD_REGISTRY,
     MethodRegistry,
+    ResolvedMethodRuntime,
 )
 from experiments.zeroshot_cf.orchestration.artifacts import ArtifactStore, StoredRun
 from experiments.zeroshot_cf.orchestration.legacy import (
     ensure_generic_v1,
     export_generic_v1,
+    generic_legacy_paths,
 )
 from experiments.zeroshot_cf.orchestration.spec import (
     ExecutionSpec,
@@ -33,7 +34,6 @@ from experiments.zeroshot_cf.orchestration.spec import (
     run_id,
 )
 
-CaseLoader = Callable[[RunSpec], BenchmarkCase]
 EvaluatorFactory = Callable[[BenchmarkCase, Any], Any]
 _SUPPORTED_TARGET_MODEL_NAME = "retained_logistic_regression"
 _SUPPORTED_TARGET_MODEL_PARAMS = {"C": 1.0, "max_iter": 1000, "seed": 42}
@@ -49,15 +49,37 @@ class PhaseTimings:
 
 
 @dataclass(frozen=True)
+class LoadedCase:
+    """Portable case plus optional process-local compatibility objects."""
+
+    case: BenchmarkCase
+    runtime_context: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "runtime_context", MappingProxyType(dict(self.runtime_context))
+        )
+
+
+CaseLoader = Callable[[RunSpec], BenchmarkCase | LoadedCase]
+
+
+@dataclass(frozen=True)
 class RunOutcome:
     spec: RunSpec
     run_id: str
     stored: StoredRun
     timings: PhaseTimings
     skipped: bool = False
+    runtime_context: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "runtime_context", MappingProxyType(dict(self.runtime_context))
+        )
 
 
-def _default_case_loader(spec: RunSpec) -> BenchmarkCase:
+def _default_case_loader(spec: RunSpec) -> LoadedCase:
     if (
         spec.target_model.name != _SUPPORTED_TARGET_MODEL_NAME
         or dict(spec.target_model.params) != _SUPPORTED_TARGET_MODEL_PARAMS
@@ -98,7 +120,8 @@ def _default_case_loader(spec: RunSpec) -> BenchmarkCase:
             f"unsupported default dataset/protocol params: {sorted(unknown)}"
         )
     provider_spec = ProviderDatasetSpec(spec.dataset.name, **params)
-    dataset = CelDatasetProvider().prepare(provider_spec)
+    adapter = CelDatasetProvider().prepare_adapter(provider_spec)
+    dataset = adapter.prepared
     metadata = dataset.provenance.metadata
     cache_tag = (
         f"{spec.dataset.name}_drop_all_minus9"
@@ -107,12 +130,8 @@ def _default_case_loader(spec: RunSpec) -> BenchmarkCase:
     )
     if len(dataset.X_validation):
         cache_tag = f"{cache_tag}_{metadata['split_variant']}"
-    evaluation_X = (
-        dataset.X_validation if len(dataset.X_validation) else dataset.X_test
-    )
-    evaluation_y = (
-        dataset.y_validation if len(dataset.y_validation) else dataset.y_test
-    )
+    evaluation_X = dataset.X_validation if len(dataset.X_validation) else dataset.X_test
+    evaluation_y = dataset.y_validation if len(dataset.y_validation) else dataset.y_test
     oracle = train_discriminator(
         dataset.X_train,
         dataset.y_train,
@@ -120,19 +139,22 @@ def _default_case_loader(spec: RunSpec) -> BenchmarkCase:
         evaluation_y,
         cache_tag,
     )
-    return build_benchmark_case(
-        dataset,
-        oracle,
-        max_test=spec.protocol.max_test,
-        test_selection=spec.protocol.test_selection,
-        seed=42,
-        target_model={
-            "kind": "logistic_regression",
-            "C": 1.0,
-            "max_iter": 1000,
-            "seed": 42,
-            "cache_tag": cache_tag,
-        },
+    return LoadedCase(
+        build_benchmark_case(
+            dataset,
+            oracle,
+            max_test=spec.protocol.max_test,
+            test_selection=spec.protocol.test_selection,
+            seed=42,
+            target_model={
+                "kind": "logistic_regression",
+                "C": 1.0,
+                "max_iter": 1000,
+                "seed": 42,
+                "cache_tag": cache_tag,
+            },
+        ),
+        {"dataset_adapter": adapter, "oracle": oracle},
     )
 
 
@@ -157,9 +179,9 @@ class GenericRunner:
         self.case_loader = case_loader
         self.evaluator_factory = evaluator_factory
         self.store = store or ArtifactStore(execution.output_root)
-        self._cases: dict[str, BenchmarkCase] = {}
+        self._cases: dict[str, LoadedCase] = {}
         self._evaluators: dict[str, Any] = {}
-        self._checkpoint_ids: dict[str, str] | None = None
+        self._method_runtimes: dict[str, ResolvedMethodRuntime] = {}
 
     @staticmethod
     def _case_key(spec: RunSpec) -> str:
@@ -172,11 +194,17 @@ class GenericRunner:
             )
         )
 
-    def _case(self, spec: RunSpec) -> BenchmarkCase:
+    def _loaded_case(self, spec: RunSpec) -> LoadedCase:
         key = self._case_key(spec)
         if key not in self._cases:
-            self._cases[key] = self.case_loader(spec)
+            loaded = self.case_loader(spec)
+            self._cases[key] = (
+                loaded if isinstance(loaded, LoadedCase) else LoadedCase(loaded)
+            )
         return self._cases[key]
+
+    def _case(self, spec: RunSpec) -> BenchmarkCase:
+        return self._loaded_case(spec).case
 
     def _evaluator(self, case: BenchmarkCase, spec: RunSpec):
         key = f"{case.case_id}|{spec.evaluation!r}"
@@ -184,81 +212,35 @@ class GenericRunner:
             self._evaluators[key] = self.evaluator_factory(case, spec.evaluation)
         return self._evaluators[key]
 
-    @staticmethod
-    def _dicoflex_backend(spec: RunSpec) -> str | None:
-        if spec.method.name != "dicoflex":
-            return None
-        foundation = spec.method.params.get("foundation", {})
-        if not isinstance(foundation, Mapping):
-            raise ValueError("dicoflex foundation params must be a mapping")
-        backend = foundation.get("backend", "tabicl")
-        if backend not in {"tabicl", "empirical"}:
-            raise ValueError(f"unknown DiCoFlex proposal backend: {backend!r}")
-        return str(backend)
+    def _method_runtime(self, spec: RunSpec) -> ResolvedMethodRuntime:
+        if spec.cell_id not in self._method_runtimes:
+            self._method_runtimes[spec.cell_id] = self.registry.resolve_runtime(
+                spec.method.name,
+                spec.method.params,
+                cache_paths=self.execution.cache_paths,
+                device=self.execution.device,
+            )
+        return self._method_runtimes[spec.cell_id]
 
     def _versions(self, spec: RunSpec, case: BenchmarkCase) -> IdentityVersions:
         entry = self.registry.entry(spec.method.name)
         target_fingerprint = str(
             case.protocol.get("target_model_fingerprint", case.case_id)
         )
-        proposal_backend = self._dicoflex_backend(spec)
-        backend_versions = {
-            None: "none-v1",
-            "tabicl": "tabicl-proposal-v1",
-            "empirical": "empirical-reference-v1",
-        }
-        backend = backend_versions[proposal_backend]
-        checkpoints: dict[str, str] = {}
-        if proposal_backend == "tabicl":
-            if self._checkpoint_ids is None:
-                from experiments.zeroshot_cf import tabicl_checkpoints
-
-                paths = tabicl_checkpoints.require_checkpoints(
-                    self.execution.cache_paths.get("tabicl")
-                )
-                self._checkpoint_ids = {
-                    path.name: tabicl_checkpoints._CHECKPOINT_SHA256[path.name]
-                    for path in paths
-                }
-            checkpoints = dict(self._checkpoint_ids)
+        runtime = self._method_runtime(spec)
         return IdentityVersions(
             dataset_fingerprint=case.dataset.provenance.fingerprint,
             case_fingerprint=case.case_id,
             method_implementation=entry.implementation_version,
-            backend_implementation=backend,
+            backend_implementation=runtime.backend_implementation,
             model_content_id=target_fingerprint,
-            checkpoint_content_ids=checkpoints,
+            checkpoint_content_ids=runtime.checkpoint_content_ids,
             evaluation_version=spec.evaluation.metric_version,
         )
 
     def _method_params(self, spec: RunSpec) -> dict[str, Any]:
         """Add execution-only backend settings after scientific identity resolves."""
-        params = deepcopy(dict(spec.method.params))
-        if self._dicoflex_backend(spec) != "tabicl":
-            return params
-        cache_dir = self.execution.cache_paths.get("tabicl")
-        if cache_dir is not None:
-            foundation = dict(params.get("foundation", {}))
-            foundation["cache_dir"] = cache_dir
-            params["foundation"] = foundation
-        return params
-
-    @contextmanager
-    def _runtime_environment(self, spec: RunSpec):
-        if self._dicoflex_backend(spec) != "tabicl" or self.execution.device is None:
-            yield
-            return
-        # DiCoFlex loads this value lazily while preparing its TabICL backend.
-        # ``_versions`` may have imported the checkpoint module first, so set
-        # the module value rather than relying on a late environment update.
-        from experiments.zeroshot_cf import tabicl_checkpoints
-
-        previous_device = tabicl_checkpoints.TABICL_DEVICE
-        try:
-            tabicl_checkpoints.TABICL_DEVICE = self.execution.device
-            yield
-        finally:
-            tabicl_checkpoints.TABICL_DEVICE = previous_device
+        return dict(self._method_runtime(spec).params)
 
     @staticmethod
     def _validate_resumed_manifest(
@@ -293,7 +275,8 @@ class GenericRunner:
 
     def run(self, spec: RunSpec, *, resume: bool | None = None) -> RunOutcome:
         total_started = time.perf_counter()
-        case = self._case(spec)
+        loaded_case = self._loaded_case(spec)
+        case = loaded_case.case
         evaluator = self._evaluator(case, spec)
         versions = self._versions(spec, case)
         identity = identity_payload(spec, versions)
@@ -321,6 +304,7 @@ class GenericRunner:
                 stored,
                 PhaseTimings(0.0, 0.0, 0.0, 0.0, elapsed),
                 skipped=True,
+                runtime_context=loaded_case.runtime_context,
             )
 
         method = self.registry.create(
@@ -329,7 +313,7 @@ class GenericRunner:
             variant=spec.method.variant,
         )
         prepare_started = time.perf_counter()
-        with self._runtime_environment(spec):
+        with self._method_runtime(spec).activate():
             prepared = method.prepare(method_context(case))
         prepare_s = time.perf_counter() - prepare_started
 
@@ -404,6 +388,7 @@ class GenericRunner:
             resolved_run_id,
             stored,
             PhaseTimings(prepare_s, generate_s, evaluate_s, write_s, total_s),
+            runtime_context=loaded_case.runtime_context,
         )
 
     def run_all(
@@ -412,4 +397,17 @@ class GenericRunner:
         *,
         resume: bool | None = None,
     ) -> tuple[RunOutcome, ...]:
+        if self.execution.legacy_export:
+            destinations = [
+                generic_legacy_paths(
+                    self.execution.output_root,
+                    spec.method.name,
+                    spec.dataset.name,
+                ).metrics_csv
+                for spec in specs
+            ]
+            if len(set(destinations)) != len(destinations):
+                raise ValueError(
+                    "legacy_export requires at most one run per method and dataset"
+                )
         return tuple(self.run(spec, resume=resume) for spec in specs)

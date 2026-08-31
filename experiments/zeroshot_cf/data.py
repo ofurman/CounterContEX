@@ -148,6 +148,11 @@ def load_dataset(
             drop_heloc_all_minus9=drop_heloc_all_minus9,
         )
     )
+    return dataset_bundle_from_adapter(name, adapter)
+
+
+def dataset_bundle_from_adapter(name: str, adapter) -> DatasetBundle:
+    """Build the historical live dataset view from one prepared CEL adapter."""
     prepared = adapter.prepared
     has_validation = bool(len(prepared.X_validation))
     return DatasetBundle(

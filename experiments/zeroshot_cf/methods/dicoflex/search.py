@@ -83,20 +83,14 @@ class _SessionSampler:
         fixed_confidence: float | Sequence[float] | np.ndarray | None = None,
     ) -> np.ndarray:
         del fixed_target
-        confidences = _per_row_confidences(fixed_confidence, len(candidate_cols))
         return np.asarray(
-            [
-                self._session.propose_numerical(
-                    np.asarray(row).reshape(1, -1),
-                    [column],
-                    quantiles=None,
-                    confidence=confidence,
-                    temperature=sample_temperature,
-                )[0]
-                for row, column, confidence in zip(
-                    X_queries, candidate_cols, confidences, strict=True
-                )
-            ],
+            self._session.propose_numerical_batch(
+                X_queries,
+                candidate_cols,
+                quantiles=None,
+                confidences=fixed_confidence,
+                temperature=sample_temperature,
+            ),
             dtype=np.float64,
         )
 
@@ -110,37 +104,16 @@ class _SessionSampler:
         confidences: Sequence[float] | None = None,
     ) -> np.ndarray:
         del fixed_target
-        anchors: tuple[float | None, ...] = (
-            (None,) if confidences is None else tuple(float(v) for v in confidences)
+        return np.asarray(
+            self._session.propose_numerical_batch(
+                X_queries,
+                candidate_cols,
+                quantiles=quantiles,
+                confidences=confidences,
+                temperature=0.0,
+            ),
+            dtype=np.float64,
         )
-        rows = []
-        for row, column in zip(X_queries, candidate_cols, strict=True):
-            grids = [
-                self._session.propose_numerical(
-                    np.asarray(row).reshape(1, -1),
-                    [column],
-                    quantiles=quantiles,
-                    confidence=anchor,
-                    temperature=0.0,
-                )[0]
-                for anchor in anchors
-            ]
-            rows.append(np.stack(grids))
-        return np.stack(rows)
-
-
-def _per_row_confidences(
-    confidence: float | Sequence[float] | np.ndarray | None,
-    count: int,
-) -> tuple[float | None, ...]:
-    if confidence is None:
-        return (None,) * count
-    values = np.asarray(confidence, dtype=np.float64)
-    if values.ndim == 0:
-        return (float(values),) * count
-    if values.shape != (count,):
-        raise ValueError("confidence must be scalar or contain one value per row")
-    return tuple(float(value) for value in values)
 
 
 @dataclass

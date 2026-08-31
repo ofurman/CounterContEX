@@ -5,8 +5,36 @@ from __future__ import annotations
 import importlib
 import inspect
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from contextlib import AbstractContextManager, nullcontext
+from copy import deepcopy
+from dataclasses import dataclass, field
+from pathlib import Path
+from types import MappingProxyType
 from typing import Any
+
+
+@dataclass(frozen=True)
+class ResolvedMethodRuntime:
+    """Execution settings and identity supplied by a method-owned resolver."""
+
+    params: Mapping[str, Any]
+    backend_implementation: str = "none-v1"
+    checkpoint_content_ids: Mapping[str, str] = field(default_factory=dict)
+    activate: Callable[[], AbstractContextManager[None]] = nullcontext
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "params", MappingProxyType(dict(self.params)))
+        object.__setattr__(
+            self,
+            "checkpoint_content_ids",
+            MappingProxyType(dict(self.checkpoint_content_ids)),
+        )
+
+
+RuntimeResolver = Callable[
+    [Mapping[str, Any], Mapping[str, Path], str | None],
+    ResolvedMethodRuntime,
+]
 
 
 @dataclass(frozen=True)
@@ -21,6 +49,7 @@ class RegistryEntry:
     variant_resolver: Callable[[str, Mapping[str, Any]], Mapping[str, Any]] | None = (
         None
     )
+    runtime_resolver: RuntimeResolver | None = None
 
 
 class MethodRegistry:
@@ -80,6 +109,19 @@ class MethodRegistry:
             raise ValueError(f"invalid parameters for {name}: {error}") from error
         return method_type(config)
 
+    def resolve_runtime(
+        self,
+        name: str,
+        params: Mapping[str, Any],
+        *,
+        cache_paths: Mapping[str, Path],
+        device: str | None,
+    ) -> ResolvedMethodRuntime:
+        entry = self.entry(name)
+        if entry.runtime_resolver is None:
+            return ResolvedMethodRuntime(deepcopy(dict(params)))
+        return entry.runtime_resolver(params, cache_paths, device)
+
 
 def _dicoflex_factory(values: Mapping[str, Any]):
     module = importlib.import_module("experiments.zeroshot_cf.methods.dicoflex")
@@ -116,6 +158,15 @@ def _dicoflex_variant(
     return resolved
 
 
+def _dicoflex_runtime(
+    values: Mapping[str, Any],
+    cache_paths: Mapping[str, Path],
+    device: str | None,
+) -> ResolvedMethodRuntime:
+    module = importlib.import_module("experiments.zeroshot_cf.methods.dicoflex.runtime")
+    return module.resolve_runtime(values, cache_paths, device)
+
+
 DEFAULT_METHOD_REGISTRY = MethodRegistry(
     (
         RegistryEntry(
@@ -127,6 +178,7 @@ DEFAULT_METHOD_REGISTRY = MethodRegistry(
             _dicoflex_factory,
             ("default", "tabicl_sparse"),
             _dicoflex_variant,
+            _dicoflex_runtime,
         ),
         RegistryEntry(
             "nice",

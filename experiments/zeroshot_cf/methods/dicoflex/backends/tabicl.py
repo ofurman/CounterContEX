@@ -25,6 +25,8 @@ from experiments.zeroshot_cf.methods.dicoflex.backends.base import (
 )
 from experiments.zeroshot_cf.methods.dicoflex.config import DiCoFlexConfig
 
+TABICL_BACKEND_IMPLEMENTATION_VERSION = "tabicl-proposal-v1"
+
 
 @dataclass(frozen=True)
 class DiCoFlexBackendInputs:
@@ -162,6 +164,37 @@ class TabICLProposalSession:
         if confidence is not None:
             values = values[:, 0, :]
         return values
+
+    def propose_numerical_batch(
+        self,
+        rows: np.ndarray,
+        columns: Sequence[int],
+        *,
+        quantiles: Sequence[float] | None,
+        confidences: float | Sequence[float] | np.ndarray | None,
+        temperature: float,
+    ) -> np.ndarray:
+        if quantiles is None:
+            return np.asarray(
+                self.state.sampler.sample_candidates_batch(
+                    rows,
+                    columns,
+                    sample_temperature=temperature,
+                    fixed_target=self.target,
+                    fixed_confidence=confidences,
+                ),
+                dtype=np.float64,
+            )
+        return np.asarray(
+            self.state.sampler.sample_candidate_grid_batch(
+                rows,
+                columns,
+                quantiles=quantiles,
+                fixed_target=self.target,
+                confidences=confidences,
+            ),
+            dtype=np.float64,
+        )
 
     def categorical_distribution(
         self,

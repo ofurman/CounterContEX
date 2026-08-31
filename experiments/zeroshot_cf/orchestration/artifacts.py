@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import fcntl
 import hashlib
 import json
 import os
@@ -10,6 +11,7 @@ import shutil
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -189,6 +191,18 @@ class ArtifactStore:
     def __init__(self, root: Path | str) -> None:
         self.root = Path(root)
 
+    @contextmanager
+    def _run_lock(self, run_id: str):
+        """Serialize publishers for one run ID across threads and processes."""
+        lock_root = self.root / ".locks"
+        lock_root.mkdir(parents=True, exist_ok=True)
+        with (lock_root / f"{run_id}.lock").open("a+") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
     def write(
         self,
         run_id: str,
@@ -204,66 +218,70 @@ class ArtifactStore:
             raise ValueError("unsupported evaluation schema version")
         self.root.mkdir(parents=True, exist_ok=True)
         destination = self.root / run_id
-        temporary = self.root / f".{run_id}.{uuid.uuid4().hex}.partial"
-        temporary.mkdir()
-        published = False
-        write_started = time.perf_counter()
-        try:
-            summary_rows = [dict(report.summary.values)]
-            point_rows = [{"point": row.point, **row.values} for row in report.points]
-            candidate_rows = [
-                {"point": row.point, "rank": row.rank, **row.values}
-                for row in report.candidates
-            ]
-            table_types = {
-                "summary": _write_csv(temporary / "summary.csv", summary_rows),
-                "points": _write_csv(
-                    temporary / "points.csv", point_rows, required_columns=("point",)
-                ),
-                "candidates": _write_csv(
-                    temporary / "candidates.csv",
-                    candidate_rows,
-                    required_columns=("point", "rank"),
-                ),
-            }
-            arrays = {
-                name: _validate_array(name, value)
-                for name, value in report.arrays.values.items()
-            }
-            np.savez_compressed(temporary / "arrays.npz", **arrays)
-            payload_write_s = time.perf_counter() - write_started
-            finalized_manifest = (
-                manifest
-                if manifest_finalizer is None
-                else manifest_finalizer(manifest, payload_write_s)
-            )
-            payload = {
-                "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
-                "evaluation_schema_version": report.schema_version,
-                "run_id": run_id,
-                "config": _json_value(finalized_manifest),
-                "report_metadata": _json_value(report.metadata),
-                "table_types": table_types,
-            }
-            (temporary / "manifest.json").write_text(
-                json.dumps(payload, indent=2, sort_keys=True) + "\n"
-            )
+        with self._run_lock(run_id):
+            if (destination / "COMPLETE").is_file():
+                raise FileExistsError(f"completed run already exists: {destination}")
             if destination.exists():
-                if (destination / "COMPLETE").exists():
-                    raise FileExistsError(
-                        f"completed run already exists: {destination}"
-                    )
                 shutil.rmtree(destination)
-            os.replace(temporary, destination)
-            published = True
-            marker_temporary = destination / f".COMPLETE.{uuid.uuid4().hex}.partial"
-            marker_temporary.write_text("complete\n")
-            os.replace(marker_temporary, destination / "COMPLETE")
-        except BaseException:
-            shutil.rmtree(temporary, ignore_errors=True)
-            if published and not (destination / "COMPLETE").exists():
-                shutil.rmtree(destination, ignore_errors=True)
-            raise
+            temporary = self.root / f".{run_id}.{uuid.uuid4().hex}.partial"
+            temporary.mkdir()
+            published = False
+            write_started = time.perf_counter()
+            try:
+                summary_rows = [dict(report.summary.values)]
+                point_rows = [
+                    {"point": row.point, **row.values} for row in report.points
+                ]
+                candidate_rows = [
+                    {"point": row.point, "rank": row.rank, **row.values}
+                    for row in report.candidates
+                ]
+                table_types = {
+                    "summary": _write_csv(temporary / "summary.csv", summary_rows),
+                    "points": _write_csv(
+                        temporary / "points.csv",
+                        point_rows,
+                        required_columns=("point",),
+                    ),
+                    "candidates": _write_csv(
+                        temporary / "candidates.csv",
+                        candidate_rows,
+                        required_columns=("point", "rank"),
+                    ),
+                }
+                arrays = {
+                    name: _validate_array(name, value)
+                    for name, value in report.arrays.values.items()
+                }
+                np.savez_compressed(temporary / "arrays.npz", **arrays)
+                payload_write_s = time.perf_counter() - write_started
+                finalized_manifest = (
+                    manifest
+                    if manifest_finalizer is None
+                    else manifest_finalizer(manifest, payload_write_s)
+                )
+                payload = {
+                    "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
+                    "evaluation_schema_version": report.schema_version,
+                    "run_id": run_id,
+                    "config": _json_value(finalized_manifest),
+                    "report_metadata": _json_value(report.metadata),
+                    "table_types": table_types,
+                }
+                (temporary / "manifest.json").write_text(
+                    json.dumps(payload, indent=2, sort_keys=True, allow_nan=False)
+                    + "\n"
+                )
+                os.replace(temporary, destination)
+                published = True
+                marker_temporary = destination / f".COMPLETE.{uuid.uuid4().hex}.partial"
+                marker_temporary.write_text("complete\n")
+                os.replace(marker_temporary, destination / "COMPLETE")
+            except BaseException:
+                shutil.rmtree(temporary, ignore_errors=True)
+                if published and not (destination / "COMPLETE").exists():
+                    shutil.rmtree(destination, ignore_errors=True)
+                raise
         return self.read(run_id)
 
     def read(self, run_id: str) -> StoredRun:
@@ -392,9 +410,7 @@ class ArtifactStore:
                     "run manifest scientific identity does not match cell_id"
                 )
             if manifest_scientific != identity_scientific:
-                raise ValueError(
-                    "run manifest scientific_spec does not match identity"
-                )
+                raise ValueError("run manifest scientific_spec does not match identity")
             if cell_id in by_cell:
                 raise ValueError(f"duplicate completed matrix cell: {cell_id}")
             by_cell[cell_id] = stored
@@ -406,15 +422,11 @@ class ArtifactStore:
             {
                 "run_id": by_cell[cell].run_id,
                 "cell_id": cell,
-                "dataset": by_cell[cell].manifest["scientific_spec"]["dataset"][
-                    "name"
+                "dataset": by_cell[cell].manifest["scientific_spec"]["dataset"]["name"],
+                "method": by_cell[cell].manifest["scientific_spec"]["method"]["name"],
+                "method_variant": by_cell[cell].manifest["scientific_spec"]["method"][
+                    "variant"
                 ],
-                "method": by_cell[cell].manifest["scientific_spec"]["method"][
-                    "name"
-                ],
-                "method_variant": by_cell[cell].manifest["scientific_spec"][
-                    "method"
-                ]["variant"],
                 "n_counterfactuals": by_cell[cell].manifest["scientific_spec"][
                     "method"
                 ]["n_counterfactuals"],
@@ -423,7 +435,8 @@ class ArtifactStore:
                 .get("foundation", {})
                 .get(
                     "backend",
-                    by_cell[cell].manifest["scientific_spec"]["method"]
+                    by_cell[cell]
+                    .manifest["scientific_spec"]["method"]
                     .get("params", {})
                     .get("foundation", {})
                     .get("backend"),

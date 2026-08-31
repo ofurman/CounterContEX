@@ -90,6 +90,16 @@ def test_method_best_effort_artifact_is_accepted() -> None:
     )
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_diagnostics_reject_non_finite_json_numbers(value) -> None:
+    with pytest.raises(ValueError, match="non-finite"):
+        GenerationResult(
+            np.array([[[0.2, 0.3]]]),
+            np.array([[True]]),
+            run_diagnostics={"score": value},
+        )
+
+
 def test_fixture_covers_every_required_generation_state() -> None:
     identifiers = {case["id"] for case in _cases()["cases"]}
     assert identifiers == {

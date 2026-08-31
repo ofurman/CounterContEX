@@ -208,9 +208,11 @@ creates a seeded proposal session. Unsupported search and backend combinations
 fail during validation instead of being discovered inside the search loop.
 
 The TabICL adapter owns compact categorical encoding, neighbor context,
-confidence anchors, checkpoint/cache and device handling, proposal sampling,
-and joint-density scoring. The search layer consumes only the proposal-session
-contract. This boundary keeps dataset preparation and common evaluation free of
+confidence anchors, proposal sampling, and joint-density scoring. Its
+method-owned runtime policy resolves checkpoint identity, cache paths, and
+device scope. The search layer consumes only the proposal-session contract,
+including one paired batch operation used for beam expansion. This boundary
+keeps the generic runner, dataset preparation, and common evaluation free of
 foundation-model imports.
 
 The deterministic `empirical` adapter supplies target-class numerical
@@ -228,7 +230,8 @@ To add a TabPFN or TabFM adapter:
 3. Declare only capabilities the adapter implements and add conformance tests
    for every declared operation and every rejected unsupported combination.
 4. Register a stable backend identifier and implementation version so a backend
-   or model-content change creates a new run identity.
+   or model-content change creates a new run identity, and register its
+   execution policy in `methods/dicoflex/runtime.py`.
 5. Add a matrix variant that changes only the foundation/backend fields. Do not
    modify datasets, the evaluator, or common artifact schemas for an ablation.
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import random
 import subprocess
 import sys
@@ -106,9 +107,7 @@ def _failure_context() -> MethodContext:
     [
         NiceMethod(),
         WachterMethod(),
-        GrowingSpheresMethod(
-            GrowingSpheresConfig(n_candidates=128, max_shells=12)
-        ),
+        GrowingSpheresMethod(GrowingSpheresConfig(n_candidates=128, max_shells=12)),
         FaceMethod(FaceConfig(n_neighbors=3)),
     ],
     ids=lambda method: method.method_id,
@@ -176,6 +175,7 @@ def test_genuine_failures_are_unavailable_with_namespaced_best_effort(method):
     best_effort = result.artifacts["method.best_effort"]
     assert np.isfinite(best_effort).all()
     assert best_effort[0, 3] == request.factuals[0, 3]
+    json.dumps([dict(values) for values in result.point_diagnostics], allow_nan=False)
 
 
 def test_dice_prepare_is_lazy_and_generate_restores_global_rng(monkeypatch):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -332,7 +333,11 @@ class GenerationRequest:
 
 def _validate_json_value(value: Any, *, path: str) -> None:
     """Reject diagnostics that cannot be represented in a manifest."""
-    if value is None or isinstance(value, str | bool | int | float):
+    if value is None or isinstance(value, str | bool | int):
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"{path} must not contain non-finite floats")
         return
     if isinstance(value, np.generic):
         _validate_json_value(value.item(), path=path)

@@ -222,7 +222,7 @@ def test_known_forbidden_dependency_edges_can_only_shrink() -> None:
 
 def test_cutover_removed_obsolete_runtime_and_reporting_implementations() -> None:
     suite = REPO_ROOT / "experiments" / "zeroshot_cf"
-    removed = {"reporting.py", "runner_compat.py", "tabicl_runtime.py"}
+    removed = {"reporting.py", "runner_compat.py"}
     assert not any((suite / name).exists() for name in removed)
     for path in suite.rglob("*.py"):
         relative = path.relative_to(suite)
@@ -231,14 +231,36 @@ def test_cutover_removed_obsolete_runtime_and_reporting_implementations() -> Non
         source = path.read_text()
         assert not any(name.removesuffix(".py") in source for name in removed)
 
+    runtime = suite / "tabicl_runtime.py"
+    tree = ast.parse(runtime.read_text())
+    assert {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef))
+    } == set()
+    assert any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "experiments.zeroshot_cf.orchestration.tabicl_runtime_compat"
+        for node in tree.body
+    )
+
+
+def test_generic_runner_contains_no_concrete_method_or_backend_policy() -> None:
+    source = (
+        (REPO_ROOT / "experiments" / "zeroshot_cf" / "orchestration" / "runner.py")
+        .read_text()
+        .lower()
+    )
+    assert "dicoflex" not in source
+    assert "tabicl" not in source
+    assert "empirical" not in source
+
 
 def test_exp8_numbered_entrypoint_only_translates_and_delegates() -> None:
     path = REPO_ROOT / "experiments" / "zeroshot_cf" / "exp8_tabicl_cf.py"
     source = path.read_text()
     tree = ast.parse(source)
-    functions = {
-        node.name for node in tree.body if isinstance(node, ast.FunctionDef)
-    }
+    functions = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
     assert functions.isdisjoint(
         {"_legacy_info", "_legacy_metrics", "_legacy_row", "_canonical_run"}
     )
@@ -264,7 +286,7 @@ def test_exp8_numbered_entrypoint_only_translates_and_delegates() -> None:
     }
     assert {
         "legacy_run_spec",
-        "run_legacy_dataset_with_stored",
+        "run_legacy_dataset_with_context",
         "load_exp8_result",
         "export_exp8_result",
     } <= calls

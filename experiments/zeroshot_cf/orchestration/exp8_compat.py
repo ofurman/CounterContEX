@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import csv
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+from experiments.zeroshot_cf.data import dataset_bundle_from_adapter
 from experiments.zeroshot_cf.generator import (
     ATHENA_CONTEXT_SIZE,
     ATHENA_CONTEXT_STRATEGY,
@@ -92,7 +93,6 @@ _EXP8_MULTI_CF_COLUMNS = (
 )
 
 
-
 def _legacy_arrays(dataset_name: str, results_dir: Path) -> dict[str, np.ndarray]:
     paths = generic_legacy_paths(results_dir, "dicoflex", dataset_name)
     with np.load(paths.arrays_npz, allow_pickle=False) as archive:
@@ -112,6 +112,7 @@ def _legacy_info(
     metrics: dict[str, Any],
     arrays: dict[str, np.ndarray],
     stored: StoredRun,
+    runtime_context: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Rebuild the documented Exp8 diagnostics from canonical artifacts."""
     metrics = dict(metrics)
@@ -142,18 +143,19 @@ def _legacy_info(
     actionable_idx = list(run_diagnostics.get("actionable_idx", ()))
     immutable_idx = list(run_diagnostics.get("immutable_idx", ()))
     flipped = [
-        bool(value)
-        for value in _point_values(point_diagnostics, "flipped", False)
+        bool(value) for value in _point_values(point_diagnostics, "flipped", False)
     ]
+    adapter = runtime_context.get("dataset_adapter")
+    oracle = runtime_context.get("oracle")
+    if adapter is None or oracle is None:
+        raise ValueError("Exp8 compatibility requires live dataset and oracle context")
     return {
-        # The old live bundle and estimator are deliberately unavailable after the
-        # generic lifecycle. The keys remain so callers can detect that boundary.
-        "bundle": None,
+        "bundle": dataset_bundle_from_adapter(spec.dataset.name, adapter),
         "y_pred": arrays["y_pred"],
         "y_target": arrays["y_target"],
         "actionable_idx": actionable_idx,
         "immutable_idx": immutable_idx,
-        "disc_model": None,
+        "disc_model": oracle,
         "tau": float(search["tau"]),
         "temperature": float(foundation["temperature"]),
         "candidate_quantiles": (
@@ -187,9 +189,7 @@ def _legacy_info(
         "categorical_confidence_batching": bool(
             cache.get("conditional_estimator", False)
         ),
-        "conditional_estimator_cache": bool(
-            cache.get("conditional_estimator", False)
-        ),
+        "conditional_estimator_cache": bool(cache.get("conditional_estimator", False)),
         "tabicl_kv_cache": bool(cache.get("key_value", False)),
         "test_selection": spec.protocol.test_selection,
         "split_variant": metrics["split_variant"],
@@ -277,7 +277,6 @@ def _legacy_info(
     }
 
 
-
 def _legacy_metrics(
     X_test: np.ndarray,
     X_cf: np.ndarray,
@@ -307,9 +306,7 @@ def _legacy_metrics(
         "sparsity": float(np.mean(X_test != X_cf)),
         "actionability": float(np.all(X_test == X_cf, axis=1).mean()),
         "true_actionability": true_actionability,
-        "proximity_l2_jaccard": float(
-            shared["proximity_all_features_euclidean"]
-        ),
+        "proximity_l2_jaccard": float(shared["proximity_all_features_euclidean"]),
         "frac_oob": float(np.any((X_cf < 0.0) | (X_cf > 1.0), axis=1).mean()),
         "l0_count_mean": valid_stat(changed, np.mean),
         "l0_count_median": valid_stat(changed, np.median),
@@ -320,17 +317,10 @@ def _legacy_metrics(
         "failure_rate": float((~flipped).mean()),
         "n_actionable": len(info["actionable_idx"]),
         "diverse_coverage_at_k": float(shared["diverse_coverage_at_k"]),
-        "diverse_returned_count_mean": float(
-            shared["diverse_returned_count_mean"]
-        ),
+        "diverse_returned_count_mean": float(shared["diverse_returned_count_mean"]),
     }
     if np.asarray(info["X_cf_sets"]).shape[1] > 1:
-        metrics.update(
-            {
-                name: float(shared[name])
-                for name in _EXP8_MULTI_CF_COLUMNS
-            }
-        )
+        metrics.update({name: float(shared[name]) for name in _EXP8_MULTI_CF_COLUMNS})
     return metrics
 
 
@@ -375,9 +365,7 @@ def _legacy_row(
         "joint_scoring_batch_count_mean": float(
             np.mean(info["joint_scoring_batch_count_per_point"])
         ),
-        "joint_rows_scored_mean": float(
-            np.mean(info["joint_rows_scored_per_point"])
-        ),
+        "joint_rows_scored_mean": float(np.mean(info["joint_rows_scored_per_point"])),
         "accepted_refinement_count_mean": float(
             np.mean(info["accepted_refinement_count_per_point"])
         ),
@@ -386,14 +374,10 @@ def _legacy_row(
             if np.any(reached_validity)
             else float("nan")
         ),
-        "final_action_count_mean": float(
-            np.mean(info["final_action_count_per_point"])
-        ),
+        "final_action_count_mean": float(np.mean(info["final_action_count_per_point"])),
         "extra_actions_mean": float(np.mean(info["extra_actions_per_point"])),
         "categorical_proposal_count": info["categorical_proposal_count"],
-        "categorical_confidence_batching": info[
-            "categorical_confidence_batching"
-        ],
+        "categorical_confidence_batching": info["categorical_confidence_batching"],
         "conditional_estimator_cache": info["conditional_estimator_cache"],
         "tabicl_kv_cache": info["tabicl_kv_cache"],
         "split_variant": info["split_variant"],
@@ -414,13 +398,13 @@ def _legacy_row(
     return row, metrics
 
 
-
 def load_exp8_result(
     spec: RunSpec,
     metrics: dict[str, Any],
     *,
     stored: StoredRun,
     results_dir: Path,
+    runtime_context: Mapping[str, Any],
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
     """Adapt one completed canonical run to the historical Exp8 return shape."""
     if (
@@ -434,6 +418,7 @@ def load_exp8_result(
         metrics,
         arrays,
         stored,
+        runtime_context,
     )
     return arrays["X_test"], arrays["y_test"], arrays["X_cf"], info
 

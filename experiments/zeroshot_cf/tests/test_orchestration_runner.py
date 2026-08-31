@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import csv
 import json
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -18,7 +20,11 @@ from experiments.zeroshot_cf.core.contracts import (
 )
 from experiments.zeroshot_cf.datasets.benchmark import build_benchmark_case
 from experiments.zeroshot_cf.evaluation import EvaluationSpec, Evaluator
-from experiments.zeroshot_cf.methods.registry import MethodRegistry, RegistryEntry
+from experiments.zeroshot_cf.methods.registry import (
+    MethodRegistry,
+    RegistryEntry,
+    ResolvedMethodRuntime,
+)
 from experiments.zeroshot_cf.orchestration.artifacts import ArtifactStore
 from experiments.zeroshot_cf.orchestration.legacy import _legacy_method_id
 from experiments.zeroshot_cf.orchestration.runner import (
@@ -268,6 +274,23 @@ def test_runner_routes_dicoflex_execution_settings_outside_identity(
         captured["params"] = params
         return _RuntimeMethod("dicoflex", calls)
 
+    def runtime_resolver(params, cache_paths, device):
+        resolved = dict(params)
+        resolved["foundation"] = {"cache_dir": cache_paths["tabicl"]}
+
+        @contextmanager
+        def activate():
+            from experiments.zeroshot_cf import tabicl_checkpoints
+
+            previous = tabicl_checkpoints.TABICL_DEVICE
+            tabicl_checkpoints.TABICL_DEVICE = device
+            try:
+                yield
+            finally:
+                tabicl_checkpoints.TABICL_DEVICE = previous
+
+        return ResolvedMethodRuntime(resolved, activate=activate)
+
     registry = MethodRegistry(
         (
             RegistryEntry(
@@ -277,6 +300,7 @@ def test_runner_routes_dicoflex_execution_settings_outside_identity(
                 "Config",
                 "dicoflex-v3",
                 factory,
+                runtime_resolver=runtime_resolver,
             ),
         )
     )
@@ -461,9 +485,9 @@ def test_default_case_loader_uses_portable_provider_without_benchmark_runner(
 
     def fake_prepare(self, provider_spec):
         captured["provider_spec"] = provider_spec
-        return source_case.dataset
+        return SimpleNamespace(prepared=source_case.dataset)
 
-    monkeypatch.setattr(cel_module.CelDatasetProvider, "prepare", fake_prepare)
+    monkeypatch.setattr(cel_module.CelDatasetProvider, "prepare_adapter", fake_prepare)
     monkeypatch.setattr(
         discriminator_module,
         "train_discriminator",
@@ -479,8 +503,10 @@ def test_default_case_loader_uses_portable_provider_without_benchmark_runner(
 
     loaded = _default_case_loader(spec)
 
-    assert loaded.dataset is source_case.dataset
-    assert loaded.protocol["test_selection"] == "first"
+    assert loaded.case.dataset is source_case.dataset
+    assert loaded.case.protocol["test_selection"] == "first"
+    assert loaded.runtime_context["dataset_adapter"].prepared is source_case.dataset
+    assert isinstance(loaded.runtime_context["oracle"], _Oracle)
     assert captured["provider_spec"].validation_fraction == 0.2
     assert captured["provider_spec"].drop_heloc_all_minus9
     assert captured["provider_spec"].split_seed == 42
@@ -510,6 +536,26 @@ def test_runner_passes_method_variant_to_registry(tmp_path):
     ).run(spec)
 
     assert outcome.stored.manifest["scientific_spec"]["method"]["variant"] == "tuned"
+
+
+def test_run_all_rejects_legacy_path_collisions_before_loading_cases(tmp_path):
+    calls = []
+
+    def fail_case_loader(spec):
+        calls.append(spec.cell_id)
+        raise AssertionError("colliding matrix must fail before execution")
+
+    runner = GenericRunner(
+        ExecutionSpec(tmp_path, legacy_export=True),
+        case_loader=fail_case_loader,
+    )
+    first = _spec("one", "nice")
+    second = replace(first, seed=first.seed + 1)
+
+    with pytest.raises(ValueError, match="at most one run"):
+        runner.run_all((first, second))
+
+    assert calls == []
 
 
 @pytest.mark.parametrize(
@@ -732,6 +778,4 @@ def test_legacy_export_writes_frozen_files_and_resume_restores_without_generatio
     assert arrays.is_file()
     assert calls.count(f"generate:{method_name}") == 1
     aggregate_row = ArtifactStore(tmp_path).aggregate_expected([spec.cell_id])[0]
-    assert aggregate_row["backend"] == (
-        "tabicl" if method_name == "dicoflex" else None
-    )
+    assert aggregate_row["backend"] == ("tabicl" if method_name == "dicoflex" else None)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -16,7 +15,7 @@ from experiments.zeroshot_cf.generator import (
     TabICLGeneratorInputs,
     TabICLGeneratorResult,
 )
-from experiments.zeroshot_cf.methods.base import MethodCapabilities
+from experiments.zeroshot_cf.methods.base import MethodCapabilities, json_diagnostic
 from experiments.zeroshot_cf.methods.dicoflex.backend import (
     DiCoFlexBackendInputs,
     prepare_backend,
@@ -29,19 +28,6 @@ from experiments.zeroshot_cf.methods.dicoflex.backends.base import (
 from experiments.zeroshot_cf.methods.dicoflex.backends.empirical import EmpiricalBackend
 from experiments.zeroshot_cf.methods.dicoflex.config import DiCoFlexConfig
 from experiments.zeroshot_cf.methods.dicoflex.search import generate_with_backend
-
-
-def _json_diagnostic(value: Any) -> Any:
-    """Copy retained history values into JSON-compatible containers and scalars."""
-    if isinstance(value, np.ndarray):
-        return _json_diagnostic(value.tolist())
-    if isinstance(value, np.generic):
-        return _json_diagnostic(value.item())
-    if isinstance(value, Mapping):
-        return {str(key): _json_diagnostic(item) for key, item in value.items()}
-    if isinstance(value, list | tuple):
-        return [_json_diagnostic(item) for item in value]
-    return value
 
 
 def adapt_generator_result(
@@ -78,9 +64,7 @@ def adapt_generator_result(
     for index, count in enumerate(counts):
         history = diagnostic_value("history_per_point", index, ())
         attempt_history = diagnostic_value("attempt_history_per_point", index, ())
-        diverse_histories = diagnostic_value(
-            "diverse_histories_per_point", index, ()
-        )
+        diverse_histories = diagnostic_value("diverse_histories_per_point", index, ())
         initial_valid_record = next(
             (
                 step
@@ -91,89 +75,99 @@ def adapt_generator_result(
         )
         final_record = history[-1] if history and isinstance(history[-1], dict) else {}
         point_diagnostics.append(
-            {
-                "returned_count": int(count),
-                "flipped": bool(diagnostics.flipped_per_point[index]),
-                "changed_columns": list(diagnostics.changed_per_point[index]),
-                "steps": int(diagnostics.steps_per_point[index]),
-                "validity_steps": int(diagnostics.validity_steps_per_point[index]),
-                "refinement_steps": int(diagnostics.refinement_steps_per_point[index]),
-                "accepted_refinement_count": int(
-                    diagnostics.accepted_refinement_count_per_point[index]
-                ),
-                "history": _json_diagnostic(history),
-                "attempt_history": _json_diagnostic(attempt_history),
-                "diverse_histories": _json_diagnostic(diverse_histories),
-                "attempt_steps": len(attempt_history),
-                "initial_valid_step": diagnostic_value(
-                    "initial_valid_step_per_point", index, None
-                ),
-                "initial_sparse_action_count": int(
-                    diagnostic_value("initial_sparse_action_count_per_point", index, -1)
-                ),
-                "final_action_count": int(
-                    diagnostic_value(
-                        "final_action_count_per_point",
-                        index,
-                        len(diagnostics.changed_per_point[index]),
-                    )
-                ),
-                "initial_tabicl_joint_log_density": float(
-                    diagnostic_value(
-                        "initial_tabicl_joint_log_density_per_point", index, np.nan
-                    )
-                ),
-                "final_tabicl_joint_log_density": float(
-                    diagnostic_value(
-                        "final_tabicl_joint_log_density_per_point", index, np.nan
-                    )
-                ),
-                "tabicl_joint_log_density_gain": float(
-                    diagnostic_value(
-                        "tabicl_joint_log_density_gain_per_point", index, np.nan
-                    )
-                ),
-                "joint_scoring_batch_count": int(
-                    diagnostic_value("joint_scoring_batch_count_per_point", index, 0)
-                ),
-                "joint_rows_scored": int(
-                    diagnostic_value("joint_rows_scored_per_point", index, 0)
-                ),
-                "extra_actions": int(
-                    diagnostic_value("extra_actions_per_point", index, 0)
-                ),
-                "refinement_stopping_reason": str(
-                    diagnostic_value(
-                        "refinement_stopping_reason_per_point", index, "not_started"
-                    )
-                ),
-                "initial_valid_action_sparsity": history_float(
-                    initial_valid_record, "action_sparsity"
-                ),
-                "initial_valid_grouped_gower": history_float(
-                    initial_valid_record, "grouped_gower"
-                ),
-                "final_action_sparsity": history_float(
-                    final_record if history else {"action_sparsity": 0.0},
-                    "action_sparsity",
-                ),
-                "first_action_type": (
-                    history[0].get("action_type", "numerical")
-                    if history and isinstance(history[0], dict)
-                    else "numerical"
-                ),
-                "candidate_pool_count": int(
-                    diagnostics.diverse_candidate_pool_count_per_point[index]
-                ),
-                "search_depth": int(diagnostics.diverse_search_depth_per_point[index]),
-                "target_probability": float(
-                    diagnostics.target_probability_per_point[index]
-                ),
-                "point_runtime_s": float(diagnostics.point_runtime_s[index]),
-                "joint_scoring_runtime_s": float(
-                    diagnostics.joint_scoring_runtime_s_per_point[index]
-                ),
-            }
+            json_diagnostic(
+                {
+                    "returned_count": int(count),
+                    "flipped": bool(diagnostics.flipped_per_point[index]),
+                    "changed_columns": list(diagnostics.changed_per_point[index]),
+                    "steps": int(diagnostics.steps_per_point[index]),
+                    "validity_steps": int(diagnostics.validity_steps_per_point[index]),
+                    "refinement_steps": int(
+                        diagnostics.refinement_steps_per_point[index]
+                    ),
+                    "accepted_refinement_count": int(
+                        diagnostics.accepted_refinement_count_per_point[index]
+                    ),
+                    "history": json_diagnostic(history),
+                    "attempt_history": json_diagnostic(attempt_history),
+                    "diverse_histories": json_diagnostic(diverse_histories),
+                    "attempt_steps": len(attempt_history),
+                    "initial_valid_step": diagnostic_value(
+                        "initial_valid_step_per_point", index, None
+                    ),
+                    "initial_sparse_action_count": int(
+                        diagnostic_value(
+                            "initial_sparse_action_count_per_point", index, -1
+                        )
+                    ),
+                    "final_action_count": int(
+                        diagnostic_value(
+                            "final_action_count_per_point",
+                            index,
+                            len(diagnostics.changed_per_point[index]),
+                        )
+                    ),
+                    "initial_tabicl_joint_log_density": float(
+                        diagnostic_value(
+                            "initial_tabicl_joint_log_density_per_point", index, np.nan
+                        )
+                    ),
+                    "final_tabicl_joint_log_density": float(
+                        diagnostic_value(
+                            "final_tabicl_joint_log_density_per_point", index, np.nan
+                        )
+                    ),
+                    "tabicl_joint_log_density_gain": float(
+                        diagnostic_value(
+                            "tabicl_joint_log_density_gain_per_point", index, np.nan
+                        )
+                    ),
+                    "joint_scoring_batch_count": int(
+                        diagnostic_value(
+                            "joint_scoring_batch_count_per_point", index, 0
+                        )
+                    ),
+                    "joint_rows_scored": int(
+                        diagnostic_value("joint_rows_scored_per_point", index, 0)
+                    ),
+                    "extra_actions": int(
+                        diagnostic_value("extra_actions_per_point", index, 0)
+                    ),
+                    "refinement_stopping_reason": str(
+                        diagnostic_value(
+                            "refinement_stopping_reason_per_point", index, "not_started"
+                        )
+                    ),
+                    "initial_valid_action_sparsity": history_float(
+                        initial_valid_record, "action_sparsity"
+                    ),
+                    "initial_valid_grouped_gower": history_float(
+                        initial_valid_record, "grouped_gower"
+                    ),
+                    "final_action_sparsity": history_float(
+                        final_record if history else {"action_sparsity": 0.0},
+                        "action_sparsity",
+                    ),
+                    "first_action_type": (
+                        history[0].get("action_type", "numerical")
+                        if history and isinstance(history[0], dict)
+                        else "numerical"
+                    ),
+                    "candidate_pool_count": int(
+                        diagnostics.diverse_candidate_pool_count_per_point[index]
+                    ),
+                    "search_depth": int(
+                        diagnostics.diverse_search_depth_per_point[index]
+                    ),
+                    "target_probability": float(
+                        diagnostics.target_probability_per_point[index]
+                    ),
+                    "point_runtime_s": float(diagnostics.point_runtime_s[index]),
+                    "joint_scoring_runtime_s": float(
+                        diagnostics.joint_scoring_runtime_s_per_point[index]
+                    ),
+                }
+            )
         )
 
     artifacts = {

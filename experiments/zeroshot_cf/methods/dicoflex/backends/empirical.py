@@ -64,6 +64,35 @@ class EmpiricalProposalSession:
         # np.quantile is quantile-major; the search contract is feature-major.
         return np.asarray(np.quantile(values, levels, axis=0).T, dtype=np.float64)
 
+    def propose_numerical_batch(
+        self,
+        rows: np.ndarray,
+        columns: Sequence[int],
+        *,
+        quantiles: Sequence[float] | None,
+        confidences: float | Sequence[float] | np.ndarray | None,
+        temperature: float,
+    ) -> np.ndarray:
+        if confidences is not None:
+            raise ValueError(
+                "empirical backend does not support confidence conditioning"
+            )
+        pairs = tuple(zip(np.asarray(rows), columns, strict=True))
+        values = [
+            self.propose_numerical(
+                np.asarray(row).reshape(1, -1),
+                [column],
+                quantiles=quantiles,
+                confidence=None,
+                temperature=temperature,
+            )[0]
+            for row, column in pairs
+        ]
+        result = np.asarray(values, dtype=np.float64)
+        if quantiles is not None:
+            return result[:, None, :]
+        return result
+
     def categorical_distribution(
         self,
         row: np.ndarray,

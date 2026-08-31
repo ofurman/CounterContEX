@@ -122,13 +122,13 @@ def read_legacy_metrics(
     return {key: _coerce_legacy_scalar(value) for key, value in rows[0].items()}
 
 
-def run_legacy_dataset_with_stored(
+def run_legacy_dataset_with_context(
     spec: RunSpec,
     *,
     results_dir: Path,
     tabicl_cache_dir: Path | None = None,
-) -> tuple[dict[str, Any], StoredRun]:
-    """Run one translated spec and return its v1 row and exact canonical run."""
+) -> tuple[dict[str, Any], StoredRun, Mapping[str, Any]]:
+    """Return a v1 row, canonical run, and process-local compatibility context."""
     cache_paths = {} if tabicl_cache_dir is None else {"tabicl": tabicl_cache_dir}
     runner = GenericRunner(
         ExecutionSpec(
@@ -152,7 +152,22 @@ def run_legacy_dataset_with_stored(
             "total_s": timings.get("total_s"),
         }
     )
-    return row, outcome.stored
+    return row, outcome.stored, getattr(outcome, "runtime_context", {})
+
+
+def run_legacy_dataset_with_stored(
+    spec: RunSpec,
+    *,
+    results_dir: Path,
+    tabicl_cache_dir: Path | None = None,
+) -> tuple[dict[str, Any], StoredRun]:
+    """Run one translated spec and return its v1 row and exact canonical run."""
+    row, stored, _ = run_legacy_dataset_with_context(
+        spec,
+        results_dir=results_dir,
+        tabicl_cache_dir=tabicl_cache_dir,
+    )
+    return row, stored
 
 
 def run_legacy_dataset(

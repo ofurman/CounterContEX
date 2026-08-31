@@ -271,8 +271,9 @@ class _SingleFeatureSampler:
         return np.ones((len(columns), 1), dtype=float)
 
 
-def test_public_generator_forwards_confidence_quantiles_and_preserves_immutable(
-) -> None:
+def test_public_generator_forwards_confidence_quantiles_and_preserves_immutable() -> (
+    None
+):
     sampler = _ConfidenceGridSampler()
     result = generate_counterfactual_batch(
         TabICLGeneratorInputs(
@@ -619,9 +620,7 @@ def test_exp8_adapter_uses_exact_current_run_when_stale_version_is_newer(
             scientific_spec=spec.scientific_payload(),
         )
         stale_manifest = copy.deepcopy(stored.manifest)
-        stale_manifest["method_point_diagnostics"][0]["history"] = [
-            {"column": "stale"}
-        ]
+        stale_manifest["method_point_diagnostics"][0]["history"] = [{"column": "stale"}]
         current_path = tmp_path / "runs" / spec.cell_id / "v3-current"
         stale_path = tmp_path / "runs" / spec.cell_id / "v2-stale"
         current_path.mkdir(parents=True)
@@ -634,27 +633,37 @@ def test_exp8_adapter_uses_exact_current_run_when_stale_version_is_newer(
             report=stored.report,
             path=stale_path,
         )
-        return metrics, stored
+        return (
+            metrics,
+            stored,
+            {
+                "dataset_adapter": "live-adapter",
+                "oracle": "live-oracle",
+            },
+        )
 
     stored = SimpleNamespace(
-            manifest=manifest,
-            report=SimpleNamespace(
-                summary=SimpleNamespace(
-                    values={"set_validity_returned_threshold": 1.0}
-                ),
-                arrays=SimpleNamespace(
-                    values={
-                        "common.available": np.array([[True, False]]),
-                        "candidate.lof_score": np.array([1.5]),
-                    }
-                ),
-                metadata={"primary_rank": 0},
+        manifest=manifest,
+        report=SimpleNamespace(
+            summary=SimpleNamespace(values={"set_validity_returned_threshold": 1.0}),
+            arrays=SimpleNamespace(
+                values={
+                    "common.available": np.array([[True, False]]),
+                    "candidate.lof_score": np.array([1.5]),
+                }
             ),
+            metadata={"primary_rank": 0},
+        ),
     )
 
     monkeypatch.setattr(exp8, "RESULTS_DIR", tmp_path)
-    monkeypatch.setattr(exp8, "run_legacy_dataset_with_stored", fake_run)
+    monkeypatch.setattr(exp8, "run_legacy_dataset_with_context", fake_run)
     monkeypatch.setattr(exp8_compat, "_legacy_arrays", lambda *args: arrays)
+    monkeypatch.setattr(
+        exp8_compat,
+        "dataset_bundle_from_adapter",
+        lambda name, adapter: (name, adapter),
+    )
 
     X_test, y_test, X_cf, info = exp8.generate_tabicl_counterfactuals(
         "heloc",
@@ -672,6 +681,8 @@ def test_exp8_adapter_uses_exact_current_run_when_stale_version_is_newer(
     assert captured["results_dir"] == tmp_path
     assert captured["tabicl_cache_dir"] == tmp_path / "cache"
     assert info["metrics"]["validity"] == 1.0
+    assert info["bundle"] == ("heloc", "live-adapter")
+    assert info["disc_model"] == "live-oracle"
     assert info["metrics"]["lof_scores_cf"] == 1.5
     assert info["diverse_available_count_per_point"].tolist() == [1]
     assert info["flipped_per_point"] == [True]
