@@ -76,6 +76,8 @@ marker, generic resume behavior, or one runner for the six-method matrix.
   artifacts, 9.42 summed runtime hours.
 - DiCoFlex/Lending Club alone took 27,519 generation seconds, so full-matrix execution is unsuitable
   as a repeated stage gate.
+- The current Exp9 Athena launcher and submit helper use a six-hour walltime, which is shorter than
+  the measured 7.64-hour DiCoFlex/Lending Club cell; the cutover must raise or parameterize it.
 - Full-suite Ruff currently has pre-existing failures; lint checks in this plan target new package
   directories until a separate mechanical cleanup is performed.
 

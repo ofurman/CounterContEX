@@ -11,6 +11,7 @@
 1. Reduce legacy entry points to translation shims.
    - Where: Exp8/9/11–14 modules and Athena launchers.
    - Parsers translate legacy flags to concrete `RunSpec`s, invoke the generic runner/aggregator, and request the v1 compatibility exporter. Remove duplicated data preparation, common evaluation, row assembly, and direct persistence.
+   - Update the Exp9 Athena submit path to pass a configurable Slurm walltime with a default of `10:00:00`; the current six-hour limit is below the measured 7.64-hour DiCoFlex/Lending Club cell. Record the selected limit in the manifest environment metadata.
 
 2. Audit and remove obsolete helpers after import proof.
    - Where: `data.py`, `benchmark_protocol.py`, `metrics_harness.py`, `reporting.py`, `tabicl_runtime.py`, and numbered runners.
@@ -21,10 +22,13 @@
    - Document layer ownership, method/backend extension recipes, semantic metric definitions, run identity, resume/completion behavior, artifact layout, and legacy-shim lifetime.
 
 4. Run the cheap final compatibility matrix.
-   - Execute all 24 method/dataset cells with one factual through the generic runner and legacy shims. Validate manifests, v1 outputs, common schema, aggregation, offline help, and import boundaries.
+   - Run `uv run python -m experiments.zeroshot_cf.cli matrix --config experiments/zeroshot_cf/configs/matrices/one_factual_compat.yaml --resume` and then `uv run python -m experiments.zeroshot_cf.cli aggregate --config experiments/zeroshot_cf/configs/matrices/one_factual_compat.yaml`.
+   - Where: add `experiments/zeroshot_cf/tests/test_legacy_cli_compatibility.py`; reuse `test_architecture_boundaries.py` from Stage 1.
+   - Run `uv run pytest -q experiments/zeroshot_cf/tests/test_legacy_cli_compatibility.py experiments/zeroshot_cf/tests/test_architecture_boundaries.py`. Together these commands validate all 24 real manifests, v1 outputs and shim translations, the common schema, aggregation, offline help, and import boundaries.
 
 5. Run the full reference matrix once as a REPORT.
-   - Use four datasets, six methods, 1,000 factuals, seed 42, and the recorded DiCoFlex `k=3` configuration. Publish 24-cell completeness, metrics, availability/validity semantic differences, per-phase timing, and artifact hashes.
+   - Run `uv run python -m experiments.zeroshot_cf.cli matrix --config experiments/zeroshot_cf/configs/matrices/full_reference.yaml --resume` and then `uv run python -m experiments.zeroshot_cf.cli aggregate --config experiments/zeroshot_cf/configs/matrices/full_reference.yaml`.
+   - The tracked config fixes four datasets, six methods, 1,000 factuals, seed 42, and the recorded DiCoFlex `k=3` configuration. Publish 24-cell completeness, metrics, availability/validity semantic differences, per-phase timing, and artifact hashes.
    - Do not block the architecture on noisy quality point comparisons. A missing/incomplete cell opens a focused defect with the exact run ID and evidence.
 
 6. Sweep backlog and verify the repository boundary.
@@ -34,9 +38,10 @@
 
 ## Verification
 
-- [ ] GATE `uv sync --locked && uv run pytest -q` plus Ruff on new `core`, `datasets`, `methods`, `evaluation`, and `orchestration` packages — source/test inputs expose suite or new-module lint regressions.
-- [ ] GATE the 24-cell one-factual compatibility audit reads real manifests and artifacts — missing cells, schema violations, import-boundary violations, non-offline help, or legacy-export failures turn it red.
-- [ ] REPORT the 1,000-factual full matrix — record completeness, common metrics, intentional semantic differences, phase timings, and hashes in `journal.md`; publish `NOT MEASURED` if the expensive run cannot be executed.
+- [ ] GATE `uv sync --locked && uv run pytest -q` — dependency lock or retained-suite regressions turn it red.
+- [ ] GATE `uv run ruff check experiments/zeroshot_cf/core experiments/zeroshot_cf/datasets experiments/zeroshot_cf/methods experiments/zeroshot_cf/evaluation experiments/zeroshot_cf/orchestration experiments/zeroshot_cf/cli.py` — lint/import defects in every new production module, including the generic CLI, turn it red.
+- [ ] GATE run the exact Step 4 compatibility-matrix and focused-test commands — missing cells, schema violations, import-boundary violations, non-offline help, shim-translation errors, or legacy-export failures turn it red.
+- [ ] REPORT run the exact Step 5 full-reference commands — record completeness, common metrics, intentional semantic differences, phase timings, and hashes in `journal.md`; publish `NOT MEASURED` if the expensive run cannot be executed.
 
 ---
 

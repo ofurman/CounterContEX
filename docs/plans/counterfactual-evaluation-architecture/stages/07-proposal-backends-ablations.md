@@ -26,8 +26,9 @@
    - Run the same DiCoFlex search with TabICL-shaped and fake deterministic backend variants; evaluation/data code and common output schema remain byte-identical for identical canonical candidates.
 
 5. Add ablation manifests and documentation.
-   - Where: tracked example configs plus `README.md`.
-   - Demonstrate search, diversity, backend, backend hyperparameter, dataset, and seed variants. Document the exact adapter steps for future TabPFN/TabFM and why unsupported capabilities must be explicit.
+   - Where: tracked configs under `experiments/zeroshot_cf/configs/matrices/` plus `README.md`.
+   - Add `dicoflex_ablation_example.yaml` demonstrating search, diversity, backend, backend hyperparameter, dataset, and seed variants.
+   - Add `full_reference.yaml` with the exact four datasets, six retained methods, seed 42, `max_test: 1000`, the recorded DiCoFlex `k=3` configuration, legacy export enabled, and output root `experiments/zeroshot_cf/results/local/architecture_full_reference`. Document the exact adapter steps for future TabPFN/TabFM and why unsupported capabilities must be explicit.
 
 ---
 

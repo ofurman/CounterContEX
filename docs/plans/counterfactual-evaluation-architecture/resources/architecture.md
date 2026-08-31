@@ -192,6 +192,11 @@ postprocessing such as DiCE atomic pruning, randomness, and method-specific diag
 owns dataset selection, ground-truth test labels, common metrics, result paths, aggregation, or CSV
 formatting.
 
+`GenerationRequest.seed` is a semantic input, not manifest-only metadata. Every prepared method
+must propagate it into its RNGs and backend/session construction. Legacy APIs without a seed keep
+seed 42 as their compatibility default, while the typed method path accepts every resolved run
+seed.
+
 ## Canonical generation result
 
 ```python
@@ -321,6 +326,13 @@ hash of the resolved run spec, dataset/case fingerprint, method implementation/v
 evaluation version. Changing any method, backend, hyperparameter, seed, dataset, protocol, or
 evaluator creates a distinct run; field ordering does not.
 
+The canonical identity payload contains only semantic inputs: the resolved dataset/protocol/target
+model/method/evaluation/seed specs, dataset and case fingerprints, method/backend implementation
+versions, checkpoint or model content identifiers, and schema/evaluation versions. Suite labels,
+output roots, local cache/checkpoint paths, resume flags, device, host, timestamps, and captured
+environment details are excluded from `run_id` and recorded separately in the manifest. Tests
+prove both semantic sensitivity and execution-metadata invariance.
+
 The runner lifecycle is fixed:
 
 ```text
@@ -378,7 +390,8 @@ import or name the backend.
 
 - Wrap existing algorithms before moving or simplifying them.
 - Keep old CLIs as offline-safe translators until the generic runner reproduces the v1 surface.
-- Preserve `generate_counterfactual_batch()` as a public compatibility API.
+- Preserve `generate_counterfactual_batch()` as the public algorithm/search core used by the
+  DiCoFlex method during migration; it must not delegate back into the method that calls it.
 - Use synthetic semantic tests and one-factual parity gates on every stage.
 - Reserve the 9.42-hour full matrix for the final REPORT, not repeated stage gates.
 - Document intentional metric changes, especially truthful coverage and split validity fields;

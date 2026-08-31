@@ -32,7 +32,7 @@
 
 - [ ] GATE `uv run pytest -q experiments/zeroshot_cf/tests/test_dataset_contract.py experiments/zeroshot_cf/tests/test_exp9_benchmark.py experiments/zeroshot_cf/tests/test_metrics_harness.py experiments/zeroshot_cf/tests/test_generator.py` — current dataset, protocol, metric, and generator inputs stay green; a split, target-policy, formula, or non-padding regression turns this red.
 - [ ] GATE `HF_HUB_OFFLINE=1` help/aggregate contract test for every retained CLI — subprocess output and checkpoint-load spies are the inputs; importing a model or losing a command turns it red.
-- [ ] REPORT inspect `results/local/full_reference` when present — record 24-cell completeness, hashes, and runtime in `journal.md`; otherwise record `NOT MEASURED`.
+- [ ] REPORT inspect `experiments/zeroshot_cf/results/local/full_reference` when present — record 24-cell completeness, hashes, and runtime in `journal.md`; otherwise record `NOT MEASURED`.
 
 ---
 
