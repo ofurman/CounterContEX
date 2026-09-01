@@ -2,6 +2,9 @@
 
 from pathlib import Path
 
+from experiments.zeroshot_cf.datasets.target_models import (
+    DEFAULT_TARGET_MODEL_REGISTRY,
+)
 from experiments.zeroshot_cf.evaluation import METRIC_SCHEMA_VERSION
 from experiments.zeroshot_cf.methods.registry import DEFAULT_METHOD_REGISTRY
 from experiments.zeroshot_cf.orchestration.matrix import load_matrix_config
@@ -55,6 +58,23 @@ def test_e1_uses_classifier_axis_and_k1_for_every_method():
         "retained_xgboost",
     }
     assert {run.method.n_counterfactuals for run in config.runs} == {1}
+
+
+def test_campaign_target_model_specs_match_fixed_registry_params():
+    for filename in _EXPECTED:
+        config = load_matrix_config(_ROOT / filename)
+        target_models = {
+            (
+                run.target_model.name,
+                repr(dict(run.target_model.params)),
+            ): run.target_model
+            for run in config.runs
+        }
+        for target_model in target_models.values():
+            DEFAULT_TARGET_MODEL_REGISTRY.resolve(
+                target_model.name,
+                target_model.params,
+            )
 
 
 def test_future_ablation_axes_have_unambiguous_raw_values():
