@@ -34,3 +34,11 @@ repository is black-box (`predict_proba` only), so the "expected clean failure o
 premise was false; Stage 2 step 4 and Stage 7 step 4 now measure compatibility instead of
 presuming failure. (3) The campaign branch did not exist and no step created it; Stage 1 now
 starts by creating, committing, and pushing it.
+
+### D-2: Defer Lending Club pool-fill early stopping
+**Date**: 2026-09-01 - **Stage**: 1
+**Options**: A) stop diverse search once k valid candidates exist B) keep the frozen search and defer a controlled stopping-policy comparison
+**Chosen**: B
+**Rationale**: The GB10 profile identifies the 16-candidate pool-fill rule as the long-tail
+cause, but stopping at k can change DPP set quality and is therefore a scientific behavior and
+identity change. Stage 1 records B-1 instead of modifying an unversioned search policy.

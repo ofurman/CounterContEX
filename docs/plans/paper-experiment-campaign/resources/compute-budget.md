@@ -55,3 +55,45 @@ anomaly. Baseline methods add under 3 hours in aggregate; only DiCE (124 s/1000)
 
 Record actual hours from manifest `phase_timings` as the campaign proceeds. The index carries
 a REPORT row for the total.
+
+## Stage 1 measurements on gx10-bdc5 (NVIDIA GB10)
+
+Measured 2026-09-01 with TabICL checkpoints
+`bdc7dbd...b3d4ed0` (classifier) and `0db9cb5...9748ae7a` (regressor), LR target,
+the `full_reference.yaml` CounterContEx parameters, and isolated artifacts under
+`results/campaign/stage1/`.
+
+| Dataset | n | k | Generation s | Per factual | Total s |
+|---|---:|---:|---:|---:|---:|
+| adult_census | 25 | 3 | 37.194 | **1.488 s** | 38.822 |
+| german_credit | 25 | 3 | 83.472 | **3.339 s** | 83.659 |
+| heloc (profile arm) | 25 | 3 | 30.755 | **1.230 s** | 31.873 |
+| lending_club (profile arm) | 25 | 3 | 544.167 | **21.767 s** | 544.880 |
+
+The small-n values include workload and hardware effects and do not replace the historical
+n=1000 values above for cross-machine extrapolation. They replace only the Adult and German
+Credit estimates used by Stage 6.
+
+The Lending Club profile was dominated by one 498.785 s factual (91.7% of generation time).
+Its diverse search reached depth 65 while trying to fill `candidate_pool_size=16`, finishing
+with 13 pooled candidates although only k=3 were requested. The other 24 factuals had a
+1.496 s median runtime. HELOC reached maximum depth 5 and had a 0.645 s median. Lending Club
+has only 20 legal categorical alternatives per state, versus 34 for both Bank Marketing and
+Give Me Some Credit, so categorical breadth does not explain the anomaly. The long tail from
+the pool-fill stopping rule does; any early-stop change is a search-policy and implementation-
+identity change and is deferred in backlog item B-1.
+
+### Five-seed HELOC noise floor
+
+At n=100, k=1 and seeds `[17, 42, 101, 202, 303]`, every measured value was identical:
+
+| Metric | Mean | Sample std | Min | Max | Range |
+|---|---:|---:|---:|---:|---:|
+| `proximity_grouped_gower` | 0.0141824417063 | 0 | 0.0141824417063 | 0.0141824417063 | 0 |
+| `action_unit_sparsity_mean` | 1.32 | 0 | 1.32 | 1.32 | 0 |
+| `validity_returned_class` | 1.0 | 0 | 1.0 | 1.0 | 0 |
+| `coverage` | 1.0 | 0 | 1.0 | 1.0 | 0 |
+
+This is a measured zero spread for this deterministic configuration, not a general claim of
+zero experimental uncertainty. Later comparisons should publish their across-seed values and
+must not turn this observation into a zero-tolerance numeric shipping gate.
