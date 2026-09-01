@@ -265,7 +265,7 @@ def test_aggregation_rejects_missing_partial_extra_and_identity_drift(tmp_path):
         store.aggregate_expected([spec.cell_id])
 
 
-def test_runner_routes_dicoflex_execution_settings_outside_identity(
+def test_runner_routes_countercontex_execution_settings_outside_identity(
     tmp_path, monkeypatch
 ):
     captured: dict[str, object] = {}
@@ -355,7 +355,7 @@ def test_runner_routes_dicoflex_execution_settings_outside_identity(
     }
 
 
-def test_empirical_dicoflex_identity_does_not_require_tabicl_checkpoints(
+def test_empirical_countercontex_identity_does_not_require_tabicl_checkpoints(
     tmp_path, monkeypatch
 ) -> None:
     from experiments.zeroshot_cf import tabicl_checkpoints
@@ -619,7 +619,7 @@ def test_run_all_rejects_legacy_path_collisions_before_loading_cases(tmp_path):
         (3, "sparse", "tabicl_v2_diverse_dpp"),
     ),
 )
-def test_dicoflex_legacy_method_id_tracks_resolved_mode_and_k(
+def test_countercontex_legacy_method_id_tracks_resolved_mode_and_k(
     n_counterfactuals, cf_mode, expected
 ):
     assert (

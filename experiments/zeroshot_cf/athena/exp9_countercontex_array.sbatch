@@ -16,8 +16,8 @@ set -euo pipefail
 
 PROJECT_DIR="${PROJECT_DIR:-$SLURM_SUBMIT_DIR}"
 SUITE_DIR="${SUITE_DIR:-$PROJECT_DIR/experiments/zeroshot_cf}"
-CASE_FILE="${CASE_FILE:-$SUITE_DIR/athena/exp9_dicoflex_cases.tsv}"
-RESULTS_DIR="${RESULTS_DIR:-$SUITE_DIR/results/athena/exp9_dicoflex}"
+CASE_FILE="${CASE_FILE:-$SUITE_DIR/athena/exp9_countercontex_cases.tsv}"
+RESULTS_DIR="${RESULTS_DIR:-$SUITE_DIR/results/athena/exp9_countercontex}"
 TABICL_CACHE_DIR="${TABICL_CACHE_DIR:-$SUITE_DIR/models/tabicl}"
 MAX_VALIDITY_STEPS="${MAX_VALIDITY_STEPS:-100}"
 N_COUNTERFACTUALS="${N_COUNTERFACTUALS:-3}"
@@ -80,7 +80,7 @@ echo "python=${PYTHON_CMD[*]}"
 echo "cuda_visible_devices=${CUDA_VISIBLE_DEVICES:-unset}"
 nvidia-smi
 
-"${PYTHON_CMD[@]}" -m experiments.zeroshot_cf.exp9_dicoflex_benchmark \
+"${PYTHON_CMD[@]}" -m experiments.zeroshot_cf.exp9_countercontex_benchmark \
     --dataset "$DATASET" \
     --max-test "$MAX_TEST" \
     --n-estimators "$N_ESTIMATORS" \

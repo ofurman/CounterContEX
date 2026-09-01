@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 from experiments.zeroshot_cf import (
-    exp9_dicoflex_benchmark as exp9,
+    exp9_countercontex_benchmark as exp9,
 )
 from experiments.zeroshot_cf import (
     exp11_nice_nun_baseline as exp11,

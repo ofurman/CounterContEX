@@ -1,7 +1,7 @@
 # TabICL counterfactual benchmark suite
 
 This directory is the retained CounterContEX surface: the TabICL generator,
-the Exp9 DiCoFlex benchmark, four comparison baselines, pinned CEL dataset
+the Exp9 CounterContEx benchmark, four comparison baselines, pinned CEL dataset
 bootstrap, checkpoint staging, offline smoke checks, and Athena launchers.
 Legacy TabPFN counterfactual experiments are intentionally out of scope.
 
@@ -62,7 +62,7 @@ access and checkpoint loading:
 
 ```bash
 HF_HUB_OFFLINE=1 uv run --project experiments/zeroshot_cf python -m experiments.zeroshot_cf.exp8_tabicl_cf --help
-HF_HUB_OFFLINE=1 uv run --project experiments/zeroshot_cf python -m experiments.zeroshot_cf.exp9_dicoflex_benchmark --help
+HF_HUB_OFFLINE=1 uv run --project experiments/zeroshot_cf python -m experiments.zeroshot_cf.exp9_countercontex_benchmark --help
 HF_HUB_OFFLINE=1 uv run --project experiments/zeroshot_cf python -m experiments.zeroshot_cf.exp11_nice_nun_baseline --help
 HF_HUB_OFFLINE=1 uv run --project experiments/zeroshot_cf python -m experiments.zeroshot_cf.exp12_optimization_baselines --help
 HF_HUB_OFFLINE=1 uv run --project experiments/zeroshot_cf python -m experiments.zeroshot_cf.exp13_dice_baseline --help
@@ -111,7 +111,7 @@ encode directional, monotonic, or causal constraints.
 Available retained CLI entry points:
 
 - `python -m experiments.zeroshot_cf.exp8_tabicl_cf`
-- `python -m experiments.zeroshot_cf.exp9_dicoflex_benchmark`
+- `python -m experiments.zeroshot_cf.exp9_countercontex_benchmark`
 - `python -m experiments.zeroshot_cf.exp11_nice_nun_baseline`
 - `python -m experiments.zeroshot_cf.exp12_optimization_baselines`
 - `python -m experiments.zeroshot_cf.exp13_dice_baseline`
@@ -198,10 +198,10 @@ counterfactual and cannot enter common metric denominators.
 5. Add a matrix entry. No dataset loader, evaluator, artifact schema, or
    numbered runner change is required.
 
-## DiCoFlex proposal backends
+## CounterContEx proposal backends
 
-DiCoFlex search depends on the protocols in
-`methods/dicoflex/backends/base.py`. A backend declares whether it supplies
+CounterContEx search depends on the protocols in
+`methods/countercontex/backends/base.py`. A backend declares whether it supplies
 numerical proposals, confidence conditioning, categorical distributions, and
 joint scoring. Preparation creates dataset-level state, and `for_factual()`
 creates a seeded proposal session. Unsupported search and backend combinations
@@ -223,7 +223,7 @@ scoring capability, so incompatible search settings fail before generation.
 To add a TabPFN or TabFM adapter:
 
 1. Implement `ProposalBackend.prepare()` and the prepared backend's
-   `for_factual()` method in a new module under `methods/dicoflex/backends/`.
+   `for_factual()` method in a new module under `methods/countercontex/backends/`.
 2. Translate the model's numerical, categorical, confidence, and joint-score
    outputs into `ProposalSession`; keep model loading, caches, checkpoints, and
    native representations inside the adapter.
@@ -231,26 +231,26 @@ To add a TabPFN or TabFM adapter:
    for every declared operation and every rejected unsupported combination.
 4. Register a stable backend identifier and implementation version so a backend
    or model-content change creates a new run identity, and register its
-   execution policy in `methods/dicoflex/runtime.py`.
+   execution policy in `methods/countercontex/runtime.py`.
 5. Add a matrix variant that changes only the foundation/backend fields. Do not
    modify datasets, the evaluator, or common artifact schemas for an ablation.
 
-See `configs/matrices/dicoflex_ablation_example.yaml` for independent search,
+See `configs/matrices/countercontex_ablation_example.yaml` for independent search,
 diversity, backend-parameter, dataset, and seed variants. The tracked
 `full_reference.yaml` fixes the four retained datasets, all six methods, seed
-42, 1,000 factuals, and the recorded three-counterfactual DiCoFlex setup.
+42, 1,000 factuals, and the recorded three-counterfactual CounterContEx setup.
 
 Run the cheap compatibility matrix before the full reference workload. The
 full matrix requires staged TabICL checkpoints and optional baseline
 dependencies. Its recorded runtime was about 9.42 hours, including 7.64 hours
-for DiCoFlex on Lending Club. Use `--resume` with a scheduler limit above that
+for CounterContEx on Lending Club. Use `--resume` with a scheduler limit above that
 longest cell, and publish completeness, named availability/validity metrics,
 phase timings, and stable artifact hashes. If a cell is unavailable, record
 its exact run ID rather than substituting a value.
 
 ## Compatibility-shim lifetime
 
-`exp8_tabicl_cf.py`, `exp9_dicoflex_benchmark.py`, and Exp11-14 retain their
+`exp8_tabicl_cf.py`, `exp9_countercontex_benchmark.py`, and Exp11-14 retain their
 CLI flags and flat v1 CSV/NPZ filenames for existing local and Athena
 workflows. They are translation shims into the generic runner; new automation
 should use `experiments.zeroshot_cf.cli` and matrix configs. Keep the shims
@@ -267,7 +267,7 @@ HF_HUB_OFFLINE=1 uv run --project experiments/zeroshot_cf \
   --cache-dir experiments/zeroshot_cf/models/tabicl
 
 HF_HUB_OFFLINE=1 uv run --project experiments/zeroshot_cf \
-  python -m experiments.zeroshot_cf.exp9_dicoflex_benchmark \
+  python -m experiments.zeroshot_cf.exp9_countercontex_benchmark \
   --dataset heloc \
   --tabicl-cache-dir experiments/zeroshot_cf/models/tabicl
 

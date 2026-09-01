@@ -1,6 +1,6 @@
 schema_version: countercontex.matrix.v1
-suite: dicoflex_ablation_example
-output_root: experiments/zeroshot_cf/results/local/dicoflex_ablation_example
+suite: countercontex_ablation_example
+output_root: experiments/zeroshot_cf/results/local/countercontex_ablation_example
 datasets:
   - heloc
   - bank_marketing

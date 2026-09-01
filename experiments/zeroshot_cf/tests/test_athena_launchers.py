@@ -32,7 +32,7 @@ def _run_submit(tmp_path: Path, *, walltime: str | None) -> str:
     else:
         environment.pop("WALLTIME", None)
     completed = subprocess.run(
-        ["bash", str(ATHENA / "submit_exp9_dicoflex.sh")],
+        ["bash", str(ATHENA / "submit_exp9_countercontex.sh")],
         check=False,
         capture_output=True,
         text=True,
@@ -60,11 +60,11 @@ def test_submit_propagates_configurable_walltime(tmp_path):
 
 
 def test_array_script_has_direct_submission_fallback_and_exp9_shim():
-    source = (ATHENA / "exp9_dicoflex_array.sbatch").read_text()
+    source = (ATHENA / "exp9_countercontex_array.sbatch").read_text()
     assert "#SBATCH --time=10:00:00" in source
     fallback = (
         'COUNTERCONTEX_SLURM_WALLTIME="'
         '${COUNTERCONTEX_SLURM_WALLTIME:-10:00:00}"'
     )
     assert fallback in source
-    assert "-m experiments.zeroshot_cf.exp9_dicoflex_benchmark" in source
+    assert "-m experiments.zeroshot_cf.exp9_countercontex_benchmark" in source

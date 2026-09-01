@@ -167,7 +167,7 @@ def test_exp9_aggregate_cli_is_offline_and_does_not_load_checkpoints(
         [
             sys.executable,
             "-m",
-            "experiments.zeroshot_cf.exp9_dicoflex_benchmark",
+            "experiments.zeroshot_cf.exp9_countercontex_benchmark",
             "--dataset",
             "aggregate",
             "--results-dir",

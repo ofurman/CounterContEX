@@ -29,7 +29,7 @@ weights at runtime.
 
 ## Four benchmark cases
 
-`exp9_dicoflex_cases.tsv` intentionally contains exactly four non-comment rows:
+`exp9_countercontex_cases.tsv` intentionally contains exactly four non-comment rows:
 
 - `heloc`
 - `bank_marketing`
@@ -45,14 +45,14 @@ requested counterfactuals unless you override the launcher environment.
 - `PROJECT_DIR`: repo root on Athena. Defaults to `SLURM_SUBMIT_DIR`.
 - `SUITE_DIR`: suite project root. Defaults to `$PROJECT_DIR/experiments/zeroshot_cf`.
 - `CASE_FILE`: case TSV path.
-- `RESULTS_DIR`: output root. Defaults to `$SUITE_DIR/results/athena/exp9_dicoflex`.
+- `RESULTS_DIR`: output root. Defaults to `$SUITE_DIR/results/athena/exp9_countercontex`.
 - `TABICL_CACHE_DIR`: staged checkpoint directory. The job exports this value as `TABICL_LOCAL_CACHE`.
 - `PYTHON_BIN`: explicit interpreter override. Otherwise the launcher prefers `$SUITE_DIR/.venv/bin/python`, then `uv run --project "$SUITE_DIR" python`.
 - `HF_HUB_OFFLINE`: defaults to `1`.
 - `TABICL_DEVICE`: defaults to `cuda`.
 - `UV_CACHE_DIR`: optional shared uv cache directory. If unset and `SCRATCH` exists, the job uses `$SCRATCH/uv-cache`.
 - `WALLTIME`: Slurm time limit passed by the submit script. It defaults to
-  `10:00:00`, which covers the measured 7.64-hour DiCoFlex/Lending Club
+  `10:00:00`, which covers the measured 7.64-hour CounterContEx/Lending Club
   reference cell with some operational margin.
 
 The submit script exports the selected limit to the array task as
@@ -65,24 +65,24 @@ batch file.
 ## Submit and aggregate
 
 ```bash
-bash experiments/zeroshot_cf/athena/submit_exp9_dicoflex.sh
+bash experiments/zeroshot_cf/athena/submit_exp9_countercontex.sh
 ```
 
 Override the limit when queue policy or an ablation requires it:
 
 ```bash
 WALLTIME=12:00:00 \
-  bash experiments/zeroshot_cf/athena/submit_exp9_dicoflex.sh
+  bash experiments/zeroshot_cf/athena/submit_exp9_countercontex.sh
 ```
 
-Outputs land under `experiments/zeroshot_cf/results/athena/exp9_dicoflex/`.
+Outputs land under `experiments/zeroshot_cf/results/athena/exp9_countercontex/`.
 That tree is ignored by git.
 
 After all four tasks finish, aggregate the metric rows without loading TabICL:
 
 ```bash
 uv run --project experiments/zeroshot_cf \
-  python -m experiments.zeroshot_cf.exp9_dicoflex_benchmark \
+  python -m experiments.zeroshot_cf.exp9_countercontex_benchmark \
   --dataset aggregate
 ```
 

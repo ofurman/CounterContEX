@@ -3,8 +3,8 @@ set -euo pipefail
 
 PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
 SUITE_DIR="${SUITE_DIR:-$PROJECT_DIR/experiments/zeroshot_cf}"
-CASE_FILE="${CASE_FILE:-$SUITE_DIR/athena/exp9_dicoflex_cases.tsv}"
-SBATCH_FILE="${SBATCH_FILE:-$SUITE_DIR/athena/exp9_dicoflex_array.sbatch}"
+CASE_FILE="${CASE_FILE:-$SUITE_DIR/athena/exp9_countercontex_cases.tsv}"
+SBATCH_FILE="${SBATCH_FILE:-$SUITE_DIR/athena/exp9_countercontex_array.sbatch}"
 WALLTIME="${WALLTIME:-10:00:00}"
 
 N_CASES=$(awk 'NF && $1 !~ /^#/ {c++} END {print c + 0}' "$CASE_FILE")
@@ -27,4 +27,4 @@ sbatch \
     "$SBATCH_FILE"
 
 echo "After all tasks finish, aggregate with:"
-echo "uv run --project \"$SUITE_DIR\" python -m experiments.zeroshot_cf.exp9_dicoflex_benchmark --dataset aggregate"
+echo "uv run --project \"$SUITE_DIR\" python -m experiments.zeroshot_cf.exp9_countercontex_benchmark --dataset aggregate"

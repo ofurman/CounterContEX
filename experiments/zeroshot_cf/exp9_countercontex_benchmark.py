@@ -37,7 +37,7 @@ DEFAULT_DIVERSITY_MAX_GOWER_RATIO = 1.5
 DEFAULT_DIVERSITY_MAX_GOWER_INCREASE = 0.02
 DEFAULT_CANDIDATE_QUANTILES = tuple(i / 10 for i in range(1, 10))
 DEFAULT_CONFIDENCE_QUANTILES = (0.10, 0.25, 0.50, 0.75, 0.90)
-RESULTS_DIR = Path(__file__).parent / "results" / "athena" / "exp9_dicoflex"
+RESULTS_DIR = Path(__file__).parent / "results" / "athena" / "exp9_countercontex"
 
 
 def _spec(  # noqa: PLR0913

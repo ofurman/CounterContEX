@@ -4,7 +4,7 @@ CounterContEX is a counterfactual-explanation benchmark for tabular classifiers.
 It has one execution path for dataset preparation, counterfactual generation,
 evaluation, persistence, and comparison across methods.
 
-The main research method is DiCoFlex with a TabICL proposal backend. The repository
+The main research method is CounterContEx with a TabICL proposal backend. The repository
 also includes NICE, Wachter, Growing Spheres, DiCE, and FACE baselines. All methods
 use the same benchmark cases, evaluation metrics, artifact schema, and run identity
 rules.
@@ -32,14 +32,14 @@ The method registry contains:
 
 | Method | Registry name | Multiple CFs | Optional runtime |
 |---|---|---:|---|
-| DiCoFlex | `dicoflex` | Yes | TabICL checkpoints |
+| CounterContEx | `countercontex` | Yes | TabICL checkpoints |
 | NICE | `nice` | No | None |
 | Wachter | `wachter` | No | None |
 | Growing Spheres | `growing_spheres` | No | None |
 | DiCE | `dice` | No | `dice-ml` |
 | FACE | `face` | No | None |
 
-DiCoFlex also has a deterministic `empirical` proposal backend. This backend is
+CounterContEx also has a deterministic `empirical` proposal backend. This backend is
 useful for checkpoint-free ablations. It does not support confidence conditioning
 or joint-density scoring.
 
@@ -112,11 +112,11 @@ uv run python -m experiments.zeroshot_cf.cli aggregate \
 Available matrix files include:
 
 - `one_factual_compat.yaml`: a fast compatibility matrix across all methods.
-- `dicoflex_ablation_example.yaml`: DiCoFlex search and backend ablations.
+- `countercontex_ablation_example.yaml`: CounterContEx search and backend ablations.
 - `full_reference.yaml`: four datasets, all six methods, and 1,000 factuals.
 
 The full reference matrix is expensive. A recorded run took about 9.42 hours,
-including 7.64 hours for the Lending Club DiCoFlex cell.
+including 7.64 hours for the Lending Club CounterContEx cell.
 
 ## Architecture
 
@@ -168,11 +168,11 @@ diagnostics. Each method follows two phases:
 lazily. A new baseline does not require changes to dataset preparation, common
 evaluation, or the generic runner.
 
-DiCoFlex has a second internal boundary under
-[`methods/dicoflex/`](experiments/zeroshot_cf/methods/dicoflex/):
+CounterContEx has a second internal boundary under
+[`methods/countercontex/`](experiments/zeroshot_cf/methods/countercontex/):
 
 ```text
-DiCoFlex method -> search -> ProposalSession -> TabICL or empirical backend
+CounterContEx method -> search -> ProposalSession -> TabICL or empirical backend
                                       ^
                                       |
                     backend identity and runtime policy
@@ -180,7 +180,7 @@ DiCoFlex method -> search -> ProposalSession -> TabICL or empirical backend
 
 The proposal contract covers numerical batches, confidence conditioning,
 categorical distributions, and optional joint scoring. The generic runner has no
-TabICL, empirical, or DiCoFlex-specific policy.
+TabICL, empirical, or CounterContEx-specific policy.
 
 ### Evaluation
 
@@ -243,7 +243,7 @@ CounterContEX/
 ├── experiments/zeroshot_cf/
 │   ├── core/                     # portable contracts and validation
 │   ├── datasets/                 # providers and benchmark cases
-│   ├── methods/                  # baselines, DiCoFlex, and registry
+│   ├── methods/                  # baselines, CounterContEx, and registry
 │   ├── evaluation/               # common metrics and report types
 │   ├── orchestration/            # specs, runner, artifacts, compatibility
 │   ├── configs/matrices/         # tracked experiment definitions
@@ -270,7 +270,7 @@ from experiments.zeroshot_cf.generator import generate_counterfactual_batch
 The public `experiments.zeroshot_cf.tabicl_runtime` module remains a compatibility
 re-export for existing Python callers.
 
-A current limitation affects legacy flat-output repair. A resumed DiCoFlex run can
+A current limitation affects legacy flat-output repair. A resumed CounterContEx run can
 fail if a stored diagnostic is JSON `null` and legacy export converts it directly
 to `float`. The canonical run directory remains valid. This limitation does not
 affect fresh canonical artifact publication.

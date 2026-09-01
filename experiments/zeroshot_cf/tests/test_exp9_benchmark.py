@@ -8,7 +8,7 @@ from pathlib import Path
 
 import experiments.zeroshot_cf.benchmark_protocol as protocol
 import numpy as np
-from experiments.zeroshot_cf.exp9_dicoflex_benchmark import (
+from experiments.zeroshot_cf.exp9_countercontex_benchmark import (
     DATASETS,
     DEFAULT_CANDIDATE_QUANTILES,
     DEFAULT_MAX_TEST,

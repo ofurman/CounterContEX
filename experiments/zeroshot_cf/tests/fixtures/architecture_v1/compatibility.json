@@ -50,7 +50,7 @@
   ],
   "methods": {
     "countercontex": {
-      "source_module": "exp9_dicoflex_benchmark",
+      "source_module": "exp9_countercontex_benchmark",
       "legacy_method_ids": [
         "tabicl_v2_sparse",
         "tabicl_v2_data_plausible",
@@ -594,7 +594,7 @@
       ]
     },
     {
-      "module": "experiments.zeroshot_cf.exp9_dicoflex_benchmark",
+      "module": "experiments.zeroshot_cf.exp9_countercontex_benchmark",
       "help_tokens": [
         "--dataset",
         "--results-dir",

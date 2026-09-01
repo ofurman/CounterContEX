@@ -288,7 +288,7 @@ def test_empirical_backend_is_deterministic_and_conforms() -> None:
     np.testing.assert_allclose(proposals.probabilities, [1 / 3, 2 / 3])
 
 
-def test_empirical_backend_runs_complete_dicoflex_sparse_search() -> None:
+def test_empirical_backend_runs_complete_countercontex_sparse_search() -> None:
     method = CounterContExMethod(
         CounterContExConfig(foundation=CounterContExFoundationConfig(backend="empirical"))
     )
@@ -476,7 +476,7 @@ def test_portable_layers_do_not_import_foundation_or_concrete_methods() -> None:
 def test_tracked_ablation_and_full_reference_matrices_resolve_exact_axes() -> None:
     root = Path(__file__).resolve().parents[1]
     config_root = root / "configs" / "matrices"
-    ablation = load_matrix_config(config_root / "dicoflex_ablation_example.yaml")
+    ablation = load_matrix_config(config_root / "countercontex_ablation_example.yaml")
     reference = load_matrix_config(config_root / "full_reference.yaml")
 
     assert len(ablation.runs) == 24
@@ -534,6 +534,6 @@ def test_tracked_ablation_and_full_reference_matrices_resolve_exact_axes() -> No
     }
     assert {run.seed for run in reference.runs} == {42}
     assert {run.protocol.max_test for run in reference.runs} == {1000}
-    dicoflex = next(run for run in reference.runs if run.method.name == "countercontex")
-    assert dicoflex.method.n_counterfactuals == 3
-    assert dicoflex.method.params["foundation"]["backend"] == "tabicl"
+    countercontex = next(run for run in reference.runs if run.method.name == "countercontex")
+    assert countercontex.method.n_counterfactuals == 3
+    assert countercontex.method.params["foundation"]["backend"] == "tabicl"

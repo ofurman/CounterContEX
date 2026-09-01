@@ -3,8 +3,8 @@
   "created": "2026-09-01",
   "stages": [
     {"id": 1, "title": "Establish the canonical method surface", "file": "stages/01-canonical-method-surface.md", "status": "DONE", "depends_on": [], "commit": "1ab5a9b", "note": "Package/types/imports renamed; old registry, method, and implementation identity retained for Stage 2.", "blocked_by": []},
-    {"id": 2, "title": "Migrate identity and compatibility contracts", "file": "stages/02-migrate-identity-contracts.md", "status": "DONE", "depends_on": [1], "commit": null, "note": "Runtime identity is now countercontex/countercontex-v3; v1 stems, schemas, IDs, and deterministic values remain unchanged.", "blocked_by": []},
-    {"id": 3, "title": "Rename operational paths and documentation", "file": "stages/03-rename-operations-docs.md", "status": "PENDING", "depends_on": [2], "commit": null, "note": null, "blocked_by": []},
+    {"id": 2, "title": "Migrate identity and compatibility contracts", "file": "stages/02-migrate-identity-contracts.md", "status": "DONE", "depends_on": [1], "commit": "63d98e3", "note": "Runtime identity is now countercontex/countercontex-v3; v1 stems, schemas, IDs, and deterministic values remain unchanged.", "blocked_by": []},
+    {"id": 3, "title": "Rename operational paths and documentation", "file": "stages/03-rename-operations-docs.md", "status": "DONE", "depends_on": [2], "commit": null, "note": "Exp9 CLI, Athena launchers, ablation config, tests, result roots, and active documentation now use CounterContEx/countercontex.", "blocked_by": []},
     {"id": 4, "title": "Remove the old active name and audit the cutover", "file": "stages/04-remove-old-name.md", "status": "PENDING", "depends_on": [3], "commit": null, "note": null, "blocked_by": []}
   ]
 }
