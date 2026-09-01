@@ -41,36 +41,95 @@ target policy specific to binary classification.
 
 ## 2. Method at a glance
 
-CounterContEx separates proposal quality from decision-boundary search:
+Every path uses the same factual, target classifier, action schema, and training
+reference. The proposal backend and requested set size select the search path.
 
 ```text
-training features ──► target classifier ──► predicted context labels
-       │                       │
-       │                       └──────────► validity and target probability
-       ▼
-factual-specific Gower neighbors
-       ▼
-[local features, predicted label, optional confidence]
-       ▼
-TabICL conditional feature proposals
-       ▼
-legal complete candidate rows
-       ▼
-greedy search or bounded beam search
-       ▼
-one counterfactual or a diverse counterfactual set
+┌─────────────────────────────────────────────────────────────────────┐
+│ Shared inputs                                                       │
+│ factual x · target y* · classifier · action schema · training data  │
+└────────────────────────────────┬────────────────────────────────────┘
+                                 ▼
+                     ┌──────────────────────┐
+                     │  Proposal backend?   │
+                     └──────────┬───────────┘
+                ┌───────────────┴────────────────┐
+                │                                │
+        default │                                │ checkpoint-free control
+                ▼                                ▼
+┌───────────────────────────────┐   ┌───────────────────────────────┐
+│ TabICL backend                │   │ Empirical backend             │
+│                               │   │                               │
+│ 1. Select up to 512 local     │   │ Use classifier target-class   │
+│    Gower neighbors.           │   │ reference rows.               │
+│ 2. Attach predicted labels.   │   │                               │
+│ 3. Propose numerical mode or  │   │ Propose medians or quantiles  │
+│    a quantile grid.           │   │ and smoothed category rates.  │
+│ 4. Optionally add confidence  │   │                               │
+│    anchors.                   │   │ No confidence or joint score. │
+│ 5. Estimate category rates.   │   │                               │
+└───────────────┬───────────────┘   └───────────────┬───────────────┘
+                └───────────────────┬───────────────┘
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ Create legal one-action rows                                        │
+│ project values · atomic category swaps · preserve immutable units   │
+└────────────────────────────────┬────────────────────────────────────┘
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ Score every complete row with the target classifier                 │
+└────────────────────────────────┬────────────────────────────────────┘
+                                 ▼
+                     ┌──────────────────────┐
+                     │  Requested count k?  │
+                     └──────────┬───────────┘
+                ┌───────────────┴────────────────┐
+                │                                │
+          k = 1 ▼                                ▼ k > 1, sparse only
+       ┌────────────────┐             ┌───────────────────────────────┐
+       │ Single-CF mode │             │ Bounded beam expansion        │
+       └───────┬────────┘             └───────────────┬───────────────┘
+       ┌───────┴──────────────┐                        ▼
+       │                      │             ┌──────────────────────────┐
+     sparse             data_plausible      │ Quality-bounded valid     │
+       ▼                      ▼             │ candidate pool            │
+┌──────────────────┐  ┌──────────────────┐  └─────────────┬────────────┘
+│ Greedy target-   │  │ Start with the   │                ▼
+│ probability      │  │ sparse valid row.│  ┌──────────────────────────┐
+│ ascent until the │  │ Try one joint-   │  │ Exact fixed-size DPP MAP │
+│ first valid row. │  │ density update.  │  │ subset selection         │
+└─────────┬────────┘  │ Keep the sparse  │  └─────────────┬────────────┘
+          │           │ row without gain.│                ▼
+          │           └─────────┬────────┘  ┌──────────────────────────┐
+          │                     │           │ Up to k valid unique rows │
+          ▼                     ▼           │ with no padding           │
+    ┌──────────────────────────────┐         └─────────────┬────────────┘
+    │ One valid row or unavailable │                       │
+    └──────────────┬───────────────┘                       │
+                   └─────────────────┬─────────────────────┘
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ Method-blind evaluation                                             │
+│ availability · validity · proximity · sparsity · actionability      │
+│ plausibility · diversity · runtime                                  │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-This design has three main parts:
+The main choices are explicit in the method configuration:
 
-1. A proposal backend estimates target-conditioned numerical values and
-   categorical probabilities.
-2. A search procedure turns those proposals into complete legal rows.
-3. A method-blind evaluator measures returned rows with common metrics.
+| Decision | Options | Effect and constraint |
+|---|---|---|
+| Proposal backend | `tabicl` or `empirical` | TabICL supports every proposal option. The empirical backend does not support confidence or joint scoring. |
+| Numerical proposal | Conditional mode or a quantile grid | The mode gives one value per feature. A grid increases candidate breadth and runtime. |
+| Confidence conditioning | Disabled or confidence quantiles | This option requires TabICL and a numerical quantile grid. It also conditions categorical probabilities. |
+| Single-counterfactual mode | `sparse` or `data_plausible` | Sparse mode stops at validity. Data-plausible mode permits one joint-density refinement after validity. |
+| Requested set size | `k = 1` or `k > 1` | Multiple rows require sparse mode, bounded beam search, and DPP selection. |
+| Feature revisits | Enabled or disabled | Revisits let later search passes propose a new value for an action unit. |
+| Categorical breadth | A configured top count or all alternatives | Single-CF search has a coverage fallback. Multi-CF search can expand all alternatives at each depth. |
 
-The boundary between the proposal backend and search is deliberate. It permits
-foundation-model ablations without changes to the action space, search, or
-evaluation.
+The proposal backend estimates feature values. The target classifier alone
+defines validity and target probability. The method-blind evaluator then uses
+the same returned-candidate contract for CounterContEx and all baselines.
 
 ## 3. Local conditional proposal model
 
