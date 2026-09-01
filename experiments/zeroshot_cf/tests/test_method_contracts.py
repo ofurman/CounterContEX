@@ -21,7 +21,11 @@ from experiments.zeroshot_cf.methods.base import (
     CounterfactualMethod,
     PreparedMethod,
 )
-from experiments.zeroshot_cf.methods.dice import DiceMethod
+from experiments.zeroshot_cf.methods.dice import (
+    DiceMethod,
+    DiceMixedAdapter,
+    generate_dice_counterfactuals,
+)
 from experiments.zeroshot_cf.methods.face import FaceConfig, FaceMethod
 from experiments.zeroshot_cf.methods.nice import NiceMethod
 from experiments.zeroshot_cf.methods.optimization import (
@@ -79,7 +83,7 @@ def _context() -> MethodContext:
     return MethodContext(reference, schema, _ReversedClassifier())
 
 
-def _request(seed=17):
+def _request(seed=17, n_counterfactuals=1):
     return GenerationRequest(
         factuals=np.array(
             [
@@ -88,7 +92,7 @@ def _request(seed=17):
             ]
         ),
         targets=np.array([2, 2]),
-        n_counterfactuals=1,
+        n_counterfactuals=n_counterfactuals,
         seed=seed,
     )
 
@@ -207,9 +211,9 @@ def test_dice_prepare_is_lazy_and_generate_restores_global_rng(monkeypatch):
         random.seed(999)
         np.random.seed(999)
         factuals = np.asarray(args[3])
-        rows = factuals.copy()
-        rows[:, 0] = 1.0
-        rows[:, 1:3] = [0.0, 1.0]
+        rows = factuals[:, None, :].copy()
+        rows[:, :, 0] = 1.0
+        rows[:, :, 1:3] = [0.0, 1.0]
         info = [
             {
                 "returned": True,
@@ -227,7 +231,7 @@ def test_dice_prepare_is_lazy_and_generate_restores_global_rng(monkeypatch):
     assert isinstance(method, CounterfactualMethod)
     assert method.capabilities.supports_categorical
     assert method.capabilities.enforces_actionability
-    assert not method.capabilities.supports_multiple_counterfactuals
+    assert method.capabilities.supports_multiple_counterfactuals
     assert method.capabilities.requires_probabilities
     prepared = method.prepare(_context())
     assert isinstance(prepared, PreparedMethod)
@@ -250,18 +254,18 @@ def test_dice_prepare_is_lazy_and_generate_restores_global_rng(monkeypatch):
     np.testing.assert_array_equal(
         _context().oracle.predict(result.candidates[:, 0]), [2, 2]
     )
-    with pytest.raises(ValueError, match="exactly one"):
-        prepared.generate(
-            GenerationRequest(_request().factuals, _request().targets, 2, seed=23)
-        )
-
     def fake_missing(*args, **kwargs):
-        factuals = np.asarray(args[3]).copy()
-        return factuals, [
+        factuals = np.asarray(args[3])
+        rows = np.full((len(factuals), 3, factuals.shape[1]), np.nan)
+        rows[:, :2] = factuals[:, None, :]
+        rows[:, 0, 0] = 0.8
+        rows[:, 1, 0] = 1.0
+        rows[:, :2, 1:3] = [0.0, 1.0]
+        return rows, [
             {
-                "returned": False,
-                "found": False,
-                "valid_candidates": 0,
+                "returned": True,
+                "found": True,
+                "valid_candidates": 2,
                 "attempts": 1,
                 "runtime_s": 0.0,
             }
@@ -269,15 +273,85 @@ def test_dice_prepare_is_lazy_and_generate_restores_global_rng(monkeypatch):
         ]
 
     monkeypatch.setattr(dice_module, "generate_dice_counterfactuals", fake_missing)
-    missing = prepared.generate(_request(seed=31))
-    assert not missing.available.any()
-    assert np.isnan(missing.candidates).all()
-    np.testing.assert_array_equal(
-        missing.artifacts["method.best_effort"], _request().factuals
+    monkeypatch.setattr(
+        dice_module, "prune_counterfactual_actions", lambda _o, _f, row, *_a, **_k: row
     )
-    np.testing.assert_array_equal(
-        missing.artifacts["method.raw_candidates"], _request().factuals
+    monkeypatch.setattr(
+        dice_module, "contract_scalar_actions", lambda _o, _f, row, *_a, **_k: row
     )
+    shortage = prepared.generate(_request(seed=31, n_counterfactuals=3))
+    assert shortage.candidates.shape == (2, 3, 4)
+    np.testing.assert_array_equal(shortage.available, [[True, True, False]] * 2)
+    assert np.isnan(shortage.candidates[:, 2]).all()
+    assert all(
+        len(np.unique(rows[mask], axis=0)) == 2
+        for rows, mask in zip(
+            shortage.candidates, shortage.available, strict=True
+        )
+    )
+    assert "method.best_effort" not in shortage.artifacts
+    np.testing.assert_array_equal(
+        shortage.artifacts["method.raw_candidates"], fake_missing(
+            None, None, None, _request().factuals
+        )[0]
+    )
+
+
+def test_dice_requests_and_returns_three_distinct_candidates():
+    import pandas as pd
+
+    class _Explainer:
+        final_cfs = np.empty((3, 3))
+
+        def __init__(self):
+            self.requested = []
+
+        def generate_counterfactuals(self, _query, **kwargs):
+            self.requested.append(kwargs["total_CFs"])
+
+        def label_decode_cfs(self, _values):
+            return pd.DataFrame(
+                {
+                    "amount": [0.0, 0.5, 1.0],
+                    "fixed": [0.25, 0.25, 0.25],
+                    "kind": ["1", "1", "1"],
+                }
+            )
+
+    codec = DiceMixedAdapter(
+        n_features=4,
+        scalar_columns=(0, 3),
+        groups=(OneHotActionGroup("kind", (1, 2)),),
+        scalar_names=("amount", "fixed"),
+    )
+    factuals = _request().factuals[:1]
+    explainer = _Explainer()
+    first, info = generate_dice_counterfactuals(
+        explainer,
+        codec,
+        _context().oracle,
+        factuals,
+        np.array([2]),
+        ["amount", "kind"],
+        n_counterfactuals=3,
+        random_state=13,
+    )
+    repeated, _ = generate_dice_counterfactuals(
+        _Explainer(),
+        codec,
+        _context().oracle,
+        factuals,
+        np.array([2]),
+        ["amount", "kind"],
+        n_counterfactuals=3,
+        random_state=13,
+    )
+
+    assert explainer.requested == [3]
+    assert info[0]["valid_candidates"] == 3
+    assert len(np.unique(first[0], axis=0)) == 3
+    assert not np.any(np.all(first[0] == factuals[0], axis=1))
+    np.testing.assert_array_equal(first, repeated)
 
 
 def test_method_modules_import_without_optional_runtime_initialization():

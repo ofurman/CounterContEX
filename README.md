@@ -40,7 +40,7 @@ The method registry contains:
 | NICE | `nice` | No | None |
 | Wachter | `wachter` | No | None |
 | Growing Spheres | `growing_spheres` | No | None |
-| DiCE | `dice` | No | `dice-ml` |
+| DiCE | `dice` | Yes | `dice-ml` |
 | FACE | `face` | No | None |
 
 The target-model registry contains `retained_logistic_regression`, `retained_mlp`,

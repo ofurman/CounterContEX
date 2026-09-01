@@ -134,3 +134,34 @@ target-class CFs, uses deterministic leading target-matched reference rows, fold
 prevent interpreting it as universal indistinguishability. K-th-neighbour support deliberately
 uses all available returned candidates.
 **Commit**: `HEAD` (this stage commit)
+
+## 2026-09-01 23:40 -- Stage 4: Diverse baseline adapters -- DONE
+**Did**: Wired the requested set size through DiCE's native genetic `total_CFs`, collected
+distinct target-class returns across configured restarts, and preserved shortages as NaN-backed
+unavailable slots. Post-processing now revalidates, removes factual rows, and deduplicates
+candidates that collapse during pruning/contraction. Flipped the capability and bumped the
+scientific implementation identity from `dice-v1` to `dice-v2`. D-6 records why NICE, Wachter,
+Growing Spheres, and FACE retain their single-counterfactual guards.
+**Verification**: GATE the deterministic k=3 fixture requested three candidates and returned
+three distinct rows, none equal to the factual; its two-of-three witness has availability
+`[true, true, false]` with the final candidate all NaN. GATE two independent real HELOC n=1,
+k=3 runs at seed 42 published the same run ID
+`9f5430462ba5d59e6a0df3b8741c0d6fb89a0e90cc26e7dc5d1831ea7889202a` and byte-identical
+`arrays.npz` SHA-256 `d0cd8627fa094759c6ff5523af29e317da16a88537c00d528fb62e347b2f9249`;
+the manifest resolves `method_implementation=dice-v2`. REPORT all three real candidates were
+available and target-class valid: `set_coverage_at_k=1.0`, `set_returned_count_mean=3.0`,
+`set_action_jaccard_mean=0.266667`, and `set_pairwise_gower_mean=0.0195753`.
+**Provenance**: Fixture assertions read the returned candidate cube and mask, while the real
+determinism gate compared every named array and the complete NPZ bytes under separate output
+roots. Set metrics came from the canonical `summary.csv`; candidate count and implementation
+identity came from `arrays.npz` and `manifest.json`. Repeating a candidate, inserting a factual,
+using ambient RNG state, or retaining `dice-v1` turns a gate red.
+**Problems**: DiCE pruning can legitimately collapse distinct raw candidates to the same
+actionable endpoint; the adapter therefore deduplicates after pruning as well as before it. Full
+suite: 275 passed; changed-file Ruff passed. An independent provenance audit passed every gate,
+re-read the real artifacts and manifest, and corroborated D-6 against all five baseline
+implementations. It notes that the shortage witness is adapter-level rather than a persisted
+run, while the evaluator independently defines coverage@k from returned count; it also confirms
+the three real rows only barely cross the class boundary and all fail tau=0.7, so these diversity
+metrics characterize returned target-class candidates, not threshold-valid successes.
+**Commit**: `HEAD` (this stage commit)

@@ -210,7 +210,7 @@ DEFAULT_METHOD_REGISTRY = MethodRegistry(
             "experiments.zeroshot_cf.methods.dice",
             "DiceMethod",
             "DiceConfig",
-            "dice-v1",
+            "dice-v2",
         ),
         RegistryEntry(
             "face",

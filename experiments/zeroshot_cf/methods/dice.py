@@ -14,12 +14,12 @@ from experiments.zeroshot_cf.baseline_common import (
     contract_scalar_actions,
     prune_counterfactual_actions,
 )
-from experiments.zeroshot_cf.core.contracts import GenerationRequest, MethodContext
-from experiments.zeroshot_cf.methods.base import (
-    MethodCapabilities,
-    canonical_single_result,
-    require_single_counterfactual,
+from experiments.zeroshot_cf.core.contracts import (
+    GenerationRequest,
+    GenerationResult,
+    MethodContext,
 )
+from experiments.zeroshot_cf.methods.base import MethodCapabilities
 from experiments.zeroshot_cf.retained_config import TAU
 
 if TYPE_CHECKING:
@@ -132,21 +132,30 @@ def generate_dice_counterfactuals(
     search_restarts: int = 1,
     stopping_threshold: float = TAU,
     random_state: int = 42,
+    n_counterfactuals: int = 1,
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
-    """Generate one CF per factual from DiCE's valid pre-sparsification set."""
+    """Generate distinct CF sets from DiCE's valid pre-sparsification output."""
     from raiutils.exceptions import UserConfigValidationException
 
     if search_restarts < 1:
         raise ValueError("search_restarts must be positive")
+    if n_counterfactuals < 1:
+        raise ValueError("n_counterfactuals must be positive")
     if not 0.5 <= stopping_threshold < 1.0:
         raise ValueError("stopping_threshold must be in [0.5, 1.0)")
-    X_cf = np.asarray(X_test, dtype=np.float64).copy()
+    factuals = np.asarray(X_test, dtype=np.float64)
+    X_cf = np.full(
+        (len(factuals), n_counterfactuals, factuals.shape[1]),
+        np.nan,
+        dtype=np.float64,
+    )
     point_info: list[dict[str, Any]] = []
     queries = codec.encode(X_test)
     for index, target in enumerate(np.asarray(y_target, dtype=int)):
         started = time.perf_counter()
         returned = False
-        valid_candidates = 0
+        selected_candidates: list[np.ndarray] = []
+        selected_keys: set[bytes] = set()
         attempts_used = 0
         for attempt in range(search_restarts):
             attempts_used = attempt + 1
@@ -156,7 +165,7 @@ def generate_dice_counterfactuals(
             try:
                 explainer.generate_counterfactuals(
                     queries.iloc[[index]],
-                    total_CFs=1,
+                    total_CFs=n_counterfactuals,
                     desired_class=int(target),
                     features_to_vary=features_to_vary,
                     stopping_threshold=stopping_threshold,
@@ -188,8 +197,7 @@ def generate_dice_counterfactuals(
                 classifier.predict(candidates), dtype=int
             )
             valid_indices = np.flatnonzero(predictions == int(target))
-            valid_candidates = len(valid_indices)
-            if valid_candidates:
+            if len(valid_indices):
                 candidates = candidates[valid_indices]
                 compact_factual = queries.iloc[index].to_numpy()
                 compact_candidates = final_frame.iloc[valid_indices][
@@ -197,14 +205,26 @@ def generate_dice_counterfactuals(
                 ].to_numpy()
                 changed_actions = (compact_candidates != compact_factual).sum(axis=1)
                 l2 = np.linalg.norm(candidates - X_test[index], axis=1)
-                selected = np.lexsort((l2, changed_actions))[0]
-                X_cf[index] = candidates[selected]
+                for selected in np.lexsort((l2, changed_actions)):
+                    candidate = candidates[selected]
+                    key = np.ascontiguousarray(candidate).tobytes()
+                    if key in selected_keys or np.array_equal(
+                        candidate, factuals[index]
+                    ):
+                        continue
+                    selected_candidates.append(candidate.copy())
+                    selected_keys.add(key)
+                    if len(selected_candidates) == n_counterfactuals:
+                        break
+            if len(selected_candidates) == n_counterfactuals:
                 break
+        if selected_candidates:
+            X_cf[index, : len(selected_candidates)] = selected_candidates
         point_info.append(
             {
                 "returned": bool(returned),
-                "found": bool(valid_candidates),
-                "valid_candidates": int(valid_candidates),
+                "found": bool(selected_candidates),
+                "valid_candidates": len(selected_candidates),
                 "attempts": attempts_used,
                 "runtime_s": time.perf_counter() - started,
             }
@@ -232,7 +252,7 @@ class DiceMethod:
     capabilities = MethodCapabilities(
         supports_categorical=True,
         enforces_actionability=True,
-        supports_multiple_counterfactuals=False,
+        supports_multiple_counterfactuals=True,
         requires_probabilities=True,
         optional_dependencies=("dice-ml", "raiutils", "pandas"),
     )
@@ -300,7 +320,6 @@ class PreparedDiceMethod:
     features_to_vary: tuple[str, ...]
 
     def generate(self, request: GenerationRequest):
-        require_single_counterfactual(request)
         if request.factuals.shape[1] != self.context.X_reference.shape[1]:
             raise ValueError("request feature width does not match method context")
         python_state = random.getstate()
@@ -317,6 +336,7 @@ class PreparedDiceMethod:
                 search_restarts=self.config.search_restarts,
                 stopping_threshold=self.config.stopping_threshold,
                 random_state=request.seed,
+                n_counterfactuals=request.n_counterfactuals,
             )
         finally:
             random.setstate(python_state)
@@ -326,38 +346,56 @@ class PreparedDiceMethod:
             list(self.context.feature_schema.actionable_scalars),
             list(self.context.feature_schema.actionable_groups),
         )
-        available = np.zeros(len(raw), dtype=bool)
+        candidates = np.full_like(raw, np.nan)
+        available = np.zeros(raw.shape[:2], dtype=bool)
         for index, target in enumerate(request.targets):
             target_value = target.item() if isinstance(target, np.generic) else target
-            if not diagnostics[index]["found"]:
-                continue
-            raw[index] = prune_counterfactual_actions(
-                self.context.oracle,
-                request.factuals[index],
-                raw[index],
-                target_value,
-                action_units,
-                tau=self.config.stopping_threshold,
-            )
-            raw[index] = contract_scalar_actions(
-                self.context.oracle,
-                request.factuals[index],
-                raw[index],
-                target_value,
-                self.context.feature_schema.actionable_scalars,
-                tau=self.config.stopping_threshold,
-            )
-            available[index] = bool(
-                np.asarray(self.context.oracle.predict(raw[index : index + 1]))[0]
-                == target_value
-            )
-        return canonical_single_result(
-            raw,
-            available,
+            accepted: list[np.ndarray] = []
+            accepted_keys: set[bytes] = set()
+            for candidate in raw[index]:
+                if not np.isfinite(candidate).all():
+                    continue
+                candidate = prune_counterfactual_actions(
+                    self.context.oracle,
+                    request.factuals[index],
+                    candidate,
+                    target_value,
+                    action_units,
+                    tau=self.config.stopping_threshold,
+                )
+                candidate = contract_scalar_actions(
+                    self.context.oracle,
+                    request.factuals[index],
+                    candidate,
+                    target_value,
+                    self.context.feature_schema.actionable_scalars,
+                    tau=self.config.stopping_threshold,
+                )
+                valid = bool(
+                    np.asarray(self.context.oracle.predict(candidate[None, :]))[0]
+                    == target_value
+                )
+                key = np.ascontiguousarray(candidate).tobytes()
+                if (
+                    not valid
+                    or np.array_equal(candidate, request.factuals[index])
+                    or key in accepted_keys
+                ):
+                    continue
+                accepted.append(candidate)
+                accepted_keys.add(key)
+            if accepted:
+                candidates[index, : len(accepted)] = accepted
+                available[index, : len(accepted)] = True
+            diagnostics[index]["found"] = bool(accepted)
+            diagnostics[index]["valid_candidates"] = len(accepted)
+        return GenerationResult(
+            candidates=candidates,
+            available=available,
             point_diagnostics=tuple(diagnostics),
             run_diagnostics={
                 "seed": request.seed,
                 "features_to_vary": list(self.features_to_vary),
             },
-            extra_artifacts={"method.raw_candidates": raw_unpruned},
+            artifacts={"method.raw_candidates": raw_unpruned},
         )

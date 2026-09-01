@@ -67,3 +67,12 @@ XGBoost. No combination may be excluded from later completeness gates as an expe
 that method and is unavailable for the empirical backend. Evaluation v2 instead adds neutral
 detectability and grouped-Gower neighbour support; joint density may accompany method-specific
 ablations but cannot become a cross-method headline metric.
+
+### D-6: Expose native sets only for DiCE among retained baselines
+**Date**: 2026-09-01 - **Stage**: 4
+**Options**: A) synthesize sets for every baseline B) expose only methods' native set semantics
+**Chosen**: B
+**Rationale**: DiCE natively requests multiple genetic candidates. NICE selects one nearest
+unlike neighbour, Wachter one optimized solution, Growing Spheres one nearest enemy, and FACE
+one graph-path endpoint. Sampling or perturbing those single outputs would fabricate diversity,
+so their single-counterfactual guards remain intact.
