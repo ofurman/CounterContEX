@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import joblib
 import numpy as np
@@ -23,7 +23,8 @@ from sklearn.linear_model import LogisticRegression as _SklearnLR
 from sklearn.neural_network import MLPClassifier as _SklearnMLP
 
 MODELS_DIR = Path(__file__).parent / "models"
-DEFAULT_DISC_TYPE: Literal["lr", "mlp"] = "lr"
+DiscriminatorType = Literal["lr", "mlp", "xgb"]
+DEFAULT_DISC_TYPE: DiscriminatorType = "lr"
 DEFAULT_LR_PARAMS = {
     "max_iter": 1000,
     "random_state": 42,
@@ -35,6 +36,17 @@ DEFAULT_MLP_PARAMS = {
     "random_state": 42,
     "early_stopping": True,
     "validation_fraction": 0.1,
+}
+DEFAULT_XGB_PARAMS = {
+    "n_estimators": 200,
+    "max_depth": 4,
+    "learning_rate": 0.05,
+    "subsample": 1.0,
+    "colsample_bytree": 1.0,
+    "random_state": 42,
+    "n_jobs": 1,
+    "tree_method": "hist",
+    "eval_metric": "logloss",
 }
 
 
@@ -60,7 +72,7 @@ def train_discriminator(
     X_test: np.ndarray,
     y_test: np.ndarray,
     dataset_name: str,
-    disc_type: Literal["lr", "mlp"] = DEFAULT_DISC_TYPE,
+    disc_type: DiscriminatorType = DEFAULT_DISC_TYPE,
     force_retrain: bool = False,
 ) -> DiscriminatorModel:
     """Train (or load from cache) a validity oracle for the given dataset.
@@ -89,6 +101,10 @@ def train_discriminator(
         clf = _SklearnLR(**DEFAULT_LR_PARAMS)
     elif disc_type == "mlp":
         clf = _SklearnMLP(**DEFAULT_MLP_PARAMS)
+    elif disc_type == "xgb":
+        from xgboost import XGBClassifier
+
+        clf: Any = XGBClassifier(**DEFAULT_XGB_PARAMS)
     else:
         raise ValueError(f"Unknown disc_type: {disc_type!r}")
 

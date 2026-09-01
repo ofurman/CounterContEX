@@ -28,8 +28,9 @@ The full reference benchmark uses four binary-classification datasets:
 
 The default protocol uses a deterministic 64/16/20 train, validation, and test
 split. It uses seed 42 and selects counterfactual targets from classifier
-predictions. Numerical features and atomic one-hot groups define the action space.
-Immutable features must remain unchanged.
+predictions. The target-model registry provides fixed logistic-regression, MLP,
+and XGBoost families. Numerical features and atomic one-hot groups define the
+action space. Immutable features must remain unchanged.
 
 The method registry contains:
 
@@ -41,6 +42,11 @@ The method registry contains:
 | Growing Spheres | `growing_spheres` | No | None |
 | DiCE | `dice` | No | `dice-ml` |
 | FACE | `face` | No | None |
+
+The target-model registry contains `retained_logistic_regression`, `retained_mlp`,
+and `retained_xgboost`. Matrix files may use the backward-compatible singular
+`target_model` mapping or a `target_models` list to expand classifier family as a
+scientific axis.
 
 CounterContEx also has a deterministic `empirical` proposal backend. This backend is
 useful for checkpoint-free ablations. It does not support confidence conditioning

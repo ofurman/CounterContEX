@@ -129,6 +129,14 @@ def _canonical_model_value(value: Any, seen: set[int] | None = None) -> Any:
             "dtype": value.dtype.str,
             "shape": list(value.shape),
         }
+    if isinstance(value, np.random.RandomState):
+        return {
+            "random_state": _canonical_model_value(value.get_state(), seen),
+        }
+    if isinstance(value, np.random.Generator):
+        return {
+            "generator": _canonical_model_value(value.bit_generator.state, seen),
+        }
     if isinstance(value, bytes):
         return {"bytes_sha256": hashlib.sha256(value).hexdigest()}
     if isinstance(value, Path):

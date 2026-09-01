@@ -35,10 +35,6 @@ from experiments.zeroshot_cf.orchestration.spec import (
 )
 
 EvaluatorFactory = Callable[[BenchmarkCase, Any], Any]
-_SUPPORTED_TARGET_MODEL_NAME = "retained_logistic_regression"
-_SUPPORTED_TARGET_MODEL_PARAMS = {"C": 1.0, "max_iter": 1000, "seed": 42}
-
-
 @dataclass(frozen=True)
 class PhaseTimings:
     prepare_s: float
@@ -80,14 +76,6 @@ class RunOutcome:
 
 
 def _default_case_loader(spec: RunSpec) -> LoadedCase:
-    if (
-        spec.target_model.name != _SUPPORTED_TARGET_MODEL_NAME
-        or dict(spec.target_model.params) != _SUPPORTED_TARGET_MODEL_PARAMS
-    ):
-        raise ValueError(
-            "default case loader supports only retained_logistic_regression "
-            "with params {'C': 1.0, 'max_iter': 1000, 'seed': 42}"
-        )
     # CEL is a pinned, local-only checkout rather than a locked workspace
     # dependency. ``uv run`` reconciles the environment before launching, so an
     # editable install performed by vendor_setup is not guaranteed to persist.
@@ -101,7 +89,14 @@ def _default_case_loader(spec: RunSpec) -> LoadedCase:
     from experiments.zeroshot_cf.datasets.base import DatasetSpec as ProviderDatasetSpec
     from experiments.zeroshot_cf.datasets.benchmark import build_benchmark_case
     from experiments.zeroshot_cf.datasets.cel import CelDatasetProvider
+    from experiments.zeroshot_cf.datasets.target_models import (
+        DEFAULT_TARGET_MODEL_REGISTRY,
+    )
     from experiments.zeroshot_cf.discriminator import train_discriminator
+
+    target_model = DEFAULT_TARGET_MODEL_REGISTRY.resolve(
+        spec.target_model.name, spec.target_model.params
+    )
 
     params = {
         "validation_fraction": 0.2,
@@ -138,6 +133,7 @@ def _default_case_loader(spec: RunSpec) -> LoadedCase:
         evaluation_X,
         evaluation_y,
         cache_tag,
+        disc_type=target_model.discriminator_type,
     )
     return LoadedCase(
         build_benchmark_case(
@@ -147,10 +143,8 @@ def _default_case_loader(spec: RunSpec) -> LoadedCase:
             test_selection=spec.protocol.test_selection,
             seed=42,
             target_model={
-                "kind": "logistic_regression",
-                "C": 1.0,
-                "max_iter": 1000,
-                "seed": 42,
+                "kind": target_model.model_kind,
+                **dict(target_model.declared_params),
                 "cache_tag": cache_tag,
             },
         ),

@@ -119,7 +119,9 @@ Available retained CLI entry points:
 
 The generic runner is the typed entry point for new experiment suites. Matrix
 files resolve every dataset, method variant, method parameter, evaluation
-setting, and seed before execution. The resulting run ID contains only those
+setting, target-model family, and seed before execution. A matrix may retain the
+singular `target_model` mapping or use a mutually exclusive `target_models` list
+for Cartesian expansion. The resulting run ID contains only those
 scientific inputs and the measured dataset, case, implementation, model, and
 checkpoint identities. Output paths, cache paths, devices, hosts, and resume
 settings stay in manifest execution metadata and do not change the run ID.
@@ -134,7 +136,10 @@ datasets + methods + evaluation <- orchestration <- CLI and compatibility shims
 ```
 
 Datasets own loading, preprocessing, schemas, factual selection, and target
-case construction. Methods own preparation, candidate generation, legal-action
+case construction. The dataset-owned registry resolves the fixed
+`retained_logistic_regression`, `retained_mlp`, and `retained_xgboost` families;
+their fitted content and implementation determine scientific identity. Methods
+own preparation, candidate generation, legal-action
 enforcement, and namespaced diagnostics. Evaluation derives every common
 metric only from the benchmark case and canonical candidates. Orchestration
 owns matrix expansion, lifecycle timing, manifests, persistence, resume,

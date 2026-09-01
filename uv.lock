@@ -1158,6 +1158,7 @@ dependencies = [
     { name = "torchdiffeq" },
     { name = "typing-extensions" },
     { name = "umnn" },
+    { name = "xgboost" },
 ]
 
 [package.metadata]
@@ -1180,6 +1181,7 @@ requires-dist = [
     { name = "torchdiffeq" },
     { name = "typing-extensions", specifier = ">=4.12.0" },
     { name = "umnn" },
+    { name = "xgboost", specifier = "==3.4.1" },
 ]
 
 [[package]]

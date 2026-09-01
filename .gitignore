@@ -175,6 +175,7 @@ experiments/zeroshot_cf/.venv/
 experiments/zeroshot_cf/results/data/
 experiments/zeroshot_cf/results/local/
 experiments/zeroshot_cf/results/athena/
+experiments/zeroshot_cf/results/campaign/
 experiments/zeroshot_cf/logs/
 experiments/zeroshot_cf/vendor/
 experiments/zeroshot_cf/vendor

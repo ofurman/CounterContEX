@@ -46,6 +46,11 @@ class _FittedPredictor(_ReversedLabelPredictor):
         return {"scale": self.scale}
 
 
+class _RandomStatePredictor(_ReversedLabelPredictor):
+    def __init__(self, seed: int) -> None:
+        self._random_state = np.random.RandomState(seed)
+
+
 def _dataset() -> PreparedDataset:
     domains = FeatureDomains(
         lower=np.zeros(3),
@@ -295,6 +300,21 @@ def test_case_identity_covers_selection_model_config_and_fitted_content() -> Non
     )
     with pytest.raises(ValueError, match="non-empty resolved model config"):
         build_benchmark_case(dataset, _ReversedLabelPredictor(), target_model={})
+
+
+def test_case_identity_serializes_rng_content_without_memory_addresses() -> None:
+    dataset = _dataset()
+
+    def build(seed: int) -> BenchmarkCase:
+        return build_benchmark_case(
+            dataset,
+            _RandomStatePredictor(seed),
+            max_test=4,
+            target_model={"kind": "random-state-fixture"},
+        )
+
+    assert build(42).case_id == build(42).case_id
+    assert build(42).case_id != build(7).case_id
 
 
 def test_dataset_fingerprint_is_sensitive_to_every_provenance_layer() -> None:

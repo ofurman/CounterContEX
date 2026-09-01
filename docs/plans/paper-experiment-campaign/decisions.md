@@ -42,3 +42,19 @@ starts by creating, committing, and pushing it.
 **Rationale**: The GB10 profile identifies the 16-candidate pool-fill rule as the long-tail
 cause, but stopping at k can change DPP set quality and is therefore a scientific behavior and
 identity change. Stage 1 records B-1 instead of modifying an unversioned search policy.
+
+### D-3: Extend matrix v1 compatibly for target-model axes
+**Date**: 2026-09-01 - **Stage**: 2
+**Options**: A) bump the matrix schema B) add mutually exclusive `target_models` while retaining singular `target_model`
+**Chosen**: B
+**Rationale**: The plural field only adds Cartesian shorthand; each resolved `RunSpec` and its
+scientific identity are unchanged. Existing v1 YAML/TOML matrices still resolve byte-for-byte,
+while specifying both forms is rejected as ambiguous.
+
+### D-4: All retained baselines support all target families
+**Date**: 2026-09-01 - **Stage**: 2
+**Options**: A) record expected clean failures B) retain all 15 method-family combinations
+**Chosen**: B
+**Rationale**: The measured HELOC n=1 matrix produced one available target-class-valid
+candidate for NICE, Wachter, Growing Spheres, DiCE, and FACE against each of LR, MLP, and
+XGBoost. No combination may be excluded from later completeness gates as an expected failure.

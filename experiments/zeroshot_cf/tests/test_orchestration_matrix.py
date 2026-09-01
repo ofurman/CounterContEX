@@ -41,6 +41,56 @@ evaluation: {probability_threshold: 0.8}
     assert all(run.protocol.max_test == 2 for run in config.runs)
 
 
+def test_target_models_expand_as_a_scientific_axis(tmp_path) -> None:
+    path = tmp_path / "target-model-axis.yaml"
+    path.write_text(
+        """\
+schema_version: countercontex.matrix.v1
+suite: target-model-axis
+output_root: results/target-model-axis
+datasets: [heloc]
+methods: [wachter]
+seeds: [42]
+target_models:
+  - {name: retained_logistic_regression, params: {C: 1.0, max_iter: 1000, seed: 42}}
+  - name: retained_xgboost
+    params: {n_estimators: 200, max_depth: 4, learning_rate: 0.05, seed: 42}
+"""
+    )
+
+    config = load_matrix_config(path)
+
+    assert len(config.runs) == 2
+    first, second = config.runs
+    assert first.target_model.name == "retained_logistic_regression"
+    assert second.target_model.name == "retained_xgboost"
+    assert first.cell_id != second.cell_id
+    first_payload = first.scientific_payload()
+    second_payload = second.scientific_payload()
+    first_payload.pop("target_model")
+    second_payload.pop("target_model")
+    assert first_payload == second_payload
+
+
+def test_matrix_rejects_singular_and_plural_target_model_fields(tmp_path) -> None:
+    path = tmp_path / "ambiguous-target-model.yaml"
+    path.write_text(
+        """\
+schema_version: countercontex.matrix.v1
+suite: ambiguous
+output_root: results/ambiguous
+datasets: [heloc]
+methods: [wachter]
+seeds: [42]
+target_model: {name: retained_logistic_regression}
+target_models: [{name: retained_mlp}]
+"""
+    )
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        load_matrix_config(path)
+
+
 def test_matrix_rejects_duplicate_cells_and_unknown_fields(tmp_path) -> None:
     duplicate = tmp_path / "duplicate.yaml"
     duplicate.write_text(

@@ -512,19 +512,35 @@ def test_resume_rejects_every_tampered_manifest_identity_link(tmp_path, tamper):
 
 
 @pytest.mark.parametrize(
-    "target_model",
+    ("target_model", "error_type", "message"),
     (
-        TargetModelSpec("other", {"C": 1.0, "max_iter": 1000, "seed": 42}),
-        TargetModelSpec(
-            "retained_logistic_regression",
-            {"C": 2.0, "max_iter": 1000, "seed": 42},
+        (
+            TargetModelSpec("other", {"C": 1.0, "max_iter": 1000, "seed": 42}),
+            KeyError,
+            "unknown target model",
         ),
-        TargetModelSpec("retained_logistic_regression", {"C": 1.0, "max_iter": 1000}),
+        (
+            TargetModelSpec(
+                "retained_logistic_regression",
+                {"C": 2.0, "max_iter": 1000, "seed": 42},
+            ),
+            ValueError,
+            "fixed params",
+        ),
+        (
+            TargetModelSpec(
+                "retained_logistic_regression", {"C": 1.0, "max_iter": 1000}
+            ),
+            ValueError,
+            "fixed params",
+        ),
     ),
 )
-def test_default_case_loader_rejects_unexecuted_target_model_specs(target_model):
+def test_default_case_loader_rejects_unknown_or_nonfixed_target_model_specs(
+    target_model, error_type, message
+):
     spec = replace(_spec("one", "alpha"), target_model=target_model)
-    with pytest.raises(ValueError, match="supports only"):
+    with pytest.raises(error_type, match=message):
         _default_case_loader(spec)
 
 
@@ -542,11 +558,12 @@ def test_default_case_loader_uses_portable_provider_without_benchmark_runner(
         return SimpleNamespace(prepared=source_case.dataset)
 
     monkeypatch.setattr(cel_module.CelDatasetProvider, "prepare_adapter", fake_prepare)
-    monkeypatch.setattr(
-        discriminator_module,
-        "train_discriminator",
-        lambda *args, **kwargs: _Oracle(),
-    )
+    def fake_train(*args, **kwargs):
+        captured["cache_tag"] = args[4]
+        captured["disc_type"] = kwargs["disc_type"]
+        return _Oracle()
+
+    monkeypatch.setattr(discriminator_module, "train_discriminator", fake_train)
     spec = replace(
         _spec("one", "alpha"),
         target_model=TargetModelSpec(
@@ -564,6 +581,8 @@ def test_default_case_loader_uses_portable_provider_without_benchmark_runner(
     assert captured["provider_spec"].validation_fraction == 0.2
     assert captured["provider_spec"].drop_heloc_all_minus9
     assert captured["provider_spec"].split_seed == 42
+    assert captured["cache_tag"] == "one_fixture_split"
+    assert captured["disc_type"] == "lr"
 
 
 def test_runner_passes_method_variant_to_registry(tmp_path):

@@ -78,6 +78,7 @@ def load_matrix_config(path: Path | str) -> MatrixConfig:
         "seeds",
         "protocol",
         "target_model",
+        "target_models",
         "evaluation",
         "legacy_export",
         "cache_paths",
@@ -105,11 +106,21 @@ def load_matrix_config(path: Path | str) -> MatrixConfig:
         test_selection=protocol_values.pop("test_selection", "stratified"),
         params=protocol_values,
     )
-    target_values = dict(payload.get("target_model", {}))
-    target_model = TargetModelSpec(
-        name=target_values.pop("name", "retained_logistic_regression"),
-        params=target_values.pop("params", target_values),
-    )
+    if "target_model" in payload and "target_models" in payload:
+        raise ValueError("matrix target_model and target_models are mutually exclusive")
+    raw_target_models = payload.get("target_models")
+    if raw_target_models is None:
+        raw_target_models = [
+            payload.get(
+                "target_model", {"name": "retained_logistic_regression"}
+            )
+        ]
+    if not isinstance(raw_target_models, list) or not raw_target_models:
+        raise ValueError("matrix target_models must be a non-empty list")
+    target_model_specs = []
+    for value in raw_target_models:
+        name, params = _named_spec(value, kind="target model")
+        target_model_specs.append(TargetModelSpec(name, params))
     evaluation = EvaluationSpec(**dict(payload.get("evaluation", {})))
 
     dataset_specs = []
@@ -140,7 +151,9 @@ def load_matrix_config(path: Path | str) -> MatrixConfig:
             evaluation,
             _integer(seed, field="seed"),
         )
-        for dataset, method, seed in product(dataset_specs, method_specs, seeds)
+        for dataset, target_model, method, seed in product(
+            dataset_specs, target_model_specs, method_specs, seeds
+        )
     )
     if len({run.cell_id for run in runs}) != len(runs):
         raise ValueError("matrix expands duplicate scientific cells")
