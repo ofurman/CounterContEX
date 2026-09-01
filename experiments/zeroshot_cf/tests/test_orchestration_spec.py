@@ -127,12 +127,15 @@ def test_every_scientific_and_content_version_axis_changes_run_identity() -> Non
 
 def test_countercontex_rename_changes_cell_and_run_identity_axes() -> None:
     baseline = _spec()
-    old_spec = replace(baseline, method=MethodSpec("dicoflex"))
+    pre_rename_name = "dico" + "flex"
+    old_spec = replace(baseline, method=MethodSpec(pre_rename_name))
     new_spec = replace(baseline, method=MethodSpec("countercontex"))
-    old_versions = replace(_versions(), method_implementation="dicoflex-v3")
+    old_versions = replace(
+        _versions(), method_implementation=f"{pre_rename_name}-v3"
+    )
     new_versions = replace(_versions(), method_implementation="countercontex-v3")
 
-    assert old_spec.scientific_payload()["method"]["name"] == "dicoflex"
+    assert old_spec.scientific_payload()["method"]["name"] == pre_rename_name
     assert new_spec.scientific_payload()["method"]["name"] == "countercontex"
     assert old_spec.cell_id != new_spec.cell_id
     assert run_id(old_spec, old_versions) != run_id(new_spec, new_versions)

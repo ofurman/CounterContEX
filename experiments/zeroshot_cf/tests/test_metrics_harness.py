@@ -51,8 +51,9 @@ def test_validity_uses_y_target_not_y_test():
       idx  y_test  y_pred  y_target  y_cf_pred  valid(correct)  valid(bug)
        0     0       0        1          1           True            True
        1     1       1        0          0           True            True
-       2     0       1        0          0           True            False  ← misclassified
-       3     1       0        1          0           False           True   ← misclassified
+       2     0       1        0          0           True            False
+       3     1       0        1          0           False           True
+                                                         Both are misclassified.
 
     Correct validity = 3/4 = 0.75
     Buggy  validity = 3/4 = 0.75  — same by coincidence on this example?
@@ -60,8 +61,10 @@ def test_validity_uses_y_target_not_y_test():
 
     Simpler setup:
       idx  y_test  y_pred  y_target  y_cf_pred
-       0     0       1        0          0     → y_cf==y_target → VALID; y_cf!=y_test → INVALID
-       1     1       0        1          1     → y_cf==y_target → VALID; y_cf!=y_test → INVALID
+       0     0       1        0          0
+       1     1       0        1          1
+
+    Both rows are valid against y_target and invalid against y_test.
 
     Correct validity = 2/2 = 1.0
     Buggy   validity = 0/2 = 0.0
@@ -90,7 +93,8 @@ def test_validity_uses_y_target_not_y_test():
 
     # Correct definition: CF pred matches the intended target class
     assert metrics["validity"] == pytest.approx(1.0), (
-        f"Expected validity=1.0 (both CFs hit target class) but got {metrics['validity']:.3f}. "
+        "Expected validity=1.0 (both CFs hit target class) but got "
+        f"{metrics['validity']:.3f}. "
         "This suggests validity is still scored against y_test instead of y_target."
     )
 
@@ -153,7 +157,8 @@ def test_validity_misclassified_factuals_diverge_from_buggy_definition():
 
     # All three CFs hit y_target → correct validity = 1.0
     assert metrics["validity"] == pytest.approx(1.0), (
-        f"Expected validity=1.0 (all CFs hit y_target) but got {metrics['validity']:.3f}."
+        "Expected validity=1.0 (all CFs hit y_target) but got "
+        f"{metrics['validity']:.3f}."
     )
 
     # Under the buggy definition (y_cf_pred != y_test):

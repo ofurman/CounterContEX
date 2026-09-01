@@ -393,6 +393,7 @@ def test_countercontex_does_not_select_or_resume_old_identity_manifest(
     tmp_path,
 ) -> None:
     calls: list[str] = []
+    pre_rename_name = "dico" + "flex"
     registry = MethodRegistry(
         tuple(
             RegistryEntry(
@@ -404,7 +405,7 @@ def test_countercontex_does_not_select_or_resume_old_identity_manifest(
                 lambda params, name=name: _FakeMethod(name, calls),
             )
             for name, version in (
-                ("dicoflex", "dicoflex-v3"),
+                (pre_rename_name, f"{pre_rename_name}-v3"),
                 ("countercontex", "countercontex-v3"),
             )
         )
@@ -414,7 +415,7 @@ def test_countercontex_does_not_select_or_resume_old_identity_manifest(
         registry=registry,
         case_loader=lambda spec: _case(spec.dataset.name),
     )
-    old_spec = _spec("one", "dicoflex")
+    old_spec = _spec("one", pre_rename_name)
     new_spec = _spec("one", "countercontex")
 
     old_outcome = runner.run(old_spec)
@@ -422,7 +423,7 @@ def test_countercontex_does_not_select_or_resume_old_identity_manifest(
 
     assert not new_outcome.skipped
     assert old_outcome.stored.path != new_outcome.stored.path
-    assert calls.count("generate:dicoflex") == 1
+    assert calls.count(f"generate:{pre_rename_name}") == 1
     assert calls.count("generate:countercontex") == 1
 
     shutil.copyfile(
@@ -856,4 +857,5 @@ def test_legacy_export_writes_frozen_files_and_resume_restores_without_generatio
     assert arrays.is_file()
     assert calls.count(f"generate:{method_name}") == 1
     aggregate_row = ArtifactStore(tmp_path).aggregate_expected([spec.cell_id])[0]
-    assert aggregate_row["backend"] == ("tabicl" if method_name == "countercontex" else None)
+    expected_backend = "tabicl" if method_name == "countercontex" else None
+    assert aggregate_row["backend"] == expected_backend

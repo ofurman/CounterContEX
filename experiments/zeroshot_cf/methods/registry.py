@@ -152,7 +152,9 @@ def _countercontex_variant(
     resolved = dict(values)
     search = dict(resolved.get("search", {}))
     if search.get("cf_mode", "sparse") != "sparse":
-        raise ValueError("countercontex tabicl_sparse variant requires cf_mode='sparse'")
+        raise ValueError(
+            "countercontex tabicl_sparse variant requires cf_mode='sparse'"
+        )
     search["cf_mode"] = "sparse"
     resolved["search"] = search
     return resolved

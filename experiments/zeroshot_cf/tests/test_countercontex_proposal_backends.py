@@ -534,6 +534,8 @@ def test_tracked_ablation_and_full_reference_matrices_resolve_exact_axes() -> No
     }
     assert {run.seed for run in reference.runs} == {42}
     assert {run.protocol.max_test for run in reference.runs} == {1000}
-    countercontex = next(run for run in reference.runs if run.method.name == "countercontex")
+    countercontex = next(
+        run for run in reference.runs if run.method.name == "countercontex"
+    )
     assert countercontex.method.n_counterfactuals == 3
     assert countercontex.method.params["foundation"]["backend"] == "tabicl"
