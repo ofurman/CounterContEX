@@ -1,4 +1,4 @@
-"""Benchmark-facing lifecycle for the retained DiCoFlex generator."""
+"""Benchmark-facing lifecycle for the retained CounterContEx generator."""
 
 from __future__ import annotations
 
@@ -16,18 +16,20 @@ from experiments.zeroshot_cf.generator import (
     TabICLGeneratorResult,
 )
 from experiments.zeroshot_cf.methods.base import MethodCapabilities, json_diagnostic
-from experiments.zeroshot_cf.methods.dicoflex.backend import (
-    DiCoFlexBackendInputs,
+from experiments.zeroshot_cf.methods.countercontex.backend import (
+    CounterContExBackendInputs,
     prepare_backend,
 )
-from experiments.zeroshot_cf.methods.dicoflex.backends.base import (
+from experiments.zeroshot_cf.methods.countercontex.backends.base import (
     PreparedBackend,
     ProposalBackend,
     validate_backend_capabilities,
 )
-from experiments.zeroshot_cf.methods.dicoflex.backends.empirical import EmpiricalBackend
-from experiments.zeroshot_cf.methods.dicoflex.config import DiCoFlexConfig
-from experiments.zeroshot_cf.methods.dicoflex.search import generate_with_backend
+from experiments.zeroshot_cf.methods.countercontex.backends.empirical import (
+    EmpiricalBackend,
+)
+from experiments.zeroshot_cf.methods.countercontex.config import CounterContExConfig
+from experiments.zeroshot_cf.methods.countercontex.search import generate_with_backend
 
 
 def adapt_generator_result(
@@ -200,8 +202,8 @@ def adapt_generator_result(
 
 
 @dataclass(frozen=True)
-class DiCoFlexMethod:
-    config: DiCoFlexConfig = DiCoFlexConfig()
+class CounterContExMethod:
+    config: CounterContExConfig = CounterContExConfig()
     proposal_backend: ProposalBackend | None = None
     method_id = "dicoflex"
     capabilities = MethodCapabilities(
@@ -215,10 +217,10 @@ class DiCoFlexMethod:
     def config_dict(self) -> dict[str, Any]:
         return self.config.as_dict()
 
-    def prepare(self, context: MethodContext) -> PreparedDiCoFlexMethod:
+    def prepare(self, context: MethodContext) -> PreparedCounterContExMethod:
         if self.proposal_backend is None:
             if self.config.foundation.backend == "tabicl":
-                inputs = DiCoFlexBackendInputs(
+                inputs = CounterContExBackendInputs(
                     X_reference=context.X_reference,
                     categorical_groups=context.feature_schema.categorical_groups,
                     actionable_groups=context.feature_schema.actionable_groups,
@@ -229,7 +231,7 @@ class DiCoFlexMethod:
                 backend = EmpiricalBackend().prepare(context)
             else:
                 raise ValueError(
-                    f"unknown DiCoFlex proposal backend: "
+                    f"unknown CounterContEx proposal backend: "
                     f"{self.config.foundation.backend!r}"
                 )
         else:
@@ -247,7 +249,7 @@ class DiCoFlexMethod:
             needs_categorical=bool(context.feature_schema.actionable_groups),
             needs_joint=self.config.search.cf_mode == "data_plausible",
         )
-        return PreparedDiCoFlexMethod(
+        return PreparedCounterContExMethod(
             context=context,
             config=self.config,
             backend=backend,
@@ -255,9 +257,9 @@ class DiCoFlexMethod:
 
 
 @dataclass(frozen=True)
-class PreparedDiCoFlexMethod:
+class PreparedCounterContExMethod:
     context: MethodContext
-    config: DiCoFlexConfig
+    config: CounterContExConfig
     backend: PreparedBackend
 
     def generate(self, request: GenerationRequest) -> GenerationResult:

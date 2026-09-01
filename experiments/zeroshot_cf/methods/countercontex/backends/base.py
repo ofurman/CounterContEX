@@ -1,4 +1,4 @@
-"""Portable proposal contracts consumed by DiCoFlex search."""
+"""Portable proposal contracts consumed by CounterContEx search."""
 
 from __future__ import annotations
 

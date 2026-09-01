@@ -1,5 +1,5 @@
 #  Copyright (c) Prior Labs GmbH 2026.
-"""Compatibility tests for the thin Exp9 DiCoFlex entry point."""
+"""Compatibility tests for the thin Exp9 CounterContEx entry point."""
 
 from __future__ import annotations
 

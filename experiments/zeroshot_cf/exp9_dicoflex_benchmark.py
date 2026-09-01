@@ -1,5 +1,5 @@
 #  Copyright (c) Prior Labs GmbH 2026.
-"""Thin DiCoFlex compatibility shim over the generic benchmark runner."""
+"""Thin CounterContEx compatibility shim over the generic benchmark runner."""
 
 from __future__ import annotations
 
@@ -131,7 +131,7 @@ def run_dataset(  # noqa: PLR0913
     tabicl_cache_dir: Path | None = None,
     results_dir: Path = RESULTS_DIR,
 ) -> dict[str, Any]:
-    """Translate and run one DiCoFlex case through the generic lifecycle."""
+    """Translate and run one CounterContEx case through the generic lifecycle."""
     spec = _spec(
         dataset_name,
         max_test=max_test,

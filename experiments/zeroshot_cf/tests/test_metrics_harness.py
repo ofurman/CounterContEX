@@ -227,7 +227,7 @@ def test_dicoflex_common_metrics_match_reference_definitions():
     assert metrics["coverage"] == pytest.approx(1.0)
     assert metrics["validity"] == pytest.approx(2 / 3)
     assert metrics["actionability"] == pytest.approx(1.0)
-    # Four of nine transformed entries exceed DiCoFlex's epsilon of 0.05.
+    # Four of nine transformed entries exceed CounterContEx's epsilon of 0.05.
     assert metrics["sparsity"] == pytest.approx(4 / 9)
     assert metrics["action_unit_sparsity_mean"] == pytest.approx(4 / 3)
     # Valid rows have mixed distances 0.02 and 0.25 over two numeric units.

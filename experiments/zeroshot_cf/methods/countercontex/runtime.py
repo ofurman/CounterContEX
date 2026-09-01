@@ -1,4 +1,4 @@
-"""Method-owned execution and identity policies for DiCoFlex backends."""
+"""Method-owned execution and identity policies for CounterContEx backends."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ def _empirical_runtime(
     device: str | None,
 ) -> ResolvedMethodRuntime:
     del cache_paths, device
-    from experiments.zeroshot_cf.methods.dicoflex.backends.empirical import (
+    from experiments.zeroshot_cf.methods.countercontex.backends.empirical import (
         EMPIRICAL_BACKEND_IMPLEMENTATION_VERSION,
     )
 
@@ -42,7 +42,7 @@ def _tabicl_runtime(
     device: str | None,
 ) -> ResolvedMethodRuntime:
     from experiments.zeroshot_cf import tabicl_checkpoints
-    from experiments.zeroshot_cf.methods.dicoflex.backends.tabicl import (
+    from experiments.zeroshot_cf.methods.countercontex.backends.tabicl import (
         TABICL_BACKEND_IMPLEMENTATION_VERSION,
     )
 
@@ -96,8 +96,10 @@ def resolve_runtime(
     try:
         policy = _BACKEND_POLICIES[str(backend)]
     except KeyError as error:
-        raise ValueError(f"unknown DiCoFlex proposal backend: {backend!r}") from error
+        raise ValueError(
+            f"unknown CounterContEx proposal backend: {backend!r}"
+        ) from error
     resolved = policy.resolve(params, cache_paths, device)
     if resolved.backend_implementation != policy.implementation_version:
-        raise RuntimeError("DiCoFlex backend runtime identity is inconsistent")
+        raise RuntimeError("CounterContEx backend runtime identity is inconsistent")
     return resolved

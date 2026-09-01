@@ -1,4 +1,4 @@
-"""TabICL proposal adapter owned entirely by DiCoFlex."""
+"""TabICL proposal adapter owned entirely by CounterContEx."""
 
 from __future__ import annotations
 
@@ -19,17 +19,17 @@ from experiments.zeroshot_cf.grouped_categorical import (
     ConditionedCategoryDistribution,
     GroupedCategoricalCodec,
 )
-from experiments.zeroshot_cf.methods.dicoflex.backends.base import (
+from experiments.zeroshot_cf.methods.countercontex.backends.base import (
     CategoryProposals,
     ProposalCapabilities,
 )
-from experiments.zeroshot_cf.methods.dicoflex.config import DiCoFlexConfig
+from experiments.zeroshot_cf.methods.countercontex.config import CounterContExConfig
 
 TABICL_BACKEND_IMPLEMENTATION_VERSION = "tabicl-proposal-v1"
 
 
 @dataclass(frozen=True)
-class DiCoFlexBackendInputs:
+class CounterContExBackendInputs:
     """Portable data required to prepare the foundation backend."""
 
     X_reference: np.ndarray
@@ -39,7 +39,7 @@ class DiCoFlexBackendInputs:
 
 
 @dataclass(frozen=True)
-class DiCoFlexBackendRuntime:
+class CounterContExBackendRuntime:
     """Lazily imported runtime types and device selection."""
 
     device: str
@@ -47,13 +47,13 @@ class DiCoFlexBackendRuntime:
     joint_scorer_type: type
 
 
-def load_backend_runtime() -> DiCoFlexBackendRuntime:
+def load_backend_runtime() -> CounterContExBackendRuntime:
     """Load optional TabICL runtime code during method preparation."""
     from experiments.zeroshot_cf.tabicl_checkpoints import TABICL_DEVICE
     from experiments.zeroshot_cf.tabicl_joint_plausibility import TabICLJointScorer
     from experiments.zeroshot_cf.tabicl_sampler import TabICLConditionalDensitySampler
 
-    return DiCoFlexBackendRuntime(
+    return CounterContExBackendRuntime(
         device=TABICL_DEVICE,
         sampler_type=TabICLConditionalDensitySampler,
         joint_scorer_type=TabICLJointScorer,
@@ -223,9 +223,9 @@ class TabICLProposalSession:
 class PreparedTabICLBackend:
     """Dataset-level backend state shared by generation requests."""
 
-    inputs: DiCoFlexBackendInputs
-    config: DiCoFlexConfig
-    runtime: DiCoFlexBackendRuntime
+    inputs: CounterContExBackendInputs
+    config: CounterContExConfig
+    runtime: CounterContExBackendRuntime
     categorical_codec: GroupedCategoricalCodec | None
     X_sampler_reference: np.ndarray
     reference_predictions: np.ndarray
@@ -379,8 +379,8 @@ class PreparedTabICLBackend:
 class TabICLBackend:
     """Config-bound TabICL proposal backend."""
 
-    config: DiCoFlexConfig
-    runtime: DiCoFlexBackendRuntime | None = None
+    config: CounterContExConfig
+    runtime: CounterContExBackendRuntime | None = None
     backend_id: str = "tabicl"
     capabilities: ProposalCapabilities = ProposalCapabilities(
         numerical_proposals=True,
@@ -392,7 +392,7 @@ class TabICLBackend:
     def prepare(self, context: MethodContext) -> PreparedTabICLBackend:
         schema = context.feature_schema
         return prepare_backend(
-            DiCoFlexBackendInputs(
+            CounterContExBackendInputs(
                 X_reference=context.X_reference,
                 categorical_groups=schema.categorical_groups,
                 actionable_groups=schema.actionable_groups,
@@ -404,10 +404,10 @@ class TabICLBackend:
 
 
 def prepare_backend(
-    inputs: DiCoFlexBackendInputs,
-    config: DiCoFlexConfig,
+    inputs: CounterContExBackendInputs,
+    config: CounterContExConfig,
     *,
-    runtime: DiCoFlexBackendRuntime | None = None,
+    runtime: CounterContExBackendRuntime | None = None,
 ) -> PreparedTabICLBackend:
     """Prepare encoded reference data and lazy runtime dependencies."""
     runtime = load_backend_runtime() if runtime is None else runtime

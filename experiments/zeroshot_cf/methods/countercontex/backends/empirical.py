@@ -1,4 +1,4 @@
-"""Deterministic empirical proposal backend for runnable DiCoFlex ablations."""
+"""Deterministic empirical proposal backend for runnable CounterContEx ablations."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from experiments.zeroshot_cf.action_space import OneHotActionGroup
 from experiments.zeroshot_cf.core.contracts import MethodContext
-from experiments.zeroshot_cf.methods.dicoflex.backends.base import (
+from experiments.zeroshot_cf.methods.countercontex.backends.base import (
     CategoryProposals,
     ProposalCapabilities,
 )

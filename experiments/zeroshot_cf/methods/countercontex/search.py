@@ -1,4 +1,4 @@
-"""Backend-neutral adapter from DiCoFlex sessions to the retained search core."""
+"""Backend-neutral adapter from CounterContEx sessions to the retained search core."""
 
 from __future__ import annotations
 
@@ -13,12 +13,12 @@ from experiments.zeroshot_cf.generator import (
     TabICLGeneratorResult,
     generate_counterfactual_batch,
 )
-from experiments.zeroshot_cf.methods.dicoflex.backends.base import (
+from experiments.zeroshot_cf.methods.countercontex.backends.base import (
     PreparedBackend,
     ProposalSession,
     validate_backend_capabilities,
 )
-from experiments.zeroshot_cf.methods.dicoflex.config import DiCoFlexConfig
+from experiments.zeroshot_cf.methods.countercontex.config import CounterContExConfig
 
 
 class _SessionSampler:
@@ -171,7 +171,7 @@ def generate_with_backend(
     inputs: TabICLGeneratorInputs,
     *,
     discriminator: DiscriminatorProtocol,
-    config: DiCoFlexConfig,
+    config: CounterContExConfig,
     backend: PreparedBackend,
     seed: int,
     n_counterfactuals: int,

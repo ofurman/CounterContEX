@@ -302,7 +302,7 @@ def compute_legacy_common_metrics(
     available = np.isfinite(counterfactuals).all(axis=1)[:, None]
     if not available.all():
         raise ValueError(
-            "DiCoFlex common metrics require complete counterfactuals; "
+            "CounterContEx common metrics require complete counterfactuals; "
             f"coverage was {float(available.mean()):.4f}"
         )
     candidate_cube = counterfactuals[:, None, :]

@@ -1,4 +1,4 @@
-"""Contract tests for the benchmark-facing DiCoFlex method."""
+"""Contract tests for the benchmark-facing CounterContEx method."""
 
 from __future__ import annotations
 
@@ -20,20 +20,22 @@ from experiments.zeroshot_cf.generator import (
     TabICLGeneratorResult,
 )
 from experiments.zeroshot_cf.methods.base import CounterfactualMethod, PreparedMethod
-from experiments.zeroshot_cf.methods.dicoflex.backend import (
-    DiCoFlexBackendInputs,
-    DiCoFlexBackendRuntime,
+from experiments.zeroshot_cf.methods.countercontex.backend import (
+    CounterContExBackendInputs,
+    CounterContExBackendRuntime,
     prepare_backend,
 )
-from experiments.zeroshot_cf.methods.dicoflex.backends.base import ProposalCapabilities
-from experiments.zeroshot_cf.methods.dicoflex.config import (
-    DiCoFlexConfig,
-    DiCoFlexFoundationConfig,
-    DiCoFlexSearchConfig,
+from experiments.zeroshot_cf.methods.countercontex.backends.base import (
+    ProposalCapabilities,
 )
-from experiments.zeroshot_cf.methods.dicoflex.method import (
-    DiCoFlexMethod,
-    PreparedDiCoFlexMethod,
+from experiments.zeroshot_cf.methods.countercontex.config import (
+    CounterContExConfig,
+    CounterContExFoundationConfig,
+    CounterContExSearchConfig,
+)
+from experiments.zeroshot_cf.methods.countercontex.method import (
+    CounterContExMethod,
+    PreparedCounterContExMethod,
     adapt_generator_result,
 )
 
@@ -227,9 +229,9 @@ def test_seed_42_adapter_is_exactly_equivalent_to_legacy_available_slots() -> No
 
 
 def test_config_serialization_separates_search_diversity_and_foundation() -> None:
-    config = DiCoFlexConfig(
-        search=DiCoFlexSearchConfig(candidate_quantiles=(0.25, 0.75)),
-        foundation=DiCoFlexFoundationConfig(
+    config = CounterContExConfig(
+        search=CounterContExSearchConfig(candidate_quantiles=(0.25, 0.75)),
+        foundation=CounterContExFoundationConfig(
             confidence_quantiles=(0.5,),
             cache_dir=Path("cache/tabicl"),
         ),
@@ -245,7 +247,7 @@ def test_config_serialization_separates_search_diversity_and_foundation() -> Non
 def test_method_prepare_owns_portable_backend_setup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import experiments.zeroshot_cf.methods.dicoflex.method as method_module
+    import experiments.zeroshot_cf.methods.countercontex.method as method_module
 
     captured: dict[str, object] = {}
     backend = SimpleNamespace(
@@ -262,11 +264,12 @@ def test_method_prepare_owns_portable_backend_setup(
         return backend
 
     monkeypatch.setattr(method_module, "prepare_backend", fake_prepare_backend)
-    method = DiCoFlexMethod()
+    method = CounterContExMethod()
     context = _context()
 
     prepared = method.prepare(context)
 
+    assert CounterContExMethod.method_id == "dicoflex"
     assert isinstance(method, CounterfactualMethod)
     assert isinstance(prepared, PreparedMethod)
     assert prepared.backend is backend
@@ -300,7 +303,7 @@ def test_method_passes_request_k_seed_and_portable_domains_to_search(
         return _retained_result((1, 1), 3)
 
     monkeypatch.setattr(
-        "experiments.zeroshot_cf.methods.dicoflex.method.generate_with_backend",
+        "experiments.zeroshot_cf.methods.countercontex.method.generate_with_backend",
         fake_generate,
     )
     request = GenerationRequest(
@@ -310,9 +313,8 @@ def test_method_passes_request_k_seed_and_portable_domains_to_search(
         seed=137,
     )
 
-    result = PreparedDiCoFlexMethod(context, DiCoFlexConfig(), backend).generate(
-        request
-    )
+    prepared = PreparedCounterContExMethod(context, CounterContExConfig(), backend)
+    result = prepared.generate(request)
 
     assert captures["seed"] == 137
     assert captures["n_counterfactuals"] == 3
@@ -345,18 +347,18 @@ def test_nondefault_seed_reaches_proposal_and_joint_sampler_contexts() -> None:
             self.kwargs = kwargs
 
     context = _context()
-    config = DiCoFlexConfig(
-        search=DiCoFlexSearchConfig(cf_mode="data_plausible"),
+    config = CounterContExConfig(
+        search=CounterContExSearchConfig(cf_mode="data_plausible"),
     )
     backend = prepare_backend(
-        DiCoFlexBackendInputs(
+        CounterContExBackendInputs(
             X_reference=context.X_reference,
             categorical_groups=(),
             actionable_groups=(),
             oracle=context.oracle,
         ),
         config,
-        runtime=DiCoFlexBackendRuntime(
+        runtime=CounterContExBackendRuntime(
             device="cpu",
             sampler_type=_Sampler,
             joint_scorer_type=_JointScorer,
@@ -373,7 +375,7 @@ def test_nondefault_seed_reaches_proposal_and_joint_sampler_contexts() -> None:
 def test_method_import_does_not_initialize_tabicl_or_checkpoint_runtime() -> None:
     code = """
 import sys
-import experiments.zeroshot_cf.methods.dicoflex.method
+import experiments.zeroshot_cf.methods.countercontex.method
 for forbidden in (
     'experiments.zeroshot_cf.tabicl_checkpoints',
     'experiments.zeroshot_cf.tabicl_sampler',

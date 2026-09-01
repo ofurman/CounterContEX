@@ -131,13 +131,13 @@ def compute_dicoflex_common_metrics(
     lof_n_neighbors: int = 20,
     isolation_forest_estimators: int = 100,
 ) -> dict[str, float]:
-    """Compute the method-independent metrics reported by DiCoFlex.
+    """Compute the method-independent metrics reported by CounterContEx.
 
-    DiCoFlex also reports generator likelihood metrics. Those are deliberately
+    CounterContEx also reports generator likelihood metrics. Those are deliberately
     omitted because they are model-specific and TabICL does not expose a
     comparable joint counterfactual log density. Distances are evaluated only
     on valid counterfactuals, matching ``CFMetrics.feature_distance``. In
-    addition to DiCoFlex's continuous-only distances, the returned grouped
+    addition to CounterContEx's continuous-only distances, the returned grouped
     Gower metric assigns one contribution to each original categorical group.
     """
     return compute_legacy_common_metrics(

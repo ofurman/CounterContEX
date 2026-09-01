@@ -129,7 +129,7 @@ def _legacy_method_id(
     try:
         return str(ids[mode])
     except KeyError as error:
-        raise ValueError(f"unsupported DiCoFlex v1 mode: {mode!r}") from error
+        raise ValueError(f"unsupported CounterContEx v1 mode: {mode!r}") from error
 
 
 def _common_metrics(summary: Mapping[str, Any]) -> dict[str, Any]:

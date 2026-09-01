@@ -20,14 +20,14 @@ from experiments.zeroshot_cf.generator import (
     TabICLGeneratorResult,
     generate_counterfactual_batch,
 )
-from experiments.zeroshot_cf.methods.dicoflex.backend import (
-    DiCoFlexBackendInputs,
+from experiments.zeroshot_cf.methods.countercontex.backend import (
+    CounterContExBackendInputs,
     prepare_backend,
 )
-from experiments.zeroshot_cf.methods.dicoflex.config import (
-    DiCoFlexConfig,
-    DiCoFlexFoundationConfig,
-    DiCoFlexSearchConfig,
+from experiments.zeroshot_cf.methods.countercontex.config import (
+    CounterContExConfig,
+    CounterContExFoundationConfig,
+    CounterContExSearchConfig,
 )
 from experiments.zeroshot_cf.retained_config import TAU
 
@@ -69,12 +69,12 @@ def _build_point_backend_factory(
     seed: int = 42,
 ):
     # This compatibility boundary intentionally keeps seed 42 as its default.
-    config = DiCoFlexConfig(
-        search=DiCoFlexSearchConfig(
+    config = CounterContExConfig(
+        search=CounterContExSearchConfig(
             candidate_quantiles=(0.5,) if confidence_quantiles is not None else None,
             cf_mode=cf_mode,
         ),
-        foundation=DiCoFlexFoundationConfig(
+        foundation=CounterContExFoundationConfig(
             n_estimators=n_estimators,
             temperature=temperature,
             confidence_quantiles=confidence_quantiles,
@@ -83,7 +83,7 @@ def _build_point_backend_factory(
         ),
     )
     backend = prepare_backend(
-        DiCoFlexBackendInputs(
+        CounterContExBackendInputs(
             X_reference=context.bundle.X_train,
             categorical_groups=tuple(context.categorical_groups),
             actionable_groups=tuple(context.grouped_actionable),

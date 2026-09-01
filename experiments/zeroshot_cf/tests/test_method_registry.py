@@ -22,6 +22,10 @@ def test_registry_lists_all_methods_and_rejects_duplicates_and_unknown_names() -
         "nice",
         "wachter",
     )
+    assert (
+        DEFAULT_METHOD_REGISTRY.entry("dicoflex").implementation_version
+        == "dicoflex-v3"
+    )
     entry = RegistryEntry("fake", "fake", "Fake", "Config", "v1", lambda p: p)
     registry = MethodRegistry((entry,))
     with pytest.raises(ValueError, match="duplicate"):
@@ -72,7 +76,7 @@ main(['list-methods'])
 for forbidden in ('dice_ml', 'raiutils', 'tabicl', 'torch',
                   'experiments.zeroshot_cf.methods.dice',
                   'experiments.zeroshot_cf.methods.face',
-                  'experiments.zeroshot_cf.methods.dicoflex',
+                  'experiments.zeroshot_cf.methods.countercontex',
                   'experiments.zeroshot_cf.tabicl_checkpoints',
                   'experiments.zeroshot_cf.tabicl_sampler'):
     assert forbidden not in sys.modules, forbidden

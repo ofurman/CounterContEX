@@ -1,4 +1,4 @@
-"""Typed configuration for the retained DiCoFlex search."""
+"""Typed configuration for the retained CounterContEx search."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from experiments.zeroshot_cf.retained_config import TAU
 
 
 @dataclass(frozen=True)
-class DiCoFlexSearchConfig:
+class CounterContExSearchConfig:
     """Settings for greedy validity search and optional refinement."""
 
     tau: float = TAU
@@ -49,7 +49,7 @@ class DiCoFlexSearchConfig:
 
 
 @dataclass(frozen=True)
-class DiCoFlexDiversityConfig:
+class CounterContExDiversityConfig:
     """Settings for bounded beam generation and fixed-size DPP selection."""
 
     beam_width: int = 8
@@ -74,7 +74,7 @@ class DiCoFlexDiversityConfig:
 
 
 @dataclass(frozen=True)
-class DiCoFlexFoundationConfig:
+class CounterContExFoundationConfig:
     """Settings for the TabICL proposal and joint-density runtime."""
 
     n_estimators: int = DEFAULT_N_ESTIMATORS
@@ -96,13 +96,15 @@ class DiCoFlexFoundationConfig:
 
 
 @dataclass(frozen=True)
-class DiCoFlexConfig:
+class CounterContExConfig:
     """Complete serializable method configuration."""
 
-    search: DiCoFlexSearchConfig = field(default_factory=DiCoFlexSearchConfig)
-    diversity: DiCoFlexDiversityConfig = field(default_factory=DiCoFlexDiversityConfig)
-    foundation: DiCoFlexFoundationConfig = field(
-        default_factory=DiCoFlexFoundationConfig
+    search: CounterContExSearchConfig = field(default_factory=CounterContExSearchConfig)
+    diversity: CounterContExDiversityConfig = field(
+        default_factory=CounterContExDiversityConfig
+    )
+    foundation: CounterContExFoundationConfig = field(
+        default_factory=CounterContExFoundationConfig
     )
 
     def __post_init__(self) -> None:

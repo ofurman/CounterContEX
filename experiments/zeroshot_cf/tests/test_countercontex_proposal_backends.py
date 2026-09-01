@@ -1,4 +1,4 @@
-"""Conformance, rejection, and parity gates for DiCoFlex proposal backends."""
+"""Conformance, rejection, and parity gates for CounterContEx proposal backends."""
 
 from __future__ import annotations
 
@@ -21,26 +21,26 @@ from experiments.zeroshot_cf.generator import (
     TabICLGeneratorPointBackend,
     generate_counterfactual_batch,
 )
-from experiments.zeroshot_cf.methods.dicoflex.backends.base import (
+from experiments.zeroshot_cf.methods.countercontex.backends.base import (
     CategoryProposals,
     PreparedBackend,
     ProposalBackend,
     ProposalCapabilities,
     ProposalSession,
 )
-from experiments.zeroshot_cf.methods.dicoflex.backends.empirical import (
+from experiments.zeroshot_cf.methods.countercontex.backends.empirical import (
     EmpiricalBackend,
 )
-from experiments.zeroshot_cf.methods.dicoflex.backends.tabicl import (
+from experiments.zeroshot_cf.methods.countercontex.backends.tabicl import (
     TabICLProposalSession,
 )
-from experiments.zeroshot_cf.methods.dicoflex.config import (
-    DiCoFlexConfig,
-    DiCoFlexFoundationConfig,
-    DiCoFlexSearchConfig,
+from experiments.zeroshot_cf.methods.countercontex.config import (
+    CounterContExConfig,
+    CounterContExFoundationConfig,
+    CounterContExSearchConfig,
 )
-from experiments.zeroshot_cf.methods.dicoflex.method import DiCoFlexMethod
-from experiments.zeroshot_cf.methods.dicoflex.search import (
+from experiments.zeroshot_cf.methods.countercontex.method import CounterContExMethod
+from experiments.zeroshot_cf.methods.countercontex.search import (
     _SessionSampler,
     generate_with_backend,
 )
@@ -188,10 +188,10 @@ def _categorical_context() -> MethodContext:
     )
 
 
-def _fake_config(*, search=None, confidence_quantiles=None) -> DiCoFlexConfig:
-    return DiCoFlexConfig(
-        search=search or DiCoFlexSearchConfig(),
-        foundation=DiCoFlexFoundationConfig(
+def _fake_config(*, search=None, confidence_quantiles=None) -> CounterContExConfig:
+    return CounterContExConfig(
+        search=search or CounterContExSearchConfig(),
+        foundation=CounterContExFoundationConfig(
             backend="fake",
             confidence_quantiles=confidence_quantiles,
         ),
@@ -289,8 +289,8 @@ def test_empirical_backend_is_deterministic_and_conforms() -> None:
 
 
 def test_empirical_backend_runs_complete_dicoflex_sparse_search() -> None:
-    method = DiCoFlexMethod(
-        DiCoFlexConfig(foundation=DiCoFlexFoundationConfig(backend="empirical"))
+    method = CounterContExMethod(
+        CounterContExConfig(foundation=CounterContExFoundationConfig(backend="empirical"))
     )
     prepared = method.prepare(_context())
 
@@ -311,21 +311,21 @@ def test_empirical_backend_runs_complete_dicoflex_sparse_search() -> None:
 @pytest.mark.parametrize(
     "config",
     [
-        DiCoFlexConfig(
-            search=DiCoFlexSearchConfig(candidate_quantiles=(0.5,)),
-            foundation=DiCoFlexFoundationConfig(
+        CounterContExConfig(
+            search=CounterContExSearchConfig(candidate_quantiles=(0.5,)),
+            foundation=CounterContExFoundationConfig(
                 backend="empirical", confidence_quantiles=(0.5,)
             ),
         ),
-        DiCoFlexConfig(
-            search=DiCoFlexSearchConfig(cf_mode="data_plausible"),
-            foundation=DiCoFlexFoundationConfig(backend="empirical"),
+        CounterContExConfig(
+            search=CounterContExSearchConfig(cf_mode="data_plausible"),
+            foundation=CounterContExFoundationConfig(backend="empirical"),
         ),
     ],
 )
 def test_empirical_backend_rejects_unsupported_search_requests(config) -> None:
     with pytest.raises(ValueError, match="confidence conditioning|joint scoring"):
-        DiCoFlexMethod(config).prepare(_context())
+        CounterContExMethod(config).prepare(_context())
 
 
 @pytest.mark.parametrize(
@@ -339,14 +339,14 @@ def test_empirical_backend_rejects_unsupported_search_requests(config) -> None:
         (
             ProposalCapabilities(),
             _fake_config(
-                search=DiCoFlexSearchConfig(candidate_quantiles=(0.5,)),
+                search=CounterContExSearchConfig(candidate_quantiles=(0.5,)),
                 confidence_quantiles=(0.5,),
             ),
             "confidence conditioning",
         ),
         (
             ProposalCapabilities(),
-            _fake_config(search=DiCoFlexSearchConfig(cf_mode="data_plausible")),
+            _fake_config(search=CounterContExSearchConfig(cf_mode="data_plausible")),
             "joint scoring",
         ),
     ],
@@ -357,14 +357,15 @@ def test_unsupported_backend_capabilities_fail_during_prepare(
     message,
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        DiCoFlexMethod(config, _FakeBackend(capabilities)).prepare(_context())
+        CounterContExMethod(config, _FakeBackend(capabilities)).prepare(_context())
 
 
 def test_categorical_search_requires_declared_distribution_support() -> None:
     with pytest.raises(ValueError, match="categorical distributions"):
-        DiCoFlexMethod(_fake_config(), _FakeBackend(ProposalCapabilities())).prepare(
-            _categorical_context()
+        method = CounterContExMethod(
+            _fake_config(), _FakeBackend(ProposalCapabilities())
         )
+        method.prepare(_categorical_context())
 
 
 def test_fake_backend_adapter_preserves_legacy_candidate_arrays() -> None:
@@ -424,8 +425,8 @@ def test_sparse_search_does_not_activate_joint_scoring_capability() -> None:
 def test_search_contract_has_no_dynamic_capability_probes() -> None:
     root = Path(__file__).resolve().parents[1]
     for relative in (
-        "methods/dicoflex/search.py",
-        "methods/dicoflex/backends/base.py",
+        "methods/countercontex/search.py",
+        "methods/countercontex/backends/base.py",
     ):
         tree = ast.parse((root / relative).read_text())
         calls = [

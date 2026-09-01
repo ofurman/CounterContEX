@@ -123,27 +123,27 @@ class MethodRegistry:
         return entry.runtime_resolver(params, cache_paths, device)
 
 
-def _dicoflex_factory(values: Mapping[str, Any]):
-    module = importlib.import_module("experiments.zeroshot_cf.methods.dicoflex")
+def _countercontex_factory(values: Mapping[str, Any]):
+    module = importlib.import_module("experiments.zeroshot_cf.methods.countercontex")
     unknown = set(values) - {"search", "diversity", "foundation"}
     if unknown:
         raise ValueError(f"unknown parameters for dicoflex: {sorted(unknown)}")
     try:
-        config = module.DiCoFlexConfig(
-            search=module.DiCoFlexSearchConfig(**dict(values.get("search", {}))),
-            diversity=module.DiCoFlexDiversityConfig(
+        config = module.CounterContExConfig(
+            search=module.CounterContExSearchConfig(**dict(values.get("search", {}))),
+            diversity=module.CounterContExDiversityConfig(
                 **dict(values.get("diversity", {}))
             ),
-            foundation=module.DiCoFlexFoundationConfig(
+            foundation=module.CounterContExFoundationConfig(
                 **dict(values.get("foundation", {}))
             ),
         )
     except TypeError as error:
         raise ValueError(f"invalid parameters for dicoflex: {error}") from error
-    return module.DiCoFlexMethod(config)
+    return module.CounterContExMethod(config)
 
 
-def _dicoflex_variant(
+def _countercontex_variant(
     variant: str,
     values: Mapping[str, Any],
 ) -> Mapping[str, Any]:
@@ -158,12 +158,14 @@ def _dicoflex_variant(
     return resolved
 
 
-def _dicoflex_runtime(
+def _countercontex_runtime(
     values: Mapping[str, Any],
     cache_paths: Mapping[str, Path],
     device: str | None,
 ) -> ResolvedMethodRuntime:
-    module = importlib.import_module("experiments.zeroshot_cf.methods.dicoflex.runtime")
+    module = importlib.import_module(
+        "experiments.zeroshot_cf.methods.countercontex.runtime"
+    )
     return module.resolve_runtime(values, cache_paths, device)
 
 
@@ -171,14 +173,14 @@ DEFAULT_METHOD_REGISTRY = MethodRegistry(
     (
         RegistryEntry(
             "dicoflex",
-            "experiments.zeroshot_cf.methods.dicoflex",
-            "DiCoFlexMethod",
-            "DiCoFlexConfig",
+            "experiments.zeroshot_cf.methods.countercontex",
+            "CounterContExMethod",
+            "CounterContExConfig",
             "dicoflex-v3",
-            _dicoflex_factory,
+            _countercontex_factory,
             ("default", "tabicl_sparse"),
-            _dicoflex_variant,
-            _dicoflex_runtime,
+            _countercontex_variant,
+            _countercontex_runtime,
         ),
         RegistryEntry(
             "nice",
