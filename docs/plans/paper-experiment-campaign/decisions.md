@@ -76,3 +76,12 @@ ablations but cannot become a cross-method headline metric.
 unlike neighbour, Wachter one optimized solution, Growing Spheres one nearest enemy, and FACE
 one graph-path endpoint. Sampling or perturbing those single outputs would fabricate diversity,
 so their single-counterfactual guards remain intact.
+
+### D-7: Analyze historical metric schemas without rewriting them
+**Date**: 2026-09-01 - **Stage**: 5
+**Options**: A) rerun Stage 1 under evaluation v2 B) add a validated read-only v1 analysis path
+**Chosen**: B
+**Rationale**: The noise-floor evidence is a published historical v1 result and rerunning would
+create different scientific identities rather than analyze that evidence. The compatibility
+reader validates COMPLETE payloads, typed tables, content identities, and matrix membership;
+it never upgrades, rewrites, or mixes v1 and v2 values in one seed group.

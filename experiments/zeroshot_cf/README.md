@@ -157,6 +157,22 @@ uv run python -m experiments.zeroshot_cf.cli aggregate \
   --config experiments/zeroshot_cf/configs/matrices/one_factual_compat.yaml
 ```
 
+Published matrices can be converted into auditable paper products without loading a method or
+checkpoint. Every F3--F7 figure is accompanied by its source CSV, and T1--T3 are emitted as CSV
+and LaTeX from the same seed aggregation:
+
+```bash
+uv run python -m experiments.zeroshot_cf.cli analyze \
+  --config experiments/zeroshot_cf/configs/matrices/full_reference.yaml \
+  --output experiments/zeroshot_cf/results/local/analysis
+```
+
+Analysis refuses partial, missing, extra, duplicate, or identity-mismatched cells. Seed groups
+are keyed by the complete scientific specification except seed and report mean, sample standard
+deviation, and the actual finite `n` for each metric. Historical evaluation-v1 artifacts remain
+read-only inputs: their COMPLETE markers, typed tables, identities, and exact matrix membership
+are validated without rewriting or re-evaluating them.
+
 Each run directory is complete only after its `COMPLETE` marker is published.
 Resume validates the complete manifest against the resolved identity. Matrix
 aggregation reads the expected manifest set and rejects missing, extra,

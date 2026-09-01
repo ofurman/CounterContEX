@@ -165,3 +165,41 @@ run, while the evaluator independently defines coverage@k from returned count; i
 the three real rows only barely cross the class boundary and all fail tau=0.7, so these diversity
 metrics characterize returned target-class candidates, not threshold-valid successes.
 **Commit**: `HEAD` (this stage commit)
+
+## 2026-09-02 00:10 -- Stage 5: Analysis layer -- DONE
+**Did**: Added an artifact-only analysis package and `cli analyze`. Exact matrix membership is
+validated before seed grouping by the complete scientific identity minus seed; numeric metrics
+emit mean, sample standard deviation, and finite n. Added paired Wilcoxon tests with joint Holm
+correction, explicit statistic/p/n/effect, and a below-noise-floor flag; an average-rank Demsar
+diagram; auditable CSV-backed F3--F7 builders; and common-source CSV/LaTeX T1--T3 builders. D-7
+records the validated read-only path needed to analyze published evaluation-v1 artifacts.
+**Verification**: GATE a deliberately incomplete matrix root raises
+`partial run directories are not aggregateable` before producing a survivor average. GATE
+eight identical pairs return statistic 0, corrected p=1, n=8, non-significant; eight unit-gap
+pairs return corrected p=0.0078125 and significant, while a significant 0.01 effect against a
+0.02 noise floor is explicitly flagged. GATE all eight named figure/table builders expose only
+`output_root`, `matrix_config`, and `output_dir` path inputs; analysis imports no method package
+and contains no paper metric literals. A real Stage 4 smoke wrote all 18 F3--F7/T1--T3,
+significance, and manifest products from canonical artifacts.
+**Report**: The analysis layer read all five exact Stage 1 HELOC noise-floor cells and wrote
+`results/campaign/stage5/noise_floor_aggregate.csv` (SHA-256
+`d022c7df598f980f7e08c18ed65459b66db6b2d0f64bd504056a5fdba5bac94a`). Actual seed n=5;
+coverage 1.0 +/- 0, returned-class validity 1.0 +/- 0, threshold validity 0 +/- 0,
+grouped-Gower 0.01418244 +/- 0, and action-unit changes 1.32 +/- 0. The only nonzero reported
+spread is floating roundoff in legacy sparsity (`7.76e-18`), not stochastic method variation.
+**Provenance**: Loader gates derive expected cells from the matrix and rederive run and cell
+hashes from each manifest identity; deleting COMPLETE, changing any scientific field, or
+removing a requested seed turns aggregation red. Statistical witnesses supply independent
+paired vectors rather than copying implementation output. Builders read summary/manifest/NPZ
+paths and write the precise CSV used by each figure. Stage 1 values were decoded from its typed
+published summary tables, not transcribed from the earlier journal.
+**Problems**: The v2-only `ArtifactStore.read()` correctly rejected historical v1 reports;
+analysis now owns a narrow read-only compatibility path instead of weakening current evaluator
+validation. The first independent audit found that compatibility matching discarded all
+evaluation settings and omitted the redundant top-level run ID check; the delegated fix now
+normalizes only schema-added fields and has threshold/run-ID witnesses. A fresh audit then found
+unknown schemas could enter the legacy path; the second and final light fix explicitly admits
+only v1 and rejects v3 or mixed-schema roots. A third fresh audit passed every gate and reproduced
+the Stage 1 hash and Stage 4 smoke. Full suite: 283 passed; analysis/CLI Ruff and offline CLI help
+passed.
+**Commit**: `HEAD` (this stage commit)

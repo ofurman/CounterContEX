@@ -45,6 +45,16 @@ def _aggregate(path: str) -> int:
     return 0
 
 
+def _analyze(path: str, output: str | None) -> int:
+    config = _config(path)
+    from experiments.zeroshot_cf.analysis.builders import build_all
+
+    destination = Path(output) if output else config.execution.output_root / "analysis"
+    products = build_all(config.execution.output_root, Path(path), destination)
+    print(f"wrote {len(products)} analysis products into {destination}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -56,6 +66,9 @@ def build_parser() -> argparse.ArgumentParser:
     matrix.add_argument("--dry-run", action="store_true")
     aggregate = commands.add_parser("aggregate", help="aggregate a configured matrix")
     aggregate.add_argument("--config", required=True)
+    analyze = commands.add_parser("analyze", help="build paper tables and figures")
+    analyze.add_argument("--config", required=True)
+    analyze.add_argument("--output")
     commands.add_parser("list-methods", help="list registered method names")
     return parser
 
@@ -73,6 +86,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     if args.command == "aggregate":
         return _aggregate(args.config)
+    if args.command == "analyze":
+        return _analyze(args.config, args.output)
     if args.command == "list-methods":
         from experiments.zeroshot_cf.methods.registry import DEFAULT_METHOD_REGISTRY
 
