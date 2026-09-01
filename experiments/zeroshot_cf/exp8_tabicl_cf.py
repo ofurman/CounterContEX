@@ -77,7 +77,7 @@ def _spec(  # noqa: PLR0913
     resolved_max_test = _resolve_max_test(dataset_name, max_test)
     spec = legacy_run_spec(
         dataset_name,
-        "dicoflex",
+        "countercontex",
         method_variant=("tabicl_sparse" if normalized_mode == "sparse" else "default"),
         method_params={
             "search": {

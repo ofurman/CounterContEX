@@ -91,7 +91,7 @@ def resolve_runtime(
     params = deepcopy(dict(values))
     foundation = params.get("foundation", {})
     if not isinstance(foundation, Mapping):
-        raise ValueError("dicoflex foundation params must be a mapping")
+        raise ValueError("countercontex foundation params must be a mapping")
     backend = foundation.get("backend", "tabicl")
     try:
         policy = _BACKEND_POLICIES[str(backend)]

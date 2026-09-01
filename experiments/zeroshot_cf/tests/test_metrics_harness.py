@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 from experiments.zeroshot_cf.action_space import OneHotActionGroup
 from experiments.zeroshot_cf.metrics_harness import (
-    compute_dicoflex_common_metrics,
+    compute_countercontex_common_metrics,
     compute_metrics,
 )
 
@@ -202,7 +202,7 @@ def test_proximity_uses_valid_mask_from_y_target():
     assert metrics["proximity_l2_jaccard"] == pytest.approx(1.5)
 
 
-def test_dicoflex_common_metrics_match_reference_definitions():
+def test_countercontex_common_metrics_match_reference_definitions():
     X_test = np.zeros((3, 3), dtype=float)
     X_cf = np.array(
         [
@@ -214,7 +214,7 @@ def test_dicoflex_common_metrics_match_reference_definitions():
     X_train = np.random.default_rng(21).uniform(0, 1, (40, 3))
     disc = _MockDisc(np.array([1, 1, 0]))
 
-    metrics = compute_dicoflex_common_metrics(
+    metrics = compute_countercontex_common_metrics(
         disc,
         X_cf,
         X_test,
@@ -243,9 +243,9 @@ def test_dicoflex_common_metrics_match_reference_definitions():
     assert np.isfinite(metrics["isolation_forest_scores_test"])
 
 
-def test_dicoflex_common_metrics_reject_negative_sparsity_epsilon() -> None:
+def test_countercontex_common_metrics_reject_negative_sparsity_epsilon() -> None:
     with pytest.raises(ValueError, match="sparsity_eps must be non-negative"):
-        compute_dicoflex_common_metrics(
+        compute_countercontex_common_metrics(
             _MockDisc(np.array([1])),
             X_cf=np.array([[0.2, 0.3]]),
             X_test=np.array([[0.1, 0.3]]),
@@ -256,11 +256,11 @@ def test_dicoflex_common_metrics_reject_negative_sparsity_epsilon() -> None:
         )
 
 
-def test_dicoflex_grouped_gower_treats_one_hot_group_as_one_feature() -> None:
+def test_countercontex_grouped_gower_treats_one_hot_group_as_one_feature() -> None:
     X_test = np.array([[0.0, 1.0, 0.0, 0.0]])
     X_cf = np.array([[0.2, 0.0, 0.0, 1.0]])
     X_train = np.random.default_rng(23).uniform(0, 1, (40, 4))
-    metrics = compute_dicoflex_common_metrics(
+    metrics = compute_countercontex_common_metrics(
         _MockDisc(np.array([1])),
         X_cf,
         X_test,
@@ -275,9 +275,9 @@ def test_dicoflex_grouped_gower_treats_one_hot_group_as_one_feature() -> None:
     assert metrics["action_unit_sparsity_mean"] == pytest.approx(2.0)
 
 
-def test_dicoflex_common_metrics_keep_singleton_target_dimension():
+def test_countercontex_common_metrics_keep_singleton_target_dimension():
     X_train = np.random.default_rng(22).uniform(0, 1, (40, 2))
-    metrics = compute_dicoflex_common_metrics(
+    metrics = compute_countercontex_common_metrics(
         _MockDisc(np.array([1])),
         X_cf=np.array([[0.2, 0.3]]),
         X_test=np.array([[0.1, 0.3]]),

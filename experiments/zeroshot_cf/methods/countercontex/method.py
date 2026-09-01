@@ -205,7 +205,7 @@ def adapt_generator_result(
 class CounterContExMethod:
     config: CounterContExConfig = CounterContExConfig()
     proposal_backend: ProposalBackend | None = None
-    method_id = "dicoflex"
+    method_id = "countercontex"
     capabilities = MethodCapabilities(
         supports_categorical=True,
         enforces_actionability=True,

@@ -7,7 +7,7 @@ datasets:
   - give_me_some_credit
   - lending_club
 methods:
-  - name: dicoflex
+  - name: countercontex
     variant: tabicl_sparse
     params:
       foundation:

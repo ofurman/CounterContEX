@@ -35,7 +35,7 @@ def test_legacy_method_inventory_has_stable_artifact_names() -> None:
     fixture = _fixture("compatibility.json")
     methods = fixture["methods"]
     assert set(methods) == {
-        "dicoflex",
+        "countercontex",
         "nice",
         "wachter",
         "growing_spheres",
@@ -48,7 +48,7 @@ def test_legacy_method_inventory_has_stable_artifact_names() -> None:
         assert contract["legacy_method_ids"]
         frozen = V1_CONTRACT[method_name]
 
-        if method_name == "dicoflex":
+        if method_name == "countercontex":
             from experiments.zeroshot_cf.generator import CF_MODES
 
             actual_method_ids = {
@@ -251,7 +251,7 @@ def test_generic_runner_contains_no_concrete_method_or_backend_policy() -> None:
         .read_text()
         .lower()
     )
-    assert "dicoflex" not in source
+    assert "countercontex" not in source
     assert "tabicl" not in source
     assert "empirical" not in source
 

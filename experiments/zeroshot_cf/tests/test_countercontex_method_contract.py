@@ -269,7 +269,7 @@ def test_method_prepare_owns_portable_backend_setup(
 
     prepared = method.prepare(context)
 
-    assert CounterContExMethod.method_id == "dicoflex"
+    assert CounterContExMethod.method_id == "countercontex"
     assert isinstance(method, CounterfactualMethod)
     assert isinstance(prepared, PreparedMethod)
     assert prepared.backend is backend

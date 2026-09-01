@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 V1_CONTRACT = {
-    "dicoflex": {
+    "countercontex": {
         "stem": "exp9_tabicl",
         "method_id": "tabicl_v2_sparse",
         "method_ids": {

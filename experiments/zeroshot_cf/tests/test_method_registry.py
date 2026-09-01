@@ -15,16 +15,16 @@ from experiments.zeroshot_cf.methods.registry import (
 
 def test_registry_lists_all_methods_and_rejects_duplicates_and_unknown_names() -> None:
     assert DEFAULT_METHOD_REGISTRY.names() == (
+        "countercontex",
         "dice",
-        "dicoflex",
         "face",
         "growing_spheres",
         "nice",
         "wachter",
     )
     assert (
-        DEFAULT_METHOD_REGISTRY.entry("dicoflex").implementation_version
-        == "dicoflex-v3"
+        DEFAULT_METHOD_REGISTRY.entry("countercontex").implementation_version
+        == "countercontex-v3"
     )
     entry = RegistryEntry("fake", "fake", "Fake", "Config", "v1", lambda p: p)
     registry = MethodRegistry((entry,))
@@ -40,26 +40,26 @@ def test_registry_rejects_unknown_or_invalid_method_parameters() -> None:
     with pytest.raises(ValueError, match="positive"):
         DEFAULT_METHOD_REGISTRY.create("nice", {"lof_n_neighbors": 0})
     with pytest.raises(ValueError, match="unknown parameters"):
-        DEFAULT_METHOD_REGISTRY.create("dicoflex", {"mystery": {}})
+        DEFAULT_METHOD_REGISTRY.create("countercontex", {"mystery": {}})
     with pytest.raises(ValueError, match="unsupported variant"):
         DEFAULT_METHOD_REGISTRY.create("nice", variant="tuned")
     with pytest.raises(ValueError, match="unsupported variant"):
-        DEFAULT_METHOD_REGISTRY.create("dicoflex", variant="data_plausible")
-    assert DEFAULT_METHOD_REGISTRY.entry("dicoflex").supported_variants == (
+        DEFAULT_METHOD_REGISTRY.create("countercontex", variant="data_plausible")
+    assert DEFAULT_METHOD_REGISTRY.entry("countercontex").supported_variants == (
         "default",
         "tabicl_sparse",
     )
-    sparse = DEFAULT_METHOD_REGISTRY.create("dicoflex", variant="tabicl_sparse")
+    sparse = DEFAULT_METHOD_REGISTRY.create("countercontex", variant="tabicl_sparse")
     assert sparse.config.search.cf_mode == "sparse"
     empirical = DEFAULT_METHOD_REGISTRY.create(
-        "dicoflex",
+        "countercontex",
         {"foundation": {"backend": "empirical"}},
         variant="tabicl_sparse",
     )
     assert empirical.config.foundation.backend == "empirical"
     with pytest.raises(ValueError, match="requires cf_mode='sparse'"):
         DEFAULT_METHOD_REGISTRY.create(
-            "dicoflex",
+            "countercontex",
             {"search": {"cf_mode": "data_plausible"}},
             variant="tabicl_sparse",
         )

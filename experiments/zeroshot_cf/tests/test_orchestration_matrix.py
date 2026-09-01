@@ -138,7 +138,7 @@ schema_version: countercontex.matrix.v1
 suite: fixture
 output_root: results
 datasets: [heloc]
-methods: [dicoflex]
+methods: [countercontex]
 seeds: [7, 8]
 legacy_export: true
 """

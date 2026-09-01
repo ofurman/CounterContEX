@@ -117,7 +117,7 @@ def compute_metrics(
     }
 
 
-def compute_dicoflex_common_metrics(
+def compute_countercontex_common_metrics(
     disc_model: Any,
     X_cf: np.ndarray,
     X_test: np.ndarray,

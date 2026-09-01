@@ -120,7 +120,7 @@ def _legacy_method_id(
     config: Mapping[str, Any],
     n_counterfactuals: int,
 ) -> str:
-    if method_name != "dicoflex":
+    if method_name != "countercontex":
         return str(contract["method_id"])
     ids = contract["method_ids"]
     if n_counterfactuals > 1:
@@ -290,7 +290,7 @@ def _method_metrics(
                 ),
             }
         )
-    elif method_name == "dicoflex":
+    elif method_name == "countercontex":
         search = dict(config.get("search", {}))
         diversity = dict(config.get("diversity", {}))
         foundation = dict(config.get("foundation", {}))
@@ -695,7 +695,7 @@ def export_generic_v1(
         "y_target": case.targets,
         "y_cf_pred": y_cf_pred,
     }
-    if method_name == "dicoflex":
+    if method_name == "countercontex":
         arrays.update(
             {
                 "X_sparse": np.asarray(values["method.sparse_counterfactuals"]),

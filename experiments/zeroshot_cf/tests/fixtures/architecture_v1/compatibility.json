@@ -49,7 +49,7 @@
     "changed_columns"
   ],
   "methods": {
-    "dicoflex": {
+    "countercontex": {
       "source_module": "exp9_dicoflex_benchmark",
       "legacy_method_ids": [
         "tabicl_v2_sparse",

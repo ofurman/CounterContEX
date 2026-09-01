@@ -6,7 +6,7 @@ datasets:
   - bank_marketing
 methods:
   # Search ablation: bounded validity search versus joint-density refinement.
-  - name: dicoflex
+  - name: countercontex
     variant: tabicl_sparse
     params:
       search:
@@ -15,7 +15,7 @@ methods:
       foundation:
         backend: tabicl
         n_estimators: 1
-  - name: dicoflex
+  - name: countercontex
     variant: tabicl_sparse
     params:
       search:
@@ -24,7 +24,7 @@ methods:
       foundation:
         backend: empirical
         n_estimators: 1
-  - name: dicoflex
+  - name: countercontex
     variant: default
     params:
       search:
@@ -36,7 +36,7 @@ methods:
         n_estimators: 1
 
   # Diversity ablation: request three candidates with a smaller beam and pool.
-  - name: dicoflex
+  - name: countercontex
     variant: tabicl_sparse
     n_counterfactuals: 3
     params:
@@ -51,7 +51,7 @@ methods:
         n_estimators: 1
 
   # Backend and backend-hyperparameter ablations remain inside foundation.
-  - name: dicoflex
+  - name: countercontex
     variant: tabicl_sparse
     params:
       search:
@@ -60,7 +60,7 @@ methods:
         backend: tabicl
         n_estimators: 2
         temperature: 1.0e-9
-  - name: dicoflex
+  - name: countercontex
     variant: tabicl_sparse
     params:
       search:

@@ -112,7 +112,7 @@ def test_exp9_translates_legacy_settings_into_one_run_spec() -> None:
     assert spec.dataset.name == "heloc"
     assert spec.protocol.max_test == 7
     assert spec.protocol.params["validation_fraction"] == 0.25
-    assert spec.method.name == "dicoflex"
+    assert spec.method.name == "countercontex"
     assert spec.method.variant == "default"
     assert spec.method.params["search"]["cf_mode"] == "data_plausible"
     assert spec.method.params["foundation"]["n_estimators"] == 2

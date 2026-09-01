@@ -127,7 +127,7 @@ def _countercontex_factory(values: Mapping[str, Any]):
     module = importlib.import_module("experiments.zeroshot_cf.methods.countercontex")
     unknown = set(values) - {"search", "diversity", "foundation"}
     if unknown:
-        raise ValueError(f"unknown parameters for dicoflex: {sorted(unknown)}")
+        raise ValueError(f"unknown parameters for countercontex: {sorted(unknown)}")
     try:
         config = module.CounterContExConfig(
             search=module.CounterContExSearchConfig(**dict(values.get("search", {}))),
@@ -139,7 +139,7 @@ def _countercontex_factory(values: Mapping[str, Any]):
             ),
         )
     except TypeError as error:
-        raise ValueError(f"invalid parameters for dicoflex: {error}") from error
+        raise ValueError(f"invalid parameters for countercontex: {error}") from error
     return module.CounterContExMethod(config)
 
 
@@ -152,7 +152,7 @@ def _countercontex_variant(
     resolved = dict(values)
     search = dict(resolved.get("search", {}))
     if search.get("cf_mode", "sparse") != "sparse":
-        raise ValueError("dicoflex tabicl_sparse variant requires cf_mode='sparse'")
+        raise ValueError("countercontex tabicl_sparse variant requires cf_mode='sparse'")
     search["cf_mode"] = "sparse"
     resolved["search"] = search
     return resolved
@@ -172,11 +172,11 @@ def _countercontex_runtime(
 DEFAULT_METHOD_REGISTRY = MethodRegistry(
     (
         RegistryEntry(
-            "dicoflex",
+            "countercontex",
             "experiments.zeroshot_cf.methods.countercontex",
             "CounterContExMethod",
             "CounterContExConfig",
-            "dicoflex-v3",
+            "countercontex-v3",
             _countercontex_factory,
             ("default", "tabicl_sparse"),
             _countercontex_variant,

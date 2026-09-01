@@ -94,7 +94,7 @@ _EXP8_MULTI_CF_COLUMNS = (
 
 
 def _legacy_arrays(dataset_name: str, results_dir: Path) -> dict[str, np.ndarray]:
-    paths = generic_legacy_paths(results_dir, "dicoflex", dataset_name)
+    paths = generic_legacy_paths(results_dir, "countercontex", dataset_name)
     with np.load(paths.arrays_npz, allow_pickle=False) as archive:
         return {name: np.asarray(archive[name]).copy() for name in archive.files}
 

@@ -476,7 +476,7 @@ def test_exp8_adapter_translates_every_scientific_option() -> None:
         "validation_fraction": 0.2,
         "drop_heloc_all_minus9": True,
     }
-    assert spec.method.name == "dicoflex"
+    assert spec.method.name == "countercontex"
     assert spec.method.variant == "default"
     assert spec.method.n_counterfactuals == 3
     assert spec.method.params == {
@@ -676,7 +676,7 @@ def test_exp8_adapter_uses_exact_current_run_when_stale_version_is_newer(
     np.testing.assert_allclose(X_test, [[0.0]])
     np.testing.assert_allclose(X_cf, [[1.0]])
     np.testing.assert_array_equal(y_test, [0])
-    assert captured["spec"].method.name == "dicoflex"
+    assert captured["spec"].method.name == "countercontex"
     assert captured["spec"].protocol.test_selection == "first"
     assert captured["results_dir"] == tmp_path
     assert captured["tabicl_cache_dir"] == tmp_path / "cache"

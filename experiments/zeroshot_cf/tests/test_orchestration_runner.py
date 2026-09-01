@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import shutil
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -45,6 +46,14 @@ from experiments.zeroshot_cf.orchestration.v1_contract import V1_CONTRACT
 _V1_COMPATIBILITY = json.loads(
     (
         Path(__file__).parent / "fixtures" / "architecture_v1" / "compatibility.json"
+    ).read_text()
+)
+_COUNTERCONTEX_V1_SEMANTICS = json.loads(
+    (
+        Path(__file__).parent
+        / "fixtures"
+        / "architecture_v1"
+        / "countercontex_v1_semantics.json"
     ).read_text()
 )
 
@@ -272,7 +281,7 @@ def test_runner_routes_dicoflex_execution_settings_outside_identity(
 
     def factory(params):
         captured["params"] = params
-        return _RuntimeMethod("dicoflex", calls)
+        return _RuntimeMethod("countercontex", calls)
 
     def runtime_resolver(params, cache_paths, device):
         resolved = dict(params)
@@ -294,17 +303,17 @@ def test_runner_routes_dicoflex_execution_settings_outside_identity(
     registry = MethodRegistry(
         (
             RegistryEntry(
-                "dicoflex",
+                "countercontex",
                 "fake",
                 "Fake",
                 "Config",
-                "dicoflex-v3",
+                "countercontex-v3",
                 factory,
                 runtime_resolver=runtime_resolver,
             ),
         )
     )
-    spec = _spec("one", "dicoflex")
+    spec = _spec("one", "countercontex")
     execution = ExecutionSpec(
         tmp_path,
         cache_paths={"tabicl": tmp_path / "tabicl-cache"},
@@ -321,7 +330,7 @@ def test_runner_routes_dicoflex_execution_settings_outside_identity(
         lambda spec, case: IdentityVersions(
             dataset_fingerprint=case.dataset.provenance.fingerprint,
             case_fingerprint=case.case_id,
-            method_implementation="dicoflex-v3",
+            method_implementation="countercontex-v3",
             backend_implementation="tabicl-proposal-v1",
             model_content_id="fixture-model",
         ),
@@ -360,9 +369,9 @@ def test_empirical_dicoflex_identity_does_not_require_tabicl_checkpoints(
         ),
     )
     spec = replace(
-        _spec("one", "dicoflex"),
+        _spec("one", "countercontex"),
         method=MethodSpec(
-            "dicoflex",
+            "countercontex",
             "tabicl_sparse",
             {"foundation": {"backend": "empirical"}},
         ),
@@ -375,9 +384,53 @@ def test_empirical_dicoflex_identity_does_not_require_tabicl_checkpoints(
 
     versions = runner._versions(spec, _case("one"))
 
-    assert versions.method_implementation == "dicoflex-v3"
+    assert versions.method_implementation == "countercontex-v3"
     assert versions.backend_implementation == "empirical-reference-v1"
     assert dict(versions.checkpoint_content_ids) == {}
+
+
+def test_countercontex_does_not_select_or_resume_old_identity_manifest(
+    tmp_path,
+) -> None:
+    calls: list[str] = []
+    registry = MethodRegistry(
+        tuple(
+            RegistryEntry(
+                name,
+                "fake",
+                "Fake",
+                "Config",
+                version,
+                lambda params, name=name: _FakeMethod(name, calls),
+            )
+            for name, version in (
+                ("dicoflex", "dicoflex-v3"),
+                ("countercontex", "countercontex-v3"),
+            )
+        )
+    )
+    runner = GenericRunner(
+        ExecutionSpec(tmp_path),
+        registry=registry,
+        case_loader=lambda spec: _case(spec.dataset.name),
+    )
+    old_spec = _spec("one", "dicoflex")
+    new_spec = _spec("one", "countercontex")
+
+    old_outcome = runner.run(old_spec)
+    new_outcome = runner.run(new_spec, resume=True)
+
+    assert not new_outcome.skipped
+    assert old_outcome.stored.path != new_outcome.stored.path
+    assert calls.count("generate:dicoflex") == 1
+    assert calls.count("generate:countercontex") == 1
+
+    shutil.copyfile(
+        old_outcome.stored.path / "manifest.json",
+        new_outcome.stored.path / "manifest.json",
+    )
+    with pytest.raises(ValueError, match="identity|run_id|cell_id"):
+        runner.run(new_spec, resume=True)
 
 
 @pytest.mark.parametrize("tamper", ("cell_id", "scientific_spec"))
@@ -571,8 +624,8 @@ def test_dicoflex_legacy_method_id_tracks_resolved_mode_and_k(
 ):
     assert (
         _legacy_method_id(
-            "dicoflex",
-            V1_CONTRACT["dicoflex"],
+            "countercontex",
+            V1_CONTRACT["countercontex"],
             {"search": {"cf_mode": cf_mode}},
             n_counterfactuals,
         )
@@ -584,7 +637,7 @@ def test_dicoflex_legacy_method_id_tracks_resolved_mode_and_k(
     ("method_name", "stem", "expected_keys"),
     (
         (
-            "dicoflex",
+            "countercontex",
             "exp9_tabicl",
             {
                 "X_test",
@@ -650,7 +703,7 @@ def test_legacy_export_writes_frozen_files_and_resume_restores_without_generatio
     @dataclass(frozen=True)
     class _LegacyMethod(_FakeMethod):
         def config_dict(self):
-            if self.name == "dicoflex":
+            if self.name == "countercontex":
                 return {"foundation": {"backend": "tabicl"}}
             return super().config_dict()
 
@@ -664,7 +717,7 @@ def test_legacy_export_writes_frozen_files_and_resume_restores_without_generatio
             calls.append(f"generate:{self.name}")
             candidates = np.full((len(request.factuals), 1, 1), 0.9)
             artifacts = {}
-            if self.name == "dicoflex":
+            if self.name == "countercontex":
                 artifacts = {
                     "method.best_effort": candidates[:, 0],
                     "method.sparse_counterfactuals": candidates[:, 0],
@@ -685,7 +738,7 @@ def test_legacy_export_writes_frozen_files_and_resume_restores_without_generatio
             )
 
     variants = (
-        ("default", "tabicl_sparse") if method_name == "dicoflex" else ("default",)
+        ("default", "tabicl_sparse") if method_name == "countercontex" else ("default",)
     )
     registry = MethodRegistry(
         (
@@ -705,14 +758,14 @@ def test_legacy_export_writes_frozen_files_and_resume_restores_without_generatio
         registry=registry,
         case_loader=lambda spec: _case(spec.dataset.name),
     )
-    if method_name == "dicoflex":
+    if method_name == "countercontex":
         monkeypatch.setattr(
             runner,
             "_versions",
             lambda spec, case: IdentityVersions(
                 dataset_fingerprint=case.dataset.provenance.fingerprint,
                 case_fingerprint=case.case_id,
-                method_implementation="dicoflex-v3",
+                method_implementation="countercontex-v3",
                 backend_implementation="tabicl-proposal-v1",
                 model_content_id="fixture-model",
             ),
@@ -739,7 +792,7 @@ def test_legacy_export_writes_frozen_files_and_resume_restores_without_generatio
     assert float(metrics_row["runtime_generation_s"]) >= 0
     assert float(metrics_row["runtime_total_s"]) > 0
     expected_method_value = {
-        "dicoflex": ("cf_mode", "sparse"),
+        "countercontex": ("cf_mode", "sparse"),
         "nice": ("prototype_metric", "euclidean"),
         "wachter": ("model_access", "predict_and_predict_proba"),
         "growing_spheres": ("sphere_candidates", "512"),
@@ -758,6 +811,31 @@ def test_legacy_export_writes_frozen_files_and_resume_restores_without_generatio
     assert point_row["changed_columns"] == "1"
     with np.load(arrays, allow_pickle=False) as archive:
         assert set(archive.files) == expected_keys
+        if method_name == "countercontex":
+            timing_columns = set(
+                _COUNTERCONTEX_V1_SEMANTICS["summary_timing_columns"]
+            )
+            assert {
+                key: value
+                for key, value in metrics_row.items()
+                if key not in timing_columns
+            } == _COUNTERCONTEX_V1_SEMANTICS["summary"]
+            assert set(metrics_row) - set(
+                _COUNTERCONTEX_V1_SEMANTICS["summary"]
+            ) == timing_columns
+            assert all(
+                isinstance(float(metrics_row[column]), float)
+                for column in timing_columns
+            )
+            assert point_row == _COUNTERCONTEX_V1_SEMANTICS["point"]
+            assert {
+                key: {
+                    "values": archive[key].tolist(),
+                    "dtype": str(archive[key].dtype),
+                    "shape": list(archive[key].shape),
+                }
+                for key in archive.files
+            } == _COUNTERCONTEX_V1_SEMANTICS["arrays"]
     metrics.write_text("tampered\n")
 
     resumed = runner.run(spec, resume=True)
@@ -778,4 +856,4 @@ def test_legacy_export_writes_frozen_files_and_resume_restores_without_generatio
     assert arrays.is_file()
     assert calls.count(f"generate:{method_name}") == 1
     aggregate_row = ArtifactStore(tmp_path).aggregate_expected([spec.cell_id])[0]
-    assert aggregate_row["backend"] == ("tabicl" if method_name == "dicoflex" else None)
+    assert aggregate_row["backend"] == ("tabicl" if method_name == "countercontex" else None)

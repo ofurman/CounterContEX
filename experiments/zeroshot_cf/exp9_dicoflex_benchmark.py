@@ -68,7 +68,7 @@ def _spec(  # noqa: PLR0913
     normalized_mode = cf_mode.replace("-", "_")
     return legacy_run_spec(
         dataset_name,
-        "dicoflex",
+        "countercontex",
         method_variant="tabicl_sparse" if normalized_mode == "sparse" else "default",
         method_params={
             "search": {
@@ -166,7 +166,7 @@ def run_dataset(  # noqa: PLR0913
 def aggregate_results(results_dir: Path = RESULTS_DIR) -> Path:
     return aggregate_legacy_method(
         results_dir,
-        "dicoflex",
+        "countercontex",
         DATASETS,
         "exp9_tabicl_all_metrics.csv",
     )

@@ -79,7 +79,7 @@ def test_run_identity_is_order_independent_and_excludes_execution_metadata() -> 
 )
 def test_method_spec_rejects_execution_only_params(params) -> None:
     with pytest.raises(ValueError, match="execution-only"):
-        MethodSpec("dicoflex", params=params)
+        MethodSpec("countercontex", params=params)
 
 
 @pytest.mark.parametrize(
@@ -89,7 +89,7 @@ def test_method_spec_rejects_execution_only_params(params) -> None:
         lambda: ProtocolSpec(params={"checkpoint_path": "checkpoint.ckpt"}),
         lambda: TargetModelSpec("oracle", {"model_path": "model.bin"}),
         lambda: MethodSpec(
-            "dicoflex",
+            "countercontex",
             params={"foundation": {"local_checkpoint_path": "model.ckpt"}},
         ),
     ),
@@ -123,3 +123,17 @@ def test_every_scientific_and_content_version_axis_changes_run_identity() -> Non
     )
     assert all(run_id(changed, versions) != baseline for changed in changed_specs)
     assert all(run_id(spec, changed) != baseline for changed in changed_versions)
+
+
+def test_countercontex_rename_changes_cell_and_run_identity_axes() -> None:
+    baseline = _spec()
+    old_spec = replace(baseline, method=MethodSpec("dicoflex"))
+    new_spec = replace(baseline, method=MethodSpec("countercontex"))
+    old_versions = replace(_versions(), method_implementation="dicoflex-v3")
+    new_versions = replace(_versions(), method_implementation="countercontex-v3")
+
+    assert old_spec.scientific_payload()["method"]["name"] == "dicoflex"
+    assert new_spec.scientific_payload()["method"]["name"] == "countercontex"
+    assert old_spec.cell_id != new_spec.cell_id
+    assert run_id(old_spec, old_versions) != run_id(new_spec, new_versions)
+    assert run_id(new_spec, old_versions) != run_id(new_spec, new_versions)

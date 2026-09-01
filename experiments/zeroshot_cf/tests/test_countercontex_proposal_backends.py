@@ -525,7 +525,7 @@ def test_tracked_ablation_and_full_reference_matrices_resolve_exact_axes() -> No
         "lending_club",
     }
     assert {run.method.name for run in reference.runs} == {
-        "dicoflex",
+        "countercontex",
         "nice",
         "wachter",
         "growing_spheres",
@@ -534,6 +534,6 @@ def test_tracked_ablation_and_full_reference_matrices_resolve_exact_axes() -> No
     }
     assert {run.seed for run in reference.runs} == {42}
     assert {run.protocol.max_test for run in reference.runs} == {1000}
-    dicoflex = next(run for run in reference.runs if run.method.name == "dicoflex")
+    dicoflex = next(run for run in reference.runs if run.method.name == "countercontex")
     assert dicoflex.method.n_counterfactuals == 3
     assert dicoflex.method.params["foundation"]["backend"] == "tabicl"

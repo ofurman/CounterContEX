@@ -1,0 +1,233 @@
+{
+  "arrays": {
+    "X_cf": {
+      "dtype": "float64",
+      "shape": [
+        1,
+        1
+      ],
+      "values": [
+        [
+          0.9
+        ]
+      ]
+    },
+    "X_cf_sets": {
+      "dtype": "float64",
+      "shape": [
+        1,
+        1,
+        1
+      ],
+      "values": [
+        [
+          [
+            0.9
+          ]
+        ]
+      ]
+    },
+    "X_sparse": {
+      "dtype": "float64",
+      "shape": [
+        1,
+        1
+      ],
+      "values": [
+        [
+          0.9
+        ]
+      ]
+    },
+    "X_test": {
+      "dtype": "float64",
+      "shape": [
+        1,
+        1
+      ],
+      "values": [
+        [
+          0.1
+        ]
+      ]
+    },
+    "diverse_available_count": {
+      "dtype": "int64",
+      "shape": [
+        1
+      ],
+      "values": [
+        1
+      ]
+    },
+    "y_cf_pred": {
+      "dtype": "int64",
+      "shape": [
+        1
+      ],
+      "values": [
+        1
+      ]
+    },
+    "y_pred": {
+      "dtype": "int64",
+      "shape": [
+        1
+      ],
+      "values": [
+        0
+      ]
+    },
+    "y_target": {
+      "dtype": "int64",
+      "shape": [
+        1
+      ],
+      "values": [
+        1
+      ]
+    },
+    "y_test": {
+      "dtype": "int64",
+      "shape": [
+        1
+      ],
+      "values": [
+        0
+      ]
+    }
+  },
+  "point": {
+    "accepted_refinement_count": "",
+    "attempt_steps": "0",
+    "cf_prediction": "1",
+    "changed_columns": "1",
+    "extra_actions": "",
+    "factual_label": "0",
+    "factual_prediction": "0",
+    "final_action_count": "1",
+    "final_action_sparsity": "1.0",
+    "final_grouped_gower": "0.8",
+    "final_tabicl_joint_log_density": "",
+    "first_action_type": "",
+    "initial_sparse_action_count": "1",
+    "initial_tabicl_joint_log_density": "",
+    "initial_valid_action_sparsity": "1.0",
+    "initial_valid_grouped_gower": "0.8",
+    "initial_valid_step": "",
+    "joint_rows_scored": "",
+    "joint_scoring_batch_count": "",
+    "joint_scoring_runtime_s": "",
+    "lof_score": "1.0",
+    "point": "0",
+    "point_runtime_s": "",
+    "refinement_steps": "",
+    "refinement_stopping_reason": "",
+    "steps": "",
+    "tabicl_joint_log_density_gain": "",
+    "target": "1",
+    "target_probability": "0.9",
+    "valid": "True",
+    "validity_steps": ""
+  },
+  "summary": {
+    "accepted_refinement_count_mean": "nan",
+    "action_unit_sparsity_mean": "1.0",
+    "actionability": "1.0",
+    "allow_revisits": "True",
+    "candidate_mode": "batched",
+    "candidate_quantiles": "sample",
+    "categorical_confidence_batching": "False",
+    "categorical_first_fraction": "0.0",
+    "categorical_proposal_count": "1",
+    "cf_mode": "sparse",
+    "cf_oob_fraction": "0.0",
+    "cf_per_factual": "1",
+    "conditional_estimator_cache": "False",
+    "confidence_quantiles": "sample",
+    "context_labels": "target_classifier",
+    "context_size": "512",
+    "context_strategy": "gower_knn_both",
+    "coverage": "1.0",
+    "dataset": "one",
+    "diverse_action_count_mean": "1.0",
+    "diverse_action_jaccard_mean": "nan",
+    "diverse_action_jaccard_min": "nan",
+    "diverse_coverage_at_k": "1.0",
+    "diverse_factual_gower_mean": "0.8",
+    "diverse_pairwise_gower_mean": "nan",
+    "diverse_pairwise_gower_min": "nan",
+    "diverse_returned_count_mean": "1.0",
+    "diverse_returned_validity": "1.0",
+    "diversity_beam_width": "8",
+    "diversity_candidate_generation": "bounded_beam",
+    "diversity_candidate_pool_size": "16",
+    "diversity_max_extra_actions": "2",
+    "diversity_max_gower_increase": "0.02",
+    "diversity_max_gower_ratio": "1.5",
+    "diversity_selector": "exact_fixed_size_dpp_map",
+    "extra_actions_mean": "0.0",
+    "factual_oob_fraction": "0.0",
+    "failure_rate": "0.0",
+    "final_action_count_mean": "1.0",
+    "final_action_sparsity_mean": "nan",
+    "final_tabicl_joint_log_density_mean": "nan",
+    "initial_sparse_action_count_mean": "1.0",
+    "initial_tabicl_joint_log_density_mean": "nan",
+    "initial_valid_action_sparsity_mean": "nan",
+    "initial_valid_grouped_gower_mean": "nan",
+    "isolation_forest_scores_cf": "0.027008647430118604",
+    "isolation_forest_scores_test": "0.027008647430118604",
+    "joint_rows_scored_mean": "0.0",
+    "joint_scoring_batch_count_mean": "0.0",
+    "joint_shortlist_size": "16",
+    "l0_count_mean": "1.0",
+    "lof_scores_cf": "1.0",
+    "lof_scores_test": "1.0",
+    "max_extra_actions": "1",
+    "max_validity_steps": "1",
+    "method": "tabicl_v2_sparse",
+    "min_joint_log_gain": "0.0",
+    "n_dropped_rows": "7",
+    "n_estimators": "1",
+    "n_test": "1",
+    "n_test_pool": "2",
+    "n_train": "4",
+    "n_validation": "2",
+    "plausibility_backend": "proposal_support",
+    "post_valid_refinement": "False",
+    "preprocessing_variant": "fixture_clean",
+    "proximity_all_features_euclidean": "0.8",
+    "proximity_continuous_euclidean": "0.8",
+    "proximity_continuous_manhattan": "0.8",
+    "proximity_grouped_gower": "0.8",
+    "refined_fraction": "0.0",
+    "refinement_steps_mean": "nan",
+    "refinement_stopping_reasons": "",
+    "search_schedule": "probability_ascent_until_valid_then_min_grouped_gower",
+    "sparsity": "1.0",
+    "sparsity_exact": "1.0",
+    "split_seed": "13",
+    "split_variant": "fixture_split",
+    "steps_mean": "nan",
+    "tabicl_joint_log_density_gain_mean": "nan",
+    "tabicl_joint_permutations": "1",
+    "tabicl_kv_cache": "False",
+    "target_classifier_test_accuracy": "1.0",
+    "target_classifier_validation_accuracy": "1.0",
+    "tau": "0.5",
+    "temperature": "1e-09",
+    "test_selection": "first",
+    "true_actionability": "1.0",
+    "valid_candidate_objective": "grouped_gower",
+    "validity": "1.0",
+    "validity_steps_mean": "nan"
+  },
+  "summary_timing_columns": [
+    "joint_scoring_runtime_s",
+    "point_runtime_s_mean",
+    "runtime_generation_per_factual_s",
+    "runtime_generation_s",
+    "runtime_total_s"
+  ]
+}
