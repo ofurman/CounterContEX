@@ -1,0 +1,17 @@
+schema_version: countercontex.matrix.v1
+suite: campaign_e9_fmswap
+output_root: experiments/zeroshot_cf/results/campaign/e9_fmswap
+datasets: [heloc, adult_census]
+methods:
+  - {name: countercontex, params: {search: {cf_mode: sparse, candidate_quantiles: [0.1, 0.25, 0.5, 0.75, 0.9]}, foundation: {backend: tabicl, n_estimators: 1}}}
+  # Stage 11 implements and versions this backend before execution.
+  - {name: countercontex, params: {search: {cf_mode: sparse, candidate_quantiles: [0.1, 0.25, 0.5, 0.75, 0.9]}, foundation: {backend: tabpfn, n_estimators: 1}}}
+seeds: [17, 42, 101]
+protocol: {max_test: 250, test_selection: stratified}
+target_model: {name: retained_logistic_regression, params: {C: 1.0, max_iter: 1000, seed: 42}}
+evaluation: {probability_threshold: 0.7}
+cache_paths:
+  tabicl: experiments/zeroshot_cf/models/tabicl
+  tabpfn: experiments/zeroshot_cf/models/tabpfn
+device: cuda
+legacy_export: false

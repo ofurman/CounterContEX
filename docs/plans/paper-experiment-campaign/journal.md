@@ -203,3 +203,42 @@ only v1 and rejects v3 or mixed-schema roots. A third fresh audit passed every g
 the Stage 1 hash and Stage 4 smoke. Full suite: 283 passed; analysis/CLI Ruff and offline CLI help
 passed.
 **Commit**: `HEAD` (this stage commit)
+
+## 2026-09-02 00:55 -- Stage 6: Matrices and DGX launchers -- DONE
+**Did**: Added every executable matrix named by the catalog, fixed its output root, and froze
+the resolved counts with a contract test. D-8 corrects the plan's arithmetic: there are nine,
+because E8 is explicitly a read-only rescoring pass and must not generate a tenth matrix. Added
+GB10 `nohup` launchers for Stages 7--12, strict post-run aggregation, logs/PIDs/success markers,
+and retrieval instructions. Stage 11 publishes `E9_DONE`, not a false stage-DONE marker before
+E8. Updated the runbook to the actual matrix-owned CUDA setting and safe fast-forward pulls.
+**Verification**: GATE all 1,384 resolved cells across all nine matrices are unique, carry
+`countercontex.evaluation.v2`, and expose the inspected target model, backend, k, and seed. Frozen
+counts: E1=540, E2=60, E3=36, E4=200, E5=210, E6=240, E7=80, E9=12, E10=6. GATE on
+`gx10-bdc5`: CUDA=true/NVIDIA GB10; CEL revision
+`3587f943826f6b087a0d198c8c4aa4373712c7ee`; both checkpoint content hashes verified; offline
+TabICL smoke passed. GATE the exact E1 HELOC/LR/seed-42/CounterContEx/k=1 cell
+`6c979577...0a8b6` published run `6d89241e...0484e2` with all six required files and COMPLETE;
+strict single-cell aggregation accepted it.
+**Report**: The n=250 smoke returned 249 candidates: coverage 0.996, returned-class validity
+1.0, threshold validity 0.0, grouped-Gower 0.0132439. Generation took 1236.094 s, or
+4.94438 s/factual; total was 1237.330 s. The scientifically equivalent Stage 1 seed-42 n=100,
+k=1 cell measured 4.79635 s/factual, so the smoke is 3.09% slower; against the five-seed Stage 1
+mean 5.39462 +/- 0.35936 s/factual it is 8.35% faster. The earlier 1.230 s/factual HELOC profile
+used k=3 and n=25 and is not treated as an equivalent runtime baseline.
+**Provenance**: Counts came from complete dry-run JSONL rows, with duplicate cell IDs checked
+within and across matrices. Environment values came from torch, vendor verification, checkpoint
+verification, and the offline smoke—not host assumptions. Runtime and metrics were read from the
+published E1 manifest/summary; the smoke cell ID was matched back to exactly one E1 matrix row.
+Changing a target family, seed, k, backend, metric version, or scientific config turns these
+checks red. Launcher syntax passed `bash -n`; DONE markers occur only after matrix and aggregate.
+**Problems**: E5/E6/E7 and E9 deliberately declare scientific settings whose owning method
+support is implemented in Stages 10 and 11 before execution; Stage 6 proves identity expansion,
+not those future capabilities. E9 and E10 counts/roots are frozen now, while Stage 10 must replace
+their provisional method parameters with the disclosed selected configuration before either
+executes. The first audit found E2/E7 identity collisions, an explicit-default E5 confound, and
+Boolean coercion of E6's true-label name; the delegated matrix fix now has cross-matrix uniqueness
+and raw-axis/type witnesses. It then found stale DONE markers could survive a relaunch; all six
+launchers now synchronously clear the exact marker they pass to the child, with a contract witness.
+Full suite 288 passed; matrix/launcher-test Ruff, launcher syntax, and diff checks passed. A fresh
+independent provenance audit follows before the stage commit.
+**Commit**: `HEAD` (this stage commit)

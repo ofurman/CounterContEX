@@ -10,7 +10,7 @@ This is the gate between Phase A and Phase B. Nothing expensive runs before it p
 
 ## Steps
 
-1. **Write the ten campaign matrices** named in
+1. **Write the ~~ten~~ nine executable campaign matrices** named in
    [experiment-catalog.md](../resources/experiment-catalog.md), under
    `experiments/zeroshot_cf/configs/matrices/`. Use the shared protocol block from that document:
    five seeds, `max_test: 250`, stratified selection, `probability_threshold: 0.7`,
@@ -44,6 +44,9 @@ This is the gate between Phase A and Phase B. Nothing expensive runs before it p
    live (`experiments/zeroshot_cf/athena/`) or in a sibling `dgx/` directory, and update the
    relevant README.
 
+   E8 deliberately has no matrix: it is a read-only rescoring pass over E1 artifacts, as the
+   catalog and Stage 11 specify (amendment D-8).
+
 6. **Record the frozen expected cell count per matrix** in `journal.md`. Stages 7–12 gate their
    completeness against these numbers, so they must be recorded before any of them runs.
 
@@ -60,7 +63,8 @@ This is the gate between Phase A and Phase B. Nothing expensive runs before it p
 - [ ] GATE One full E1 cell completes on the DGX and publishes `manifest.json`, `summary.csv`,
       `points.csv`, `candidates.csv`, `arrays.npz` and `COMPLETE`, and `cli aggregate` accepts it
       — read from the published run directory.
-- [ ] REPORT Expected cell count for each of the ten matrices, and the DGX per-factual cost of
+- [ ] REPORT Expected cell count for each of the ~~ten~~ nine executable matrices (E8 has no
+      generation matrix), and the DGX per-factual cost of
       the smoke cell against Stage 1's measurement — record both in `journal.md`. Stages 7–12
       gate their completeness against the recorded counts.
 

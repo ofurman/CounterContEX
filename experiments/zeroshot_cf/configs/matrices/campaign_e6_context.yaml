@@ -1,0 +1,21 @@
+schema_version: countercontex.matrix.v1
+suite: campaign_e6_context
+output_root: experiments/zeroshot_cf/results/campaign/e6_context
+datasets: [heloc, bank_marketing, give_me_some_credit, lending_club, adult_census, german_credit]
+methods:
+  # Crossed by design: four context sizes x predicted/true training labels.
+  - {name: countercontex, params: {foundation: {backend: tabicl, context_size: 64, context_labels: predictions}}}
+  - {name: countercontex, params: {foundation: {backend: tabicl, context_size: 64, context_labels: "true"}}}
+  - {name: countercontex, params: {foundation: {backend: tabicl, context_size: 128, context_labels: predictions}}}
+  - {name: countercontex, params: {foundation: {backend: tabicl, context_size: 128, context_labels: "true"}}}
+  - {name: countercontex, params: {foundation: {backend: tabicl, context_size: 256, context_labels: predictions}}}
+  - {name: countercontex, params: {foundation: {backend: tabicl, context_size: 256, context_labels: "true"}}}
+  - {name: countercontex, params: {foundation: {backend: tabicl, context_size: 512, context_labels: predictions}}}
+  - {name: countercontex, params: {foundation: {backend: tabicl, context_size: 512, context_labels: "true"}}}
+seeds: [17, 42, 101, 202, 303]
+protocol: {max_test: 100, test_selection: stratified}
+target_model: {name: retained_logistic_regression, params: {C: 1.0, max_iter: 1000, seed: 42}}
+evaluation: {probability_threshold: 0.7}
+cache_paths: {tabicl: experiments/zeroshot_cf/models/tabicl}
+device: cuda
+legacy_export: false

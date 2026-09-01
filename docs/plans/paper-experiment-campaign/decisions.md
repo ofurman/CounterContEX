@@ -85,3 +85,12 @@ so their single-counterfactual guards remain intact.
 create different scientific identities rather than analyze that evidence. The compatibility
 reader validates COMPLETE payloads, typed tables, content identities, and matrix membership;
 it never upgrades, rewrites, or mixes v1 and v2 values in one seed group.
+
+### D-8: Amend campaign matrix count
+**Date**: 2026-09-02 - **Stage**: 6 - **Type**: AMENDMENT
+**Original**: "Write the ten campaign matrices named in experiment-catalog.md."
+**Replacement**: Write the nine executable matrices named there; E8 remains matrix-free.
+**Evidence**: The catalog has YAML names for E1-E7, E9, and E10, while E8 explicitly says
+"none — scoring pass over E1 arrays"; Stage 11 likewise forbids an E8 generation run.
+**Class**: measurement (amendable). The declared count was arithmetically inconsistent with the
+catalog; preserving nine avoids fabricating a generation protocol for a read-only evaluation.

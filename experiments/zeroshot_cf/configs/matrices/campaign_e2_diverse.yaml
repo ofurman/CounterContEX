@@ -1,0 +1,19 @@
+schema_version: countercontex.matrix.v1
+suite: campaign_e2_diverse
+output_root: experiments/zeroshot_cf/results/campaign/e2_diverse
+datasets: [heloc, bank_marketing, give_me_some_credit, lending_club, adult_census, german_credit]
+methods:
+  - name: countercontex
+    n_counterfactuals: 3
+    params:
+      search: {cf_mode: sparse, candidate_quantiles: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], max_validity_steps: 100}
+      diversity: {beam_width: 8, candidate_pool_size: 16, max_extra_actions: 2, max_gower_ratio: 1.5, max_gower_increase: 0.02}
+      foundation: {backend: tabicl, n_estimators: 1, temperature: 1.0e-9, confidence_quantiles: [0.1, 0.25, 0.5, 0.75, 0.9], tabicl_joint_permutations: 1}
+  - {name: dice, n_counterfactuals: 3}
+seeds: [17, 42, 101, 202, 303]
+protocol: {max_test: 250, test_selection: stratified}
+target_model: {name: retained_logistic_regression, params: {C: 1.0, max_iter: 1000, seed: 42}}
+evaluation: {probability_threshold: 0.7}
+cache_paths: {tabicl: experiments/zeroshot_cf/models/tabicl}
+device: cuda
+legacy_export: false

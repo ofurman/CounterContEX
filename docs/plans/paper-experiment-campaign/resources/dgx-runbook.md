@@ -39,12 +39,12 @@ export HF_HUB_OFFLINE=1
 export ZEROSHOT_CF_MODELS_DIR=$PWD/experiments/zeroshot_cf/models
 ```
 
-Device selection is owned by `methods/countercontex/runtime.py`; pass `--device` through the
-CLI rather than setting a device environment variable directly. Verify with
+Device selection is owned by `methods/countercontex/runtime.py`; campaign matrices carry
+`device: cuda` as execution metadata rather than a scientific setting. Verify with
 `uv run python -c "import torch; print(torch.cuda.is_available())"`.
 
-`vendor/`, `models/` and `results/` are gitignored, so `git fetch && git reset --hard
-origin/paper-experiment-campaign` syncs code without disturbing them.
+`vendor/`, `models/` and `results/` are gitignored. Use `git pull --ff-only` on the campaign
+branch to update code without rewriting shared history.
 
 ## Launch pattern
 
@@ -52,18 +52,13 @@ A `claude -p` per-stage runner cannot survive a multi-hour job — it exits and 
 child. Launch detached and poll for the marker:
 
 ```bash
-nohup bash -c '
-  cd ~/pwr/CounterContEX
-  HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.cli matrix \
-    --config experiments/zeroshot_cf/configs/matrices/campaign_e1_main.yaml \
-    --resume
-  touch ~/e1_main.DONE
-' > ~/e1_main.log 2>&1 &
+bash experiments/zeroshot_cf/dgx/launch_stage07.sh
 ```
 
-Then poll `~/e1_main.DONE` over SSH. `--resume` revalidates the complete manifest against the
-freshly resolved identity, so an interrupted campaign restarts safely; it is execution
-metadata and does not change `run_id`.
+Then poll `experiments/zeroshot_cf/results/campaign/launch/stage07.DONE`. The launchers write
+logs and PIDs beside the marker and publish DONE only after strict aggregation. `--resume`
+revalidates the complete manifest against the freshly resolved identity, so an interrupted
+campaign restarts safely; it is execution metadata and does not change `run_id`.
 
 Expect roughly 60 s of CUDA kernel compilation on the first factual of a fresh process, then
 warm per-factual costs matching [compute-budget.md](compute-budget.md).
@@ -71,7 +66,7 @@ warm per-factual costs matching [compute-budget.md](compute-budget.md).
 ## Retrieving artifacts
 
 ```bash
-rsync -av ofurman@gx10-bdc5:~/pwr/CounterContEX/experiments/zeroshot_cf/results/campaign/ \
+rsync -av ofurman@gx10-bdc5:/home/ofurman/CounterContEX/experiments/zeroshot_cf/results/campaign/ \
   experiments/zeroshot_cf/results/campaign/
 ```
 
