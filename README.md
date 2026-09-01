@@ -9,6 +9,9 @@ also includes NICE, Wachter, Growing Spheres, DiCE, and FACE baselines. All meth
 use the same benchmark cases, evaluation metrics, artifact schema, and run identity
 rules.
 
+See the [CounterContEx method overview](docs/countercontex-method.md) for the
+research motivation, algorithm, assumptions, and evaluation protocol.
+
 The maintained implementation is under
 [`experiments/zeroshot_cf/`](experiments/zeroshot_cf/). See the
 [suite README](experiments/zeroshot_cf/README.md) for detailed metric definitions,
