@@ -194,6 +194,16 @@ def test_reversed_nonzero_classes_map_target_probability_by_label():
     assert report.summary.values["validity_returned_threshold"] == 1.0
 
 
+def test_target_probability_array_preserves_slots_and_unavailable_nan():
+    case = next(case for case in _cases() if case["id"] == "partial_k3")
+    report = _evaluate(case)
+
+    probabilities = report.arrays.values["common.target_probabilities"]
+    assert probabilities.shape == (1, 3)
+    np.testing.assert_allclose(probabilities[0, :2], [0.8, 0.2])
+    assert np.isnan(probabilities[0, 2])
+
+
 def test_prepare_fits_novelty_models_once_for_repeated_evaluation(monkeypatch):
     case = next(case for case in _cases() if case["id"] == "partial_k3")
     benchmark, result, spec = _evaluation_inputs(case)

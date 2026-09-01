@@ -4,7 +4,7 @@
   "stages": [
     {"id": 1, "title": "Feasibility and noise floor", "file": "stages/01-feasibility-and-noise-floor.md", "status": "DONE", "depends_on": [], "commit": "HEAD", "note": "GB10 feasibility, zero-spread HELOC noise floor, determinism, and Lending Club long-tail profile recorded; search-policy fix deferred as B-1", "blocked_by": []},
     {"id": 2, "title": "Target-model registry", "file": "stages/02-target-model-registry.md", "status": "DONE", "depends_on": [1], "commit": "HEAD", "note": "LR/MLP/XGBoost registry, stable fitted identities, all-baseline compatibility, and target-model matrix axis verified", "blocked_by": []},
-    {"id": 3, "title": "Evaluation metrics v2", "file": "stages/03-evaluation-metrics-v2.md", "status": "PENDING", "depends_on": [1], "commit": null, "note": null, "blocked_by": []},
+    {"id": 3, "title": "Evaluation metrics v2", "file": "stages/03-evaluation-metrics-v2.md", "status": "DONE", "depends_on": [1], "commit": "HEAD", "note": "Frozen v2 adds probability arrays, detectability with arm counts, and grouped-Gower neighbour support without changing v1 denominators", "blocked_by": []},
     {"id": 4, "title": "Diverse baseline adapters", "file": "stages/04-diverse-baseline-adapters.md", "status": "PENDING", "depends_on": [1], "commit": null, "note": null, "blocked_by": []},
     {"id": 5, "title": "Analysis layer", "file": "stages/05-analysis-layer.md", "status": "PENDING", "depends_on": [3], "commit": null, "note": null, "blocked_by": []},
     {"id": 6, "title": "Matrices and DGX launchers", "file": "stages/06-matrices-and-dgx-launchers.md", "status": "PENDING", "depends_on": [2, 3, 4], "commit": null, "note": null, "blocked_by": []},

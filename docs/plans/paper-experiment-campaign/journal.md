@@ -99,3 +99,38 @@ are not evidence. It also identified that cache loading does not validate traini
 implementation metadata; current files were freshly trained under this registry, and B-2
 records the durable future-cache risk.
 **Commit**: `HEAD` (this stage commit)
+
+## 2026-09-01 23:20 -- Stage 3: Evaluation metrics v2 -- DONE
+**Did**: Froze every paper-facing metric in the single
+`countercontex.evaluation.v2` bump. Preserved the existing per-slot target-probability array;
+added orientation-independent paired-fold detectability AUC with target-label-matched real rows,
+explicit arm counts and `NOT_MEASURED`; added per-available-candidate fifth-neighbour
+grouped-Gower support and its mean; documented populations and the joint-density decision D-5.
+**Verification**: GATE the pre-change v1 deterministic `partial_k3` summary and the v2 summary
+after removing only five new fields have identical canonical SHA-256
+`0c211640ecfc1d17a1c2a87c0c1f207bf21e6ac2224bd0e2878a9079c0166f53`. GATE copied-real
+detectability AUC is exactly 0.5, the +5 OOD fixture is 1.0, and an empty CF arm reports null
+AUC/status `NOT_MEASURED` with count 0. REPORT real HELOC/NICE n=40 run
+`f101d0354c6a7cf33b0574aa0c3974146e40226bd5d4bb1af3859180c09a2935`: detectability AUC
+0.674556 with status `MEASURED` and 26 real/26 CF rows; fifth-neighbour grouped-Gower mean
+0.044089; `common.target_probabilities` shape 40×1 with 26 finite returned slots; neighbour
+array length 26. Both manifest evaluation identities are v2.
+**Provenance**: The legacy hash was measured from production evaluator output at Stage 2 HEAD
+`1fb9097` before edits, then recomputed from this run's v2 legacy subset; denominator drift in
+availability/class-success masks turns it red. Detectability values are out-of-fold predictions
+from fixed standardized LR and paired five-fold splits over the fixture inputs; returning a
+literal 0.5, using an empty arm, or separating identical twins across folds turns its witnesses
+red. Real REPORT values and probability/kNN shapes were read back from the published
+`summary.csv`, `manifest.json`, and `arrays.npz`, not from in-memory results.
+**Problems**: Ordinary stratified CV measured copied identical rows at AUC 0.387 because twins
+landed unevenly across folds; paired arm folds fixed the instrument and the null/OOD witnesses
+now distinguish degeneracy from signal. The first n=25 real smoke had only 17 valid CF rows and
+honestly recorded `NOT_MEASURED`; n increased to 40 under a new output root without changing a
+metric setting. Full suite 274 passed; changed-file Ruff, offline CLI, and 24-cell dry-run passed.
+An independent audit reproduced both gates and verified the complete real artifact down to
+array/CSV masks and means. It notes that detectability is a fixed linear probe over only
+target-class CFs, uses deterministic leading target-matched reference rows, folds AUC to
+[0.5, 1], and has only 26 rows per real arm here; these limitations travel with the metric and
+prevent interpreting it as universal indistinguishability. K-th-neighbour support deliberately
+uses all available returned candidates.
+**Commit**: `HEAD` (this stage commit)

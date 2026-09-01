@@ -58,3 +58,12 @@ while specifying both forms is rejected as ambiguous.
 **Rationale**: The measured HELOC n=1 matrix produced one available target-class-valid
 candidate for NICE, Wachter, Growing Spheres, DiCE, and FACE against each of LR, MLP, and
 XGBoost. No combination may be excluded from later completeness gates as an expected failure.
+
+### D-5: Keep TabICL joint density method-internal
+**Date**: 2026-09-01 - **Stage**: 3
+**Options**: A) promote TabICL joint log-density to common evaluation B) retain it as method diagnostics
+**Chosen**: B
+**Rationale**: A common score from CounterContEx's own proposal model would structurally favour
+that method and is unavailable for the empirical backend. Evaluation v2 instead adds neutral
+detectability and grouped-Gower neighbour support; joint density may accompany method-specific
+ablations but cannot become a cross-method headline metric.

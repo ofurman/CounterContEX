@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -16,7 +17,107 @@ from experiments.zeroshot_cf.mixed_distance import (
     grouped_gower_distance,
 )
 from sklearn.ensemble import IsolationForest
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
 from sklearn.neighbors import LocalOutlierFactor
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+
+
+@dataclass(frozen=True)
+class DetectabilityResult:
+    auc: float | None
+    status: str
+    n_reference: int
+    n_counterfactual: int
+
+
+def detectability_auc(
+    *,
+    reference: np.ndarray,
+    reference_labels: np.ndarray,
+    counterfactuals: np.ndarray,
+    counterfactual_targets: np.ndarray,
+    minimum_cf_rows: int,
+) -> DetectabilityResult:
+    """Cross-validated real-vs-CF AUC with target-label-matched real rows."""
+    real = np.asarray(reference, dtype=np.float64)
+    real_labels = np.asarray(reference_labels).reshape(-1)
+    cf = np.asarray(counterfactuals, dtype=np.float64)
+    cf_targets = np.asarray(counterfactual_targets).reshape(-1)
+    if real.ndim != 2 or cf.ndim != 2 or real.shape[1] != cf.shape[1]:
+        raise ValueError("detectability arms must be 2D with matching columns")
+    if len(real_labels) != len(real) or len(cf_targets) != len(cf):
+        raise ValueError("detectability labels must match their arms")
+    if minimum_cf_rows < 2:
+        raise ValueError("minimum_cf_rows must be at least two")
+
+    selected_real: list[np.ndarray] = []
+    selected_cf: list[np.ndarray] = []
+    for target in np.unique(cf_targets):
+        real_rows = real[real_labels == target]
+        cf_rows = cf[cf_targets == target]
+        count = min(len(real_rows), len(cf_rows))
+        if count:
+            selected_real.append(real_rows[:count])
+            selected_cf.append(cf_rows[:count])
+    matched_real = (
+        np.concatenate(selected_real) if selected_real else real[:0].copy()
+    )
+    matched_cf = np.concatenate(selected_cf) if selected_cf else cf[:0].copy()
+    n_cf = len(matched_cf)
+    if n_cf < minimum_cf_rows:
+        return DetectabilityResult(None, "NOT_MEASURED", len(matched_real), n_cf)
+
+    X = np.concatenate([matched_real, matched_cf])
+    y = np.concatenate(
+        [np.zeros(len(matched_real), dtype=int), np.ones(n_cf, dtype=int)]
+    )
+    probabilities = np.empty(len(X), dtype=np.float64)
+    pair_indices = np.random.default_rng(42).permutation(n_cf)
+    for test_pairs in np.array_split(pair_indices, 5):
+        pair_mask = np.ones(n_cf, dtype=bool)
+        pair_mask[test_pairs] = False
+        train_pairs = np.flatnonzero(pair_mask)
+        train_indices = np.concatenate([train_pairs, n_cf + train_pairs])
+        test_indices = np.concatenate([test_pairs, n_cf + test_pairs])
+        model = make_pipeline(
+            StandardScaler(),
+            LogisticRegression(C=1.0, max_iter=1000, random_state=42),
+        )
+        model.fit(X[train_indices], y[train_indices])
+        probabilities[test_indices] = model.predict_proba(X[test_indices])[:, 1]
+    raw_auc = float(roc_auc_score(y, probabilities))
+    return DetectabilityResult(
+        max(raw_auc, 1.0 - raw_auc),
+        "MEASURED",
+        len(matched_real),
+        n_cf,
+    )
+
+
+def kth_grouped_gower_distance(
+    candidates: np.ndarray,
+    reference: np.ndarray,
+    *,
+    numerical: Sequence[int],
+    categorical_groups: Sequence[OneHotActionGroup],
+    k: int,
+) -> np.ndarray:
+    """Distance from each candidate to its k-th nearest reference row."""
+    rows = np.asarray(candidates, dtype=np.float64)
+    real = np.asarray(reference, dtype=np.float64)
+    if rows.ndim != 2 or real.ndim != 2 or rows.shape[1] != real.shape[1]:
+        raise ValueError("candidate and reference matrices must have matching columns")
+    if k < 1 or k > len(real):
+        raise ValueError("k must be within the reference row count")
+    distances = np.empty(len(rows), dtype=np.float64)
+    for index, row in enumerate(rows):
+        all_distances = grouped_gower_distance(
+            real, row, numerical, categorical_groups
+        )
+        distances[index] = np.partition(all_distances, k - 1)[k - 1]
+    return distances
 
 
 def prepare_novelty_models(

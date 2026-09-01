@@ -9,7 +9,9 @@ from experiments.zeroshot_cf.core.contracts import BenchmarkCase, GenerationResu
 from experiments.zeroshot_cf.core.validation import target_probabilities
 from experiments.zeroshot_cf.evaluation.metrics import (
     common_candidate_metrics,
+    detectability_auc,
     evaluate_diverse_candidate_sets,
+    kth_grouped_gower_distance,
     prepare_novelty_models,
 )
 from experiments.zeroshot_cf.evaluation.result import (
@@ -129,6 +131,37 @@ class PreparedEvaluator:
             isolation=self.isolation,
         )
         summary.update(metric_summary)
+        available_candidates = result.candidates[result.available]
+        neighbor_distances = kth_grouped_gower_distance(
+            available_candidates,
+            self.case.dataset.X_train,
+            numerical=self.case.dataset.schema.numerical,
+            categorical_groups=self.case.dataset.schema.categorical_groups,
+            k=min(self.spec.gower_neighbor_k, len(self.case.dataset.X_train)),
+        )
+        summary["plausibility_gower_kth_neighbor_mean"] = (
+            float(neighbor_distances.mean())
+            if len(neighbor_distances)
+            else float("nan")
+        )
+        target_grid = np.broadcast_to(
+            self.case.targets[:, None], result.available.shape
+        )
+        detectability = detectability_auc(
+            reference=self.case.dataset.X_train,
+            reference_labels=self.case.dataset.y_train,
+            counterfactuals=result.candidates[class_success],
+            counterfactual_targets=target_grid[class_success],
+            minimum_cf_rows=self.spec.detectability_min_cf_rows,
+        )
+        summary.update(
+            {
+                "detectability_auc": detectability.auc,
+                "detectability_status": detectability.status,
+                "detectability_n_reference": detectability.n_reference,
+                "detectability_n_counterfactual": detectability.n_counterfactual,
+            }
+        )
         summary.update(
             evaluate_diverse_candidate_sets(
                 factuals=factuals,
@@ -206,6 +239,7 @@ class PreparedEvaluator:
             "common.target_probabilities": probabilities,
             "common.class_success": class_success,
             "common.threshold_success": threshold_success,
+            "candidate.gower_kth_neighbor": neighbor_distances,
             **metric_arrays,
             **result.artifacts,
         }

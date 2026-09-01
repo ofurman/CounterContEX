@@ -180,7 +180,7 @@ class IdentityVersions:
     backend_implementation: str
     model_content_id: str
     checkpoint_content_ids: Mapping[str, str] = field(default_factory=dict)
-    evaluation_version: str = "countercontex.evaluation.v1"
+    evaluation_version: str = "countercontex.evaluation.v2"
     artifact_schema_version: str = "countercontex.artifacts.v1"
 
     def __post_init__(self) -> None:

@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 from experiments.zeroshot_cf.core.validation import deep_freeze, readonly_array
 
-METRIC_SCHEMA_VERSION = "countercontex.evaluation.v1"
+METRIC_SCHEMA_VERSION = "countercontex.evaluation.v2"
 Scalar = str | int | float | bool | None
 
 
@@ -22,6 +22,8 @@ class EvaluationSpec:
     primary_rank: int = 0
     lof_n_neighbors: int = 20
     isolation_forest_estimators: int = 100
+    detectability_min_cf_rows: int = 20
+    gower_neighbor_k: int = 5
 
     def __post_init__(self) -> None:
         if self.metric_version != METRIC_SCHEMA_VERSION:
@@ -36,6 +38,10 @@ class EvaluationSpec:
             raise ValueError("primary_rank must be non-negative")
         if self.lof_n_neighbors <= 0 or self.isolation_forest_estimators <= 0:
             raise ValueError("novelty estimator sizes must be positive")
+        if self.detectability_min_cf_rows < 2:
+            raise ValueError("detectability_min_cf_rows must be at least two")
+        if self.gower_neighbor_k <= 0:
+            raise ValueError("gower_neighbor_k must be positive")
 
 
 @dataclass(frozen=True)

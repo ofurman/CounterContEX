@@ -185,10 +185,27 @@ Availability and validity answer different questions:
 - `primary_*` fields evaluate only the configured primary rank; `set_*` and
   diversity fields evaluate the complete returned set.
 
-Proximity, sparsity, actionability, out-of-bounds, LOF, and Isolation Forest
-candidate metrics use valid returned candidates only. A failed best-effort row
-can be retained under `method.*` for diagnosis, but it is not a returned
-counterfactual and cannot enter common metric denominators.
+Grouped-Gower and continuous proximity use returned candidates that reach the
+target class. Sparsity, action-unit changes, immutable-feature actionability,
+out-of-bounds, LOF, Isolation Forest, and k-th-nearest grouped-Gower distance use
+all available returned candidates. A failed best-effort row can be retained
+under `method.*` for diagnosis, but it is not a returned counterfactual and
+cannot enter common metric denominators.
+
+Evaluation schema `countercontex.evaluation.v2` additionally stores
+`common.target_probabilities` with one slot per requested candidate (unavailable
+slots are NaN), and `candidate.gower_kth_neighbor` with one value per available
+candidate. The summary reports the mean k-th-neighbour distance; larger values
+mean weaker support in the benchmark reference distribution.
+
+`detectability_auc` is an orientation-independent, five-fold out-of-fold AUC for
+separating target-label-matched real training rows from returned target-class
+counterfactuals using a fixed standardized logistic regression. Values near 0.5
+mean the arms are indistinguishable to this probe; values near 1 mean easily
+separable. Always read it with `detectability_n_reference`,
+`detectability_n_counterfactual`, and `detectability_status`. When the matched CF
+arm has fewer than `detectability_min_cf_rows` (20 by default), AUC is null and
+status is `NOT_MEASURED`; empty or near-empty arms never receive a synthetic 0.5.
 
 ## Adding a counterfactual method
 
