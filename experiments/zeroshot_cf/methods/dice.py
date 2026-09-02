@@ -262,6 +262,7 @@ class DiceMethod:
 
     def prepare(self, context: MethodContext) -> PreparedDiceMethod:
         import dice_ml
+        import pandas as pd
 
         schema = context.feature_schema
         groups = tuple(schema.categorical_groups)
@@ -279,10 +280,19 @@ class DiceMethod:
         )
         train_frame = codec.encode(context.X_reference)
         train_frame[OUTCOME] = np.asarray(context.oracle.predict(context.X_reference))
+        categorical_ranges = {
+            group.name: [str(category) for category in range(len(group.columns))]
+            for group in codec.groups
+        }
+        for name, categories in categorical_ranges.items():
+            train_frame[name] = pd.Categorical(
+                train_frame[name], categories=categories
+            )
         data_interface = dice_ml.Data(
             dataframe=train_frame,
             continuous_features=list(codec.scalar_names),
             outcome_name=OUTCOME,
+            permitted_range=categorical_ranges,
         )
         model_interface = dice_ml.Model(
             model=DiceClassifierAdapter(context.oracle, codec),
@@ -290,6 +300,9 @@ class DiceMethod:
             model_type="classifier",
         )
         explainer = dice_ml.Dice(data_interface, model_interface, method="genetic")
+        for name, categories in categorical_ranges.items():
+            if name in explainer.labelencoder:
+                explainer.labelencoder[name].fit(categories)
         actionable_scalars = set(schema.actionable_scalars)
         actionable_groups = {group.name for group in schema.actionable_groups}
         features_to_vary = [

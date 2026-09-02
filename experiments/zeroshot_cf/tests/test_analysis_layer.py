@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import inspect
 import json
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -176,6 +178,70 @@ def test_significance_flags_effects_below_the_noise_floor():
 
     assert result.significant
     assert result.below_noise_floor
+
+
+def test_significance_covers_every_t1_metric_in_one_holm_family(
+    tmp_path, monkeypatch
+):
+    metrics = {
+        "primary_coverage": (0.9, 0.7, 0.6),
+        "primary_validity_returned_class": (0.8, 0.6, 0.5),
+        "primary_validity_returned_threshold": (0.7, 0.5, 0.4),
+        "proximity_grouped_gower": (0.1, 0.2, 0.3),
+        "action_unit_sparsity_mean": (1.0, 2.0, 3.0),
+    }
+    rows = []
+    for dataset_index in range(4):
+        for method_index, method in enumerate(("countercontex", "nice", "wachter")):
+            for seed in (17, 42):
+                row = {
+                    "dataset": f"dataset-{dataset_index}",
+                    "target_model": "classifier",
+                    "method": method,
+                    "seed": seed,
+                }
+                row.update(
+                    {
+                        metric: values[method_index]
+                        for metric, values in metrics.items()
+                    }
+                )
+                if (
+                    dataset_index == 3
+                    and method == "nice"
+                ):
+                    row["proximity_grouped_gower"] = np.nan
+                rows.append(row)
+    config = SimpleNamespace(
+        runs=[SimpleNamespace(method=SimpleNamespace(name="countercontex"))]
+    )
+    holm_calls = []
+    original_holm = builders.holm_wilcoxon
+
+    def record_holm(comparisons, **kwargs):
+        holm_calls.append(len(comparisons))
+        return original_holm(comparisons, **kwargs)
+
+    monkeypatch.setattr(builders, "load_published_cells", lambda *_: tuple(rows))
+    monkeypatch.setattr(builders, "load_matrix_config", lambda *_: config)
+    monkeypatch.setattr(builders, "holm_wilcoxon", record_holm)
+
+    output = builders.build_significance("artifacts", "matrix", tmp_path)
+    with output.open(newline="") as handle:
+        results = list(csv.DictReader(handle))
+
+    assert len(results) == len(metrics) * 2
+    assert holm_calls == [len(results)]
+    assert {row["metric"] for row in results} == set(metrics)
+    assert {row["comparison"] for row in results} == {"nice", "wachter"}
+    assert {
+        row["n"]
+        for row in results
+        if row["metric"] == "proximity_grouped_gower"
+        and row["comparison"] == "nice"
+    } == {"3"}
+    assert all(float(row["mean_difference"]) > 0 for row in results[:6])
+    assert all(float(row["mean_difference"]) < 0 for row in results[6:])
 
 
 def test_paper_builders_accept_only_artifact_and_destination_paths():

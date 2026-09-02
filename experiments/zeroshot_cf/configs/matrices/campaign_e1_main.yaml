@@ -1,6 +1,6 @@
 schema_version: countercontex.matrix.v1
 suite: campaign_e1_main
-output_root: experiments/zeroshot_cf/results/campaign/e1_main
+output_root: experiments/zeroshot_cf/results/campaign/e1_main_dice_v5
 datasets: &datasets
   [heloc, bank_marketing, give_me_some_credit, lending_club, adult_census, german_credit]
 methods:

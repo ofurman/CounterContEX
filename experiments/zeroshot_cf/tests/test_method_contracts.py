@@ -196,6 +196,18 @@ def test_dice_prepare_is_lazy_and_generate_restores_global_rng(monkeypatch):
             self.data = data
             self.model = model
             self.method = method
+            self.labelencoder = {
+                name: _Encoder(data.kwargs["dataframe"][name])
+                for name in data.kwargs["permitted_range"]
+            }
+
+    class _Encoder:
+        def __init__(self, values):
+            self.fit(values)
+
+        def fit(self, values):
+            self.classes_ = np.unique(np.asarray(values))
+            return self
 
     monkeypatch.setitem(
         sys.modules,
@@ -233,7 +245,22 @@ def test_dice_prepare_is_lazy_and_generate_restores_global_rng(monkeypatch):
     assert method.capabilities.enforces_actionability
     assert method.capabilities.supports_multiple_counterfactuals
     assert method.capabilities.requires_probabilities
-    prepared = method.prepare(_context())
+    context = _context()
+    reference_missing_kind_b = MethodContext(
+        context.X_reference[:3],
+        context.feature_schema,
+        context.oracle,
+    )
+    prepared = method.prepare(reference_missing_kind_b)
+    assert prepared.explainer.data.kwargs["permitted_range"] == {
+        "kind": ["0", "1"]
+    }
+    assert list(
+        prepared.explainer.data.kwargs["dataframe"]["kind"].cat.categories
+    ) == ["0", "1"]
+    np.testing.assert_array_equal(
+        prepared.explainer.labelencoder["kind"].classes_, ["0", "1"]
+    )
     assert isinstance(prepared, PreparedMethod)
     python_state = random.getstate()
     numpy_state = np.random.get_state()

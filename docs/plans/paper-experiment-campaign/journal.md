@@ -59,6 +59,7 @@ older n=1000 timing table NOT MEASURED on this host because its ignored source t
 those historical values remain attributed only to the frozen positioning draft/prior run.
 **Commit**: `HEAD` (this stage commit)
 
+
 ## 2026-09-01 22:55 -- Stage 2: Target-model registry -- DONE
 **Did**: Added a dataset-owned fixed target-model registry for LR, MLP, and XGBoost; added the
 lazy XGBoost discriminator arm and explicit locked dependency; replaced the orchestration
@@ -241,4 +242,85 @@ and raw-axis/type witnesses. It then found stale DONE markers could survive a re
 launchers now synchronously clear the exact marker they pass to the child, with a contract witness.
 Full suite 288 passed; matrix/launcher-test Ruff, launcher syntax, and diff checks passed. A fresh
 independent provenance audit follows before the stage commit.
+**Commit**: `HEAD` (this stage commit)
+
+## 2026-09-02 14:35 -- Stage 7: E1 main comparison -- DONE
+**Did**: Executed the full E1 k=1 comparison on `gx10-bdc5`: six datasets, three target-model
+families, five seeds, and six methods. Strict aggregation accepted exactly 540 cells under
+`results/campaign/e1_main_dice_v5`; the Stage 5 artifact-only analysis wrote 18 products under
+`results/campaign/analysis/e1_main`, including T1, F3, F6, and one joint Holm family over all
+five T1 metrics. D-9 records the DiCE categorical-vocabulary repair and `dice-v5` identity.
+Every canonical manifest retains prepare/generate/evaluate/write/total timings per cell.
+
+**Verification**: GATE all 540 run directories contain `COMPLETE`; each of six datasets has 90
+cells, each method 90, each seed 108, and all request exactly one counterfactual. All 540 resolve
+`countercontex.evaluation.v2`; implementations are CounterContEx v3, DiCE v5, FACE v1,
+Growing Spheres v1, NICE v1, and Wachter v1. GATE a fresh production case load for every one of
+the 18 dataset-family pairs reproduced the exact single `model_content_id` present in its 30
+manifests; no wrong-family cache was observed. Strict aggregation reported 540/540, so cells
+absent by the Stage 2 expected-failure policy: **0**.
+
+**Report**: Across the 18 dataset-family blocks, T1 method means +/- sample SD are shown below;
+the metrics are primary coverage, returned-class validity, threshold validity, grouped-Gower
+proximity, and action-unit changes, respectively:
+
+- CounterContEx: .997111 +/-.008547; 1.000000 +/-0; .124030 +/-.160885;
+  .055860 +/-.035722; 1.288793 +/-.461191.
+- DiCE: .976493 +/-.038741; 1.000000 +/-0; .111434 +/-.096086;
+  .091708 +/-.046491; 1.687267 +/-.555783.
+- FACE: 1.000000 +/-0; 1.000000 +/-0; .196667 +/-.214299;
+  .110146 +/-.063182; 4.360259 +/-2.001345.
+- Growing Spheres: .999911 +/-.000377; 1.000000 +/-0; .116507 +/-.125890;
+  .060882 +/-.032454; 1.313916 +/-.667387.
+- NICE: .916685 +/-.164459; 1.000000 +/-0; .142359 +/-.141368;
+  .055139 +/-.032719; 1.574491 +/-.549634.
+- Wachter: .985833 +/-.036554; 1.000000 +/-0; .056520 +/-.067908;
+  .060144 +/-.034712; 1.200064 +/-.336631.
+
+The 25 jointly Holm-corrected CounterContEx-minus-baseline tests use n=18 paired blocks each.
+Significant results are coverage vs DiCE (difference +.020619, corrected p=.023501), proximity
+vs DiCE (-.035848, p=.002563) and FACE (-.054287, p=.001907), and action-unit changes vs DiCE
+(-.398474, p=.009232) and FACE (-3.071466, p=.004510). The other 20 corrected p-values are
+non-significant; exact statistics, effects, per-metric noise-floor flags, and p-values are in
+`significance.csv`. F3 truthfully ties every method at average rank 3.5 because its frozen
+returned-class-validity metric is 1.0 for every block; F6 contains 120,709 candidate probability
+rows.
+
+Canonical phase totals are prepare 42.072 s, generate 45,856.782 s, evaluate 520.188 s, write
+5.468 s, and total 46,447.199 s (12.9020 h). Mean total seconds/cell +/- SD by method are
+CounterContEx 469.813819 +/-463.589587, DiCE 25.965897 +/-11.375246, FACE 12.594671
++/-10.861771, Growing Spheres 2.163561 +/-1.338030, NICE 1.689811 +/-1.467083, and Wachter
+3.852232 +/-1.610667. Including published superseded DiCE v2/v3/v4 attempts gives a measured
+compute-consumption lower bound of 14.3626 h; canonical artifact wall span is 14.6555 h.
+
+**Artifacts**: aggregate SHA-256 `604eebe8...bcf991`; T1 `5cb787a9...615f1`; F3 CSV
+`1f3d2cb8...abd0`; F6 CSV `0c2446ed...16ba9c`; significance `9bcc3932...f53dc`.
+Historical evidence remains untouched in `e1_main` (DiCE v2 failure), `e1_main_dice_v3`
+(DiCE v3 failure), and `e1_main_dice_v4` (DiCE v4 failure); logs are `launch/stage07.log`,
+`stage07_dice_v4.log`, and `stage07_dice_v5.log`. Recoverably quarantined copied obsolete runs
+remain in the adjacent v3/v5 quarantine roots and never entered strict aggregation.
+
+**Provenance**: Membership came from the matrix's freshly resolved 540 cell IDs and strict
+`ArtifactStore.aggregate_expected`, not directory count alone. Evaluation and implementation
+versions, scientific k, model IDs, and timings were read from each canonical manifest. Model IDs
+were independently recomputed through `_default_case_loader`; loading a classifier from another
+family turns that equality red. T1 and statistics read only canonical artifacts; deleting a
+marker, changing a scientific field, or omitting a seed makes the loader reject the root. The
+compute lower bound sums canonical timings once plus only superseded DiCE implementation rows,
+avoiding copied non-DiCE double counting.
+
+**Problems**: The original run stopped at 470 cells when DiCE rejected German Credit `purpose`;
+v3 declared permitted ranges but then stopped on Give Me Some Credit with an unseen encoder
+label. v4 refit encoders but its German query dummy width no longer matched the prebuilt KD-tree.
+The focused missing-category witness led to v5 categorical dtype metadata plus full encoders;
+the exact German LR/seed-17 n=120 smoke passed in 13.27 s before the resumable full run. All
+failed roots were preserved. The first E1 analysis also exposed a Stage 5 builder that tested
+only the universally tied returned-class validity; TDD expanded it to all five T1 metrics in one
+Holm family. Full suite: 290 passed; 24 focused tests, changed-file Ruff, diff check, offline CLI,
+540-row dry-run, strict aggregation, and analysis rebuild passed. A fresh independent audit
+accepted exact 540/540 membership, production-recomputed all 18 model fingerprints, validated
+every available DiCE-v5 candidate's target class, atomic groups, immutable columns, and NaN
+shortages, rebuilt T1/F3/F6/significance byte-identically, and independently reproduced the
+single 25-test Holm family. It passed 27 focused tests and the 290-test full suite; its only
+caveat is the disclosed, valid but uninformative F3 tie.
 **Commit**: `HEAD` (this stage commit)

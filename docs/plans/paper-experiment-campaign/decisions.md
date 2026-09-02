@@ -94,3 +94,14 @@ it never upgrades, rewrites, or mixes v1 and v2 values in one seed group.
 "none — scoring pass over E1 arrays"; Stage 11 likewise forbids an E8 generation run.
 **Class**: measurement (amendable). The declared count was arithmetically inconsistent with the
 catalog; preserving nine avoids fabricating a generation protocol for a read-only evaluation.
+
+### D-9: Declare categorical vocabularies from the action schema in DiCE
+**Date**: 2026-09-02 - **Stage**: 7
+**Options**: A) let DiCE infer categories from the selected reference rows B) declare every
+schema category without adding synthetic reference observations
+**Chosen**: B
+**Rationale**: E1 exposed legal factual categories absent from a finite reference slice. The
+adapter now supplies the schema vocabulary as permitted ranges, pandas categorical metadata,
+and label-encoder classes, keeping query and KD-tree dimensions aligned without fabricating
+training rows or leaking factuals. This changes existing behavior, so the implementation is
+`dice-v5`; v2--v4 artifacts remain historical evidence under separate roots.

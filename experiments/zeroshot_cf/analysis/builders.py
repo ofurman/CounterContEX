@@ -302,25 +302,46 @@ def build_significance(
 ) -> Path:
     cells = load_published_cells(output_root, matrix_config)
     config = load_matrix_config(matrix_config)
-    reference = config.runs[0].method.name
-    metric = "primary_validity_returned_class"
-    frame = _numeric(cells, metric)
-    grid = frame.groupby(
-        ["dataset", "target_model", "method"], as_index=False
-    )[metric].mean()
-    pivot = grid.pivot(
-        index=["dataset", "target_model"], columns="method", values=metric
-    )
-    comparisons = {
-        method: (pivot[reference].to_numpy(), pivot[method].to_numpy())
-        for method in pivot.columns
-        if method != reference
-    }
-    seed_spread = frame.groupby(["dataset", "target_model", "method"])[metric].std()
-    noise_floor = float(seed_spread.fillna(0.0).max())
-    results = holm_wilcoxon(comparisons, noise_floor=noise_floor)
+    reference = "countercontex"
+    if reference not in {run.method.name for run in config.runs}:
+        raise ValueError("significance analysis requires countercontex")
+    comparisons = {}
+    identities = {}
+    noise_floors = {}
+    for metric in _TABLE_METRICS["t1_main"]:
+        frame = _numeric(cells, metric)
+        grid = frame.groupby(
+            ["dataset", "target_model", "method"], as_index=False
+        )[metric].mean()
+        pivot = grid.pivot(
+            index=["dataset", "target_model"], columns="method", values=metric
+        )
+        seed_spread = frame.groupby(
+            ["dataset", "target_model", "method"]
+        )[metric].std()
+        noise_floor = float(seed_spread.fillna(0.0).max())
+        for method in pivot.columns:
+            if method == reference:
+                continue
+            key = f"{metric}:{method}"
+            comparisons[key] = (
+                pivot[reference].to_numpy(),
+                pivot[method].to_numpy(),
+            )
+            identities[key] = (metric, method)
+            noise_floors[key] = noise_floor
+    results = holm_wilcoxon(comparisons, noise_floor=0.0)
+    rows = []
+    for result in results:
+        metric, method = identities[result.comparison]
+        row = {"metric": metric, **result.__dict__}
+        row["comparison"] = method
+        row["below_noise_floor"] = (
+            abs(result.mean_difference) < noise_floors[result.comparison]
+        )
+        rows.append(row)
     output = Path(output_dir) / "significance.csv"
-    write_rows(output, tuple(result.__dict__ for result in results))
+    write_rows(output, tuple(rows))
     return output
 
 
