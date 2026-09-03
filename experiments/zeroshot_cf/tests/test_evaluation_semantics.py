@@ -17,6 +17,9 @@ from experiments.zeroshot_cf.core.contracts import (
     PreparedDataset,
 )
 from experiments.zeroshot_cf.evaluation import EvaluationSpec, Evaluator
+from experiments.zeroshot_cf.evaluation.metrics import (
+    evaluate_diverse_candidate_sets,
+)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "architecture_v1" / "semantic_cases.json"
 
@@ -235,3 +238,42 @@ def test_prepare_fits_novelty_models_once_for_repeated_evaluation(monkeypatch):
     prepared.evaluate(result)
     prepared.evaluate(result)
     assert calls == {"prepare": 1, "lof_fit": 1, "isolation_fit": 1}
+
+
+def test_set_action_jaccard_is_a_distance_between_changed_feature_sets():
+    def _sets(candidates):
+        return evaluate_diverse_candidate_sets(
+            factuals=np.array([[0.5, 0.5]]),
+            candidates=np.asarray(candidates, dtype=float),
+            available=np.array([[True, True]]),
+            class_success=np.array([[True, True]]),
+            threshold_success=np.array([[True, True]]),
+            numerical=(0, 1),
+            categorical_groups=(),
+        )
+
+    disjoint = _sets([[[0.9, 0.5], [0.5, 0.9]]])
+    assert disjoint["set_action_jaccard_mean"] == 1.0
+    assert disjoint["set_action_jaccard_min"] == 1.0
+    assert disjoint["set_coverage_at_k"] == 1.0
+    assert disjoint["set_returned_count_mean"] == 2.0
+
+    identical = _sets([[[0.9, 0.5], [0.8, 0.5]]])
+    assert identical["set_action_jaccard_mean"] == 0.0
+    assert identical["set_pairwise_gower_mean"] > 0.0
+
+
+def test_set_coverage_at_k_requires_every_requested_slot():
+    available = np.array([[True, True, True], [True, True, False]])
+    report = evaluate_diverse_candidate_sets(
+        factuals=np.array([[0.5, 0.5], [0.5, 0.5]]),
+        candidates=np.full((2, 3, 2), 0.5),
+        available=available,
+        class_success=available,
+        threshold_success=available,
+        numerical=(0, 1),
+        categorical_groups=(),
+    )
+
+    assert report["set_coverage_at_k"] == 0.5
+    assert report["set_returned_count_mean"] == 2.5
