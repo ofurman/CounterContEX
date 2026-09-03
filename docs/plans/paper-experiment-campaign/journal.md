@@ -390,3 +390,98 @@ A fresh independent audit reproduced exact membership, all 18 identity diffs, ta
 timings, hashes, byte-identical T2/T3 rebuilds, amendment mechanics, and the 292-test gate; its
 interpretation caveats are incorporated above.
 **Commit**: `HEAD` (this stage commit)
+
+## 2026-09-03 12:35 -- Stage 8 erratum: E2 action-Jaccard orientation and normalized diversity -- DONE
+**Did**: Corrected the orientation under which the Stage 8 E2 set metrics were read, documented
+every `set_*` metric in the suite README, added a proximity-normalized diversity column to T2,
+and prepared the E2b diversity-budget sweep without executing it. No metric name, denominator,
+population, evaluation version, or published artifact changed; the Stage 8 entry above is left
+verbatim and Stage 8 stays DONE.
+
+The Stage 8 REPORT stated: "CounterContEx has higher action overlap (+.133904) and lower pairwise
+distance (-.030302), while its coverage, threshold validity, and proximity guardrails are better."
+`set_action_jaccard_mean` is not an overlap. `diverse_search.action_set_jaccard_distance` returns
+`1 - |A & B| / |A | B|`, a Jaccard **distance** between the changed-feature sets of two
+candidates, so larger values mean the candidates act on more disjoint feature sets. The corrected
+reading of the same published values is that CounterContEx is **more** action-diverse than DiCE
+(`.601143` vs `.467239`, +.133904) and less value-diverse (`set_pairwise_gower_mean` `.056783` vs
+`.087085`, -.030302). The sign of the pairwise-Gower statement was already correct; only the
+action-Jaccard direction was inverted. The descriptive diversity conclusion therefore splits by
+axis rather than being uniformly unsupported: E2 supports an action-diversity advantage and
+contradicts a value-diversity advantage, with coverage, threshold validity, and proximity
+guardrails better for CounterContEx. No inferential E2 hypothesis test is claimed, and no
+published number was recomputed to reach this reading.
+
+Value diversity is also confounded with proximity: DiCE candidate sets sit farther from their
+factual (`proximity_grouped_gower` `.099626` vs `.056624`), and a farther set spreads more for
+free. `set_pairwise_gower_ratio = set_pairwise_gower_mean / proximity_grouped_gower` is now
+derived per published cell in the analysis layer and reported in T2. Dividing the two
+already-published six-dataset means gives roughly `1.0028` for CounterContEx and `.8741` for
+DiCE, which inverts the raw spread ordering; that is arithmetic on published aggregates, not the
+per-cell aggregate the analysis layer produces.
+
+**Verification**: A focused evaluation witness freezes the orientation directly through
+`evaluate_diverse_candidate_sets`: two candidates changing disjoint single features give
+`set_action_jaccard_mean == set_action_jaccard_min == 1.0`, two candidates changing the same
+single feature to different values give `set_action_jaccard_mean == 0.0` with
+`set_pairwise_gower_mean > 0`. A second witness freezes `set_coverage_at_k` as "every requested
+slot returned", not "at least one": three of three and two of three available slots over two
+factuals give `set_coverage_at_k == 0.5` and `set_returned_count_mean == 2.5`. Both passed
+against the unmodified evaluator, so the metric is what this erratum assumes. Analysis witnesses
+cover the ratio derivation (0.05/0.10 = 0.5; null for zero, missing, or non-finite inputs; input
+keys preserved), its appearance as `set_pairwise_gower_ratio_mean` after seed aggregation, and
+the new T2 column tuple. E2b matrix witnesses assert 36 cells, cross-matrix `cell_id` uniqueness
+over all ten campaign matrices (1420 cells), registry-valid method configs, the `stage08b.DONE`
+marker contract, and that every E2b run's scientific payload equals its dataset-and-seed-matched
+E2 CounterContEx payload after removing `diversity.max_gower_ratio`, with E2b ratios exactly
+{2.5, 4.0}. Gates: Ruff clean on every changed file, the offline Experiment 9 CLI, and 36-row and
+60-row dry-runs for E2b and E2 with no method execution. The suite collects 297 tests against the
+campaign branch's 292, and all 5 added tests pass. This workstation cannot run 6 of them:
+`test_data_cleaning.py` (5) and `test_dataset_contract.py` (1) fail with
+`ModuleNotFoundError: No module named 'cel'` because the gitignored `vendor/` checkout is absent
+here, and they fail identically on unmodified `origin/paper-experiment-campaign` (286 passed, 6
+failed), so 291 passed / 6 environment-blocked is the same result as the branch baseline plus the
+5 new tests. The 292-passed figure in the Stage 8 entry was measured on the GB10 host, where the
+pinned CEL checkout is present; re-run `uv run pytest -q` there to confirm 297 passed.
+`uv run ruff format .` reformats 24 files that this branch does not touch, because the locked Ruff
+(0.15.12) formats differently from whatever formatted the branch; that churn was reverted, leaving
+the pre-existing drift and the 11 pre-existing `ruff check experiments/zeroshot_cf` findings (23
+before formatting) untouched and unrelated to this erratum. `git status` shows nothing under
+`results/`, `models/`, or `vendor/`.
+
+**Report**: E2b is prepared and **not executed**. Its estimated cost is 6 to 9 GPU hours,
+Lending-Club-dominated, and launching it requires an explicit instruction.
+
+**Provenance**: The orientation correction was read from
+`experiments/zeroshot_cf/diverse_search.py:action_set_jaccard_distance` and the pairwise loop in
+`experiments/zeroshot_cf/evaluation/metrics.py:evaluate_diverse_candidate_sets`, then frozen by
+the witness above; a reversed convention would turn that test red. The corrected E2 values are
+the Stage 8 REPORT numbers themselves, re-read under the correct sign. The ratio-of-means figures
+were computed from those two published mean pairs and are labelled as such.
+
+The Step 4 analysis rebuild of E2 into
+`experiments/zeroshot_cf/results/campaign/analysis_e2_revised` is **NOT MEASURED**. This
+workstation has no `experiments/zeroshot_cf/results/` tree at all: the E2 artifacts, the Stage 8
+`analysis/` products, and `launch/stage08.DONE` live only on the GB10 host, and `results/` is
+gitignored so the branch checkout could not carry them. Consequently the new `t2_diversity.csv`
+SHA-256 and the per-cell six-dataset means of `set_pairwise_gower_ratio` are unavailable and are
+not substituted by the ratio-of-published-means above. Running
+
+```bash
+HF_HUB_OFFLINE=1 uv run python -m experiments.zeroshot_cf.cli analyze \
+  --config experiments/zeroshot_cf/configs/matrices/campaign_e2_diverse.yaml \
+  --output experiments/zeroshot_cf/results/campaign/analysis_e2_revised
+```
+
+on the host holding `campaign/e2_diverse` completes this entry; strict aggregation must accept
+60/60 cells and the fresh `--output` keeps the Stage 8 `analysis/` products byte-identical.
+
+**Problems**: The Stage 8 reading inverted a distance into an overlap, which reversed one of the
+two E2 diversity claims. Root cause: the metric name says "jaccard" without a direction and the
+suite README documented neither the set metrics nor their orientation. Resolved by freezing the
+orientation in a test and documenting every `set_*` metric with its denominator and direction, so
+the next reader cannot take the sign from the name alone. Step 4 could not run for lack of local
+artifacts and is recorded as NOT MEASURED rather than approximated. Matched-population diversity
+is deferred as B-3.
+
+**Commit**: `HEAD` (this erratum commit)

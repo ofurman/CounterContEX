@@ -123,3 +123,49 @@ resolved backend implementation, and backend-owned checkpoint content IDs.
 only the resolved implementation would contradict the scientific spec and content-addressed identity.
 **Class**: measurement (amendable). The original field count omitted required backend provenance;
 the replacement preserves the intended one-axis ablation and makes all backend content auditable.
+
+### D-12: Fix the set-metric orientation in the analysis layer, not the evaluator
+**Date**: 2026-09-03 - **Stage**: 8 (erratum)
+**Options**: A) rename or re-sign the set metrics so the name carries its direction
+B) leave every stored metric untouched, freeze its orientation in a test, document it, and add
+the proximity normalization as an analysis-only derived value
+**Chosen**: B
+**Rationale**: Renaming or re-signing `set_action_jaccard_*` would break the published E2
+artifacts and require an evaluation-version bump, and Stage 3 permits exactly one, already spent.
+The defect was in the reading, not the measurement.
+
+Orientation of record for every set metric, as implemented and now documented in
+`experiments/zeroshot_cf/README.md`:
+
+- `set_coverage_at_k`: fraction of factuals whose **every** requested slot returned a candidate
+  (`returned_count >= k`), availability only. Higher is better.
+- `set_returned_count_mean`: mean returned candidates per factual. Higher is more available.
+- `set_action_jaccard_mean` / `set_action_jaccard_min`: mean and minimum pairwise Jaccard
+  **distance** between changed-feature sets, one-hot groups counting as one unit. 0 means every
+  candidate changes the same features, 1 means disjoint sets. Higher is more action-diverse.
+- `set_pairwise_gower_mean` / `set_pairwise_gower_min`: mean and minimum grouped-Gower distance
+  between pairs of returned candidates. Higher is more value-diverse.
+- Denominator for every pairwise set metric: pairs of available candidates, so only factuals with
+  at least two returned candidates contribute. Set metrics do not condition on class or threshold
+  validity.
+
+`set_pairwise_gower_ratio = set_pairwise_gower_mean / proximity_grouped_gower` is derived by
+`analysis.core.derive_cell_metrics` from summary fields that already exist, is null when
+proximity is missing, non-finite, or non-positive, and is never written into `summary.csv` or any
+manifest. It is not part of any scientific identity, so no evaluation version changed and every
+historical artifact remains readable and byte-identical. It exists because raw pairwise Gower is
+confounded with proximity: a candidate set farther from its factual spreads more for free.
+
+### D-13: Omit the 1.5 arm from E2b and reuse the E2 cells for that point
+**Date**: 2026-09-03 - **Stage**: 8 (erratum)
+**Options**: A) sweep `diversity.max_gower_ratio` over {1.5, 2.5, 4.0} inside E2b
+B) sweep {2.5, 4.0} and treat the E2 CounterContEx cells as the 1.5 point
+**Chosen**: B
+**Rationale**: E2b holds every scientific field byte-identical to the E2 CounterContEx arm and
+varies only `diversity.max_gower_ratio`. A 1.5 arm at seeds 17, 42, and 101 would therefore
+resolve to exactly the same `cell_id` as the corresponding E2 cells, colliding in the
+cross-matrix uniqueness contract and re-running work whose artifacts already exist under
+`campaign/e2_diverse`. Reusing the E2 cells keeps the sweep at one axis, keeps 36 new cells, and
+keeps the 1.5 point on published evidence rather than a duplicate identity. The cost is that the
+1.5 point carries five seeds while the new arms carry three, so budget comparisons must be read
+on the shared seeds {17, 42, 101}.

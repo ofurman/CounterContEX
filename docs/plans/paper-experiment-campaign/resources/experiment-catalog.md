@@ -9,6 +9,7 @@ same place.
 |---|---|---|---|---|
 | E1 | Main comparison, k=1 | 7 | `campaign_e1_main.yaml` | `campaign/e1_main` |
 | E2 | Diverse sets, k=3 vs DiCE | 8 | `campaign_e2_diverse.yaml` | `campaign/e2_diverse` |
+| E2b | Diversity-budget sweep, k=3 | 8 (erratum) | `campaign_e2b_budget.yaml` | `campaign/e2b_budget` |
 | E3 | Backend ablation | 8 | `campaign_e3_backend.yaml` | `campaign/e3_backend` |
 | E4 | Confidence / τ Pareto | 9 | `campaign_e4_confidence.yaml` | `campaign/e4_confidence` |
 | E5 | Search + diversity ablations | 10 | `campaign_e5_search.yaml` | `campaign/e5_search` |
@@ -33,6 +34,10 @@ same place.
 | B9 | No qualitative example | Stage 12 |
 | B10 | No robustness to model multiplicity | Stage 11 |
 | B11 | TabICL-specific, not FM-general | Stage 11 |
+
+E2b is a prepared extension rather than a plan stage: 36 cells (six datasets x three seeds x
+`diversity.max_gower_ratio` in {2.5, 4.0}), with the E2 CounterContEx cells supplying the 1.5
+point (see D-13). It must not be launched without an explicit instruction.
 
 B12 (directional constraints), B13 (multiclass), B14 (formal statement) and B15 (human
 evaluation) are **out of scope for this plan** — B12 and B13 are method extensions rather than
