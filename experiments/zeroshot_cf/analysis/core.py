@@ -216,6 +216,9 @@ def aggregate_seeds(
             "method": identity["method"]["name"],
             "method_variant": identity["method"]["variant"],
             "n_counterfactuals": identity["method"]["n_counterfactuals"],
+            "backend": identity["method"].get("params", {})
+            .get("foundation", {})
+            .get("backend"),
             "seed_n": len(members),
         }
         metric_names = sorted(set.intersection(*(set(item) for item in members)))

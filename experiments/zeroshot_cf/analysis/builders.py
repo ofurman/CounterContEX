@@ -238,6 +238,8 @@ _TABLE_METRICS = {
     "t2_diversity": (
         "set_coverage_at_k",
         "set_validity_returned_class",
+        "set_validity_returned_threshold",
+        "proximity_grouped_gower",
         "set_action_jaccard_mean",
         "set_pairwise_gower_mean",
     ),
@@ -262,6 +264,7 @@ def _build_table(
         "target_model",
         "method",
         "method_variant",
+        "backend",
         "n_counterfactuals",
         "seed_n",
     ]

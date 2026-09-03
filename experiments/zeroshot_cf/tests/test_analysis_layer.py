@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 from experiments.zeroshot_cf.analysis import (
     builders,
+    core,
     holm_wilcoxon,
     load_published_cells,
 )
@@ -262,3 +263,40 @@ def test_paper_builders_accept_only_artifact_and_destination_paths():
             "matrix_config",
             "output_dir",
         )
+
+
+def test_t2_reports_validity_and_proximity_with_diversity():
+    assert builders._TABLE_METRICS["t2_diversity"] == (
+        "set_coverage_at_k",
+        "set_validity_returned_class",
+        "set_validity_returned_threshold",
+        "proximity_grouped_gower",
+        "set_action_jaccard_mean",
+        "set_pairwise_gower_mean",
+    )
+
+
+def test_seed_aggregation_preserves_backend_identity(monkeypatch):
+    rows = []
+    for backend in ("tabicl", "empirical"):
+        scientific = {
+            "dataset": {"name": "heloc"},
+            "target_model": {"name": "classifier"},
+            "method": {
+                "name": "countercontex",
+                "variant": "default",
+                "n_counterfactuals": 3,
+                "params": {"foundation": {"backend": backend}},
+            },
+        }
+        rows.append(
+            {
+                "scientific_group": canonical_json(scientific),
+                "coverage": 1.0,
+            }
+        )
+    monkeypatch.setattr(core, "load_published_cells", lambda *_: tuple(rows))
+
+    aggregated = core.aggregate_seeds("artifacts", "matrix")
+
+    assert {row["backend"] for row in aggregated} == {"tabicl", "empirical"}

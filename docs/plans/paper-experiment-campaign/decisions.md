@@ -105,3 +105,21 @@ adapter now supplies the schema vocabulary as permitted ranges, pandas categoric
 and label-encoder classes, keeping query and KD-tree dimensions aligned without fabricating
 training rows or leaking factuals. This changes existing behavior, so the implementation is
 `dice-v5`; v2--v4 artifacts remain historical evidence under separate roots.
+
+### D-10: Disable unsupported proposal features in the backend ablation
+**Date**: 2026-09-02 - **Stage**: 8
+**Options**: A) compare each backend's maximum feature set B) hold search fixed at the shared capability set
+**Chosen**: B
+**Rationale**: The empirical backend does not implement confidence conditioning or joint
+scoring. E3 disables both in the TabICL arm too, so the comparison changes the proposal backend
+rather than simultaneously changing search policy.
+
+### D-11: Amend E3 resolved-identity difference gate
+**Date**: 2026-09-02 - **Stage**: 8 - **Type**: AMENDMENT
+**Original**: "The TabICL and empirical arms of E3 differ in exactly one resolved scientific field, `backend_implementation`."
+**Replacement**: Paired arms differ only in the backend identity bundle: declared backend,
+resolved backend implementation, and backend-owned checkpoint content IDs.
+**Evidence**: A leaf diff of completed matched manifests found exactly those four paths; requiring
+only the resolved implementation would contradict the scientific spec and content-addressed identity.
+**Class**: measurement (amendable). The original field count omitted required backend provenance;
+the replacement preserves the intended one-axis ablation and makes all backend content auditable.

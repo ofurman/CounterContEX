@@ -35,10 +35,11 @@ outcome is a legitimate result and must be reported if it occurs.** It is a REPO
 
 ## Verification
 
-- [ ] GATE The TabICL and empirical arms of E3 differ in exactly one resolved scientific field,
-      `backend_implementation` — read by diffing the two arms' resolved identities from their
-      manifests. A second differing field means the ablation is confounded and the result is not
-      about the backend.
+- [ ] GATE ~~The TabICL and empirical arms of E3 differ in exactly one resolved scientific field,
+      `backend_implementation`~~ -> Paired arms differ only in the backend identity bundle:
+      declared backend, resolved backend implementation, and backend-owned checkpoint content
+      IDs — read by diffing the two arms' scientific specifications and resolved identities from
+      their manifests. Any non-backend difference means the ablation is confounded.
 - [ ] REPORT E2 set metrics for CounterContEx and DiCE, and the E3 TabICL-vs-empirical difference
       per metric compared against the Stage 1 noise floor — record in `journal.md`, whichever way
       it lands.

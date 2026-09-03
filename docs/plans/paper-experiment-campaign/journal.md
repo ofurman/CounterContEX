@@ -324,3 +324,69 @@ shortages, rebuilt T1/F3/F6/significance byte-identically, and independently rep
 single 25-test Holm family. It passed 27 focused tests and the 290-test full suite; its only
 caveat is the disclosed, valid but uninformative F3 tie.
 **Commit**: `HEAD` (this stage commit)
+
+## 2026-09-03 03:20 -- Stage 8: E2/E3 diverse sets and backend ablation -- DONE
+**Did**: Executed E2 (six datasets x five seeds x CounterContEx/DiCE, k=3) and E3
+(six datasets x three seeds x TabICL/empirical, k=3) on `gx10-bdc5`. Strict aggregation
+accepted 60/60 E2 cells and 36/36 E3 cells. The artifact-only analysis wrote T2 and T3 under
+`results/campaign/analysis/`. TDD corrected two Stage 5 presentation defects exposed by these
+results: T2 now includes threshold validity and proximity, and seed aggregation preserves the
+backend label. D-10 records the shared-capability comparison; both arms use sparse search, so
+joint scoring is inactive, and both resolve `confidence_quantiles: null`.
+
+**Verification**: GATE all 18 dataset/seed E3 manifest pairs have identical scientific and
+resolved leaf values except the backend identity bundle: declared backend, resolved backend
+implementation, and the two TabICL checkpoint hashes (absent for empirical). No pair had a
+search, diversity, quantile, evaluation, target-model, dataset, seed, or method-implementation
+difference. D-11 amends the original one-field measurement gate because content-addressed
+backend provenance necessarily occupies those four leaf paths. All cells use evaluation v2 and
+request k=3; both strict aggregations, both analysis rebuilds, offline CLI, 60/36-row dry-runs,
+changed-file Ruff, and the 292-test full suite passed.
+
+**Report**: E2 means across the six dataset rows, in the required order of set coverage,
+returned-class validity, threshold validity, grouped-Gower proximity, action Jaccard, and
+pairwise Gower, are CounterContEx `.999333, 1.0, .134516, .056624, .601143, .056783` and DiCE
+`.665778, 1.0, .108628, .099626, .467239, .087085`. The diversity hypothesis is not supported
+descriptively (no inferential E2 hypothesis test is claimed):
+CounterContEx has higher action overlap (+.133904) and lower pairwise distance (-.030302), while
+its coverage, threshold validity, and proximity guardrails are better.
+
+For E3, TabICL-minus-empirical differences are recorded before their Stage 1 spread and verdict:
+coverage `-.003333`, spread `0`, exceeds spread adversely; threshold validity `+.005716`, spread
+`0`, exceeds spread favourably; grouped-Gower distance `+.007875`, spread `0`, exceeds spread
+adversely; neighbour-support distance `-.000432`, Stage 1 spread **NOT MEASURED** because the v1
+noise-floor artifacts predate that v2 metric, so no noise-floor verdict is claimed. Returned-class
+validity differs by exactly `0` and is a null. Threshold effects are heterogeneous: Adult
+`-.047204`, Bank `+.002945`, German `-.002778`, Give Me Some Credit `-.006667`, HELOC
+`-.001333`, and Lending Club `+.089333`. Thus TabICL is not decorative in the numerical sense,
+but E3 does not show a robust quality advantage: its average threshold gain is Lending-Club-led,
+proximity worsens on five of six datasets, coverage falls on HELOC, and mean total time rises
+from 126.889 s/cell to 1025.999 s/cell (about 8.09x). Actionability is 1.0 for both; TabICL-minus-
+empirical out-of-bounds fraction is +.000667, action Jaccard -.028452, and pairwise Gower -.000249.
+E2 totals 6.90165 h and E3 5.76444 h; generation accounts for 24659.787 s and 20637.625 s.
+The zero Stage 1 spreads are a narrow HELOC/k=1 repeatability reference, not a six-dataset k=3
+uncertainty bound; exceeding them is not presented as statistical significance.
+
+**Artifacts**: E2 aggregate SHA-256 `30ea0d5c...07a29f9`; E3 aggregate
+`4683d367...960a49`; T2 `68cf8529...7223e`; T3 `c2bdfd9a...c68391bb`. The managed launcher
+published `launch/stage08.DONE` only after both strict aggregates; the execution log is
+`launch/stage08.log`.
+
+**Provenance**: Membership was re-resolved from each matrix and checked by strict
+`ArtifactStore.aggregate_expected`, so a missing, extra, partial, duplicate, or mismatched cell
+turns the gate red. E2/E3 values came from typed canonical summaries through the path-only
+analysis layer; changing a metric or deleting a marker makes loading fail. The identity gate was
+computed from leaf diffs of every matched manifest pair, not method labels. Stage 1 spreads came
+from its published five-seed compatibility aggregate; the missing v2 plausibility value is not
+substituted. Timings came from every canonical manifest and preserve prepare/generate/evaluate/
+write/total phases.
+
+**Problems**: The literal identity gate omitted the declared backend and backend-owned content
+hashes; the amendment preserves its one-axis intent without weakening scientific identity. T2
+omitted two required guardrails and T3 dropped backend labels; focused failing witnesses led to
+the minimal analysis fixes. The E2 diversity hypothesis and a broad E3 quality benefit were not
+supported; both outcomes are reported unchanged. Full suite: 292 passed.
+A fresh independent audit reproduced exact membership, all 18 identity diffs, table values,
+timings, hashes, byte-identical T2/T3 rebuilds, amendment mechanics, and the 292-test gate; its
+interpretation caveats are incorporated above.
+**Commit**: `HEAD` (this stage commit)
