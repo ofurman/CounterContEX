@@ -200,6 +200,28 @@ Availability and validity answer different questions:
 - `valid_success_rate_*_per_factual` counts factuals with at least one success.
 - `primary_*` fields evaluate only the configured primary rank; `set_*` and
   diversity fields evaluate the complete returned set.
+- `set_coverage_at_k` is the fraction of factuals whose every requested slot
+  returned a candidate (`returned_count >= k`). It measures availability only,
+  not validity.
+- `set_returned_count_mean` is the mean number of returned candidates per
+  factual.
+- `set_action_jaccard_mean` and `set_action_jaccard_min` are the mean and the
+  minimum pairwise Jaccard **distance** between the changed-feature sets of the
+  returned candidates for the same factual, where a one-hot group counts as one
+  unit. 0 means every candidate changes the same features and 1 means disjoint
+  feature sets, so higher is more action-diverse.
+- `set_pairwise_gower_mean` and `set_pairwise_gower_min` are the mean and the
+  minimum grouped-Gower distance between pairs of returned candidates for the
+  same factual. Higher is more value-diverse.
+- The denominator of every pairwise set metric is pairs of available candidates,
+  so only factuals with at least two returned candidates contribute. Set metrics
+  do not condition on class or threshold validity; read them next to
+  `set_validity_returned_threshold` and `proximity_grouped_gower`.
+- `set_pairwise_gower_ratio` is derived in the analysis layer, not the evaluator,
+  and is not stored in `summary.csv`. It is
+  `set_pairwise_gower_mean / proximity_grouped_gower`: value diversity relative
+  to the set's own distance from the factual, which removes the confound where a
+  farther set spreads more for free.
 
 Grouped-Gower and continuous proximity use returned candidates that reach the
 target class. Sparsity, action-unit changes, immutable-feature actionability,
