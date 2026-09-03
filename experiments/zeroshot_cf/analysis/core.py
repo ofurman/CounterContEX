@@ -37,6 +37,24 @@ _NON_METRICS = frozenset(
 _LEGACY_EVALUATION_VERSION = "countercontex.evaluation.v1"
 
 
+def derive_cell_metrics(cell: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the cell with analysis-only derived metrics appended."""
+    derived = dict(cell)
+    spread = cell.get("set_pairwise_gower_mean")
+    proximity = cell.get("proximity_grouped_gower")
+    if (
+        spread is not None
+        and proximity is not None
+        and np.isfinite(spread)
+        and np.isfinite(proximity)
+        and proximity > 0
+    ):
+        derived["set_pairwise_gower_ratio"] = float(spread) / float(proximity)
+    else:
+        derived["set_pairwise_gower_ratio"] = None
+    return derived
+
+
 def load_published_cells(
     output_root: Path | str, matrix_config: Path | str
 ) -> tuple[dict[str, Any], ...]:
@@ -70,16 +88,18 @@ def load_published_cells(
         group_identity = dict(scientific)
         group_identity.pop("seed")
         rows.append(
-            {
-                **summary,
-                "target_model": scientific["target_model"]["name"],
-                "scientific_group": canonical_json(group_identity),
-                "artifact_path": str(stored.path),
-                **{
-                    f"timing_{name}": value
-                    for name, value in stored.manifest.get("timings", {}).items()
-                },
-            }
+            derive_cell_metrics(
+                {
+                    **summary,
+                    "target_model": scientific["target_model"]["name"],
+                    "scientific_group": canonical_json(group_identity),
+                    "artifact_path": str(stored.path),
+                    **{
+                        f"timing_{name}": value
+                        for name, value in stored.manifest.get("timings", {}).items()
+                    },
+                }
+            )
         )
     return tuple(rows)
 

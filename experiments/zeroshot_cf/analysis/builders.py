@@ -237,11 +237,13 @@ _TABLE_METRICS = {
     ),
     "t2_diversity": (
         "set_coverage_at_k",
+        "set_returned_count_mean",
         "set_validity_returned_class",
         "set_validity_returned_threshold",
         "proximity_grouped_gower",
         "set_action_jaccard_mean",
         "set_pairwise_gower_mean",
+        "set_pairwise_gower_ratio",
     ),
     "t3_backend": (
         "coverage",

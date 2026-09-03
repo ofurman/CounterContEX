@@ -268,12 +268,42 @@ def test_paper_builders_accept_only_artifact_and_destination_paths():
 def test_t2_reports_validity_and_proximity_with_diversity():
     assert builders._TABLE_METRICS["t2_diversity"] == (
         "set_coverage_at_k",
+        "set_returned_count_mean",
         "set_validity_returned_class",
         "set_validity_returned_threshold",
         "proximity_grouped_gower",
         "set_action_jaccard_mean",
         "set_pairwise_gower_mean",
+        "set_pairwise_gower_ratio",
     )
+
+
+def test_derive_cell_metrics_normalizes_pairwise_gower_by_proximity():
+    cell = {
+        "dataset": "heloc",
+        "set_pairwise_gower_mean": 0.05,
+        "proximity_grouped_gower": 0.10,
+    }
+
+    derived = core.derive_cell_metrics(cell)
+
+    assert derived["set_pairwise_gower_ratio"] == pytest.approx(0.5)
+    assert {name: derived[name] for name in cell} == cell
+    assert cell == {
+        "dataset": "heloc",
+        "set_pairwise_gower_mean": 0.05,
+        "proximity_grouped_gower": 0.10,
+    }
+
+    for degenerate in (
+        {"set_pairwise_gower_mean": 0.05, "proximity_grouped_gower": 0.0},
+        {"set_pairwise_gower_mean": 0.05, "proximity_grouped_gower": np.nan},
+        {"set_pairwise_gower_mean": 0.05, "proximity_grouped_gower": None},
+        {"set_pairwise_gower_mean": 0.05},
+        {"proximity_grouped_gower": 0.10},
+        {"set_pairwise_gower_mean": np.nan, "proximity_grouped_gower": 0.10},
+    ):
+        assert core.derive_cell_metrics(degenerate)["set_pairwise_gower_ratio"] is None
 
 
 def test_seed_aggregation_preserves_backend_identity(monkeypatch):
@@ -300,3 +330,33 @@ def test_seed_aggregation_preserves_backend_identity(monkeypatch):
     aggregated = core.aggregate_seeds("artifacts", "matrix")
 
     assert {row["backend"] for row in aggregated} == {"tabicl", "empirical"}
+
+
+def test_seed_aggregation_includes_derived_ratio(monkeypatch):
+    scientific = {
+        "dataset": {"name": "heloc"},
+        "target_model": {"name": "classifier"},
+        "method": {
+            "name": "countercontex",
+            "variant": "default",
+            "n_counterfactuals": 3,
+            "params": {"foundation": {"backend": "tabicl"}},
+        },
+    }
+    rows = tuple(
+        core.derive_cell_metrics(
+            {
+                "scientific_group": canonical_json(scientific),
+                "set_pairwise_gower_mean": spread,
+                "proximity_grouped_gower": 0.10,
+            }
+        )
+        for spread in (0.04, 0.06)
+    )
+    monkeypatch.setattr(core, "load_published_cells", lambda *_: rows)
+
+    aggregated = core.aggregate_seeds("artifacts", "matrix")
+
+    assert len(aggregated) == 1
+    assert aggregated[0]["set_pairwise_gower_ratio_mean"] == pytest.approx(0.5)
+    assert aggregated[0]["set_pairwise_gower_ratio_n"] == 2
