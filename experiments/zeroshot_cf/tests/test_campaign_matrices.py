@@ -14,6 +14,7 @@ _DGX = Path(__file__).parents[1] / "dgx"
 _EXPECTED = {
     "campaign_e1_main.yaml": 540,
     "campaign_e2_diverse.yaml": 60,
+    "campaign_e2b_budget.yaml": 36,
     "campaign_e3_backend.yaml": 36,
     "campaign_e4_confidence.yaml": 200,
     "campaign_e5_search.yaml": 210,
@@ -45,7 +46,7 @@ def test_campaign_matrices_have_frozen_counts_and_shared_protocol():
         }:
             assert all(run.protocol.max_test == 250 for run in config.runs)
 
-    assert len(all_cell_ids) == 1384
+    assert len(all_cell_ids) == 1420
     assert len(set(all_cell_ids)) == len(all_cell_ids)
 
 
@@ -111,6 +112,7 @@ def test_pre_ablation_campaign_method_configs_are_registry_valid():
     for filename in (
         "campaign_e1_main.yaml",
         "campaign_e2_diverse.yaml",
+        "campaign_e2b_budget.yaml",
         "campaign_e3_backend.yaml",
         "campaign_e4_confidence.yaml",
         "campaign_e10_headline.yaml",
@@ -136,6 +138,7 @@ def test_dgx_launchers_clear_the_exact_success_marker_before_nohup():
     expected_markers = {
         "07": "stage07.DONE",
         "08": "stage08.DONE",
+        "08b": "stage08b.DONE",
         "09": "stage09.DONE",
         "10": "stage10.DONE",
         "11": "stage11.E9_DONE",
@@ -148,3 +151,36 @@ def test_dgx_launchers_clear_the_exact_success_marker_before_nohup():
         launch = 'nohup "$PROJECT_DIR/experiments/zeroshot_cf/dgx/run_stage.sh"'
         assert script.index(assignment) < script.index(clear) < script.index(launch)
         assert script.count('"$MARKER"') == 2
+
+
+def _scientific_without_diversity_budget(run):
+    payload = run.scientific_payload()
+    params = dict(payload["method"]["params"])
+    diversity = dict(params["diversity"])
+    ratio = diversity.pop("max_gower_ratio")
+    params["diversity"] = diversity
+    payload["method"] = {**payload["method"], "params": params}
+    payload.pop("seed")
+    return payload, ratio
+
+
+def test_e2b_varies_only_max_gower_ratio_against_e2():
+    e2 = load_matrix_config(_ROOT / "campaign_e2_diverse.yaml")
+    e2b = load_matrix_config(_ROOT / "campaign_e2b_budget.yaml")
+    reference = {}
+    for run in e2.runs:
+        if run.method.name != "countercontex":
+            continue
+        payload, ratio = _scientific_without_diversity_budget(run)
+        assert ratio == 1.5
+        reference[(run.dataset.name, run.seed)] = payload
+
+    ratios = set()
+    for run in e2b.runs:
+        assert run.method.name == "countercontex"
+        payload, ratio = _scientific_without_diversity_budget(run)
+        assert payload == reference[(run.dataset.name, run.seed)]
+        ratios.add(ratio)
+
+    assert ratios == {2.5, 4.0}
+    assert {run.seed for run in e2b.runs} == {17, 42, 101}

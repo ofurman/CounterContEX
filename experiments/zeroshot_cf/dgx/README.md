@@ -16,6 +16,11 @@ publishes `stageNN.DONE` only after every command succeeds. Stage 11 is the exce
 launcher publishes `stage11.E9_DONE`, because E8 has no generation matrix and its read-only
 rescoring gate must pass before the plan stage itself is complete.
 
+`launch_stage08b.sh` runs the prepared E2b diversity-budget sweep
+(`campaign_e2b_budget.yaml`, 36 cells, marker `stage08b.DONE`, log `stage08b.log`). It is not
+part of any plan stage and costs an estimated 6 to 9 GPU hours, so launch it only on an explicit
+instruction.
+
 ```bash
 bash experiments/zeroshot_cf/dgx/launch_stage07.sh
 tail -f experiments/zeroshot_cf/results/campaign/launch/stage07.log
