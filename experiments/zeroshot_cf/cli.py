@@ -45,12 +45,26 @@ def _aggregate(path: str) -> int:
     return 0
 
 
-def _analyze(path: str, output: str | None) -> int:
+def _analyze(
+    path: str, output: str | None, baseline_path: str | None = None
+) -> int:
     config = _config(path)
-    from experiments.zeroshot_cf.analysis.builders import build_all
+    from experiments.zeroshot_cf.analysis.builders import (
+        build_all,
+        build_f4_confidence_campaign,
+    )
 
     destination = Path(output) if output else config.execution.output_root / "analysis"
     products = build_all(config.execution.output_root, Path(path), destination)
+    if baseline_path is not None:
+        baseline = _config(baseline_path)
+        build_f4_confidence_campaign(
+            config.execution.output_root,
+            Path(path),
+            baseline.execution.output_root,
+            Path(baseline_path),
+            destination,
+        )
     print(f"wrote {len(products)} analysis products into {destination}")
     return 0
 
@@ -69,6 +83,7 @@ def build_parser() -> argparse.ArgumentParser:
     analyze = commands.add_parser("analyze", help="build paper tables and figures")
     analyze.add_argument("--config", required=True)
     analyze.add_argument("--output")
+    analyze.add_argument("--baseline-config")
     commands.add_parser("list-methods", help="list registered method names")
     return parser
 
@@ -87,7 +102,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "aggregate":
         return _aggregate(args.config)
     if args.command == "analyze":
-        return _analyze(args.config, args.output)
+        return _analyze(args.config, args.output, args.baseline_config)
     if args.command == "list-methods":
         from experiments.zeroshot_cf.methods.registry import DEFAULT_METHOD_REGISTRY
 

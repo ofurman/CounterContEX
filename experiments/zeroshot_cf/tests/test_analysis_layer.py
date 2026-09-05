@@ -300,3 +300,51 @@ def test_seed_aggregation_preserves_backend_identity(monkeypatch):
     aggregated = core.aggregate_seeds("artifacts", "matrix")
 
     assert {row["backend"] for row in aggregated} == {"tabicl", "empirical"}
+
+
+def test_confidence_rows_derive_axes_and_reporting_thresholds(tmp_path):
+    artifact = tmp_path / "cell"
+    artifact.mkdir()
+    np.savez(
+        artifact / "arrays.npz",
+        **{"common.target_probabilities": np.asarray([[0.55], [0.75], [np.nan]])},
+    )
+    scientific = {
+        "dataset": {"name": "heloc"},
+        "target_model": {"name": "classifier"},
+        "method": {
+            "name": "countercontex",
+            "params": {
+                "search": {"tau": 0.7},
+                "foundation": {"confidence_quantiles": [0.25, 0.75]},
+            },
+        },
+    }
+    cells = (
+        {
+            "scientific_group": canonical_json(scientific),
+            "artifact_path": str(artifact),
+            "seed": 42,
+            "coverage": 2 / 3,
+            "proximity_grouped_gower": 0.1,
+            "timing_total_s": 2.0,
+        },
+    )
+
+    rows = builders._confidence_rows(cells, thresholds=(0.5, 0.7), source="e4")
+
+    assert [row["evaluation_tau"] for row in rows] == [0.5, 0.7]
+    assert [row["threshold_validity"] for row in rows] == [1.0, 0.5]
+    assert all(row["generation_tau"] == 0.7 for row in rows)
+    assert all(row["confidence_conditioned"] is True for row in rows)
+
+
+def test_campaign_f4_builder_accepts_only_artifact_and_destination_paths():
+    signature = inspect.signature(builders.build_f4_confidence_campaign)
+    assert tuple(signature.parameters) == (
+        "output_root",
+        "matrix_config",
+        "baseline_output_root",
+        "baseline_matrix_config",
+        "output_dir",
+    )

@@ -167,6 +167,16 @@ uv run python -m experiments.zeroshot_cf.cli analyze \
   --output experiments/zeroshot_cf/results/local/analysis
 ```
 
+Confidence-Pareto analyses can add comparable baseline points from a second published matrix;
+both inputs remain strict, read-only artifact roots resolved from their tracked configs:
+
+```bash
+uv run python -m experiments.zeroshot_cf.cli analyze \
+  --config experiments/zeroshot_cf/configs/matrices/campaign_e4_confidence.yaml \
+  --baseline-config experiments/zeroshot_cf/configs/matrices/campaign_e1_main.yaml \
+  --output experiments/zeroshot_cf/results/campaign/analysis/e4_confidence
+```
+
 Analysis refuses partial, missing, extra, duplicate, or identity-mismatched cells. Seed groups
 are keyed by the complete scientific specification except seed and report mean, sample standard
 deviation, and the actual finite `n` for each metric. Historical evaluation-v1 artifacts remain

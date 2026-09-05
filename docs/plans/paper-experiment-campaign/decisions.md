@@ -123,3 +123,12 @@ resolved backend implementation, and backend-owned checkpoint content IDs.
 only the resolved implementation would contradict the scientific spec and content-addressed identity.
 **Class**: measurement (amendable). The original field count omitted required backend provenance;
 the replacement preserves the intended one-axis ablation and makes all backend content auditable.
+
+### D-12: Disclose any E4-informed headline threshold selection
+**Date**: 2026-09-03 - **Stage**: 9
+**Options**: A) present an E4-selected threshold as pre-specified B) disclose E4 as exploratory selection data
+**Chosen**: B
+**Rationale**: If Stage 12 adopts a generation threshold selected from E4, the paper will state:
+"The headline generation threshold was selected after inspecting the E4 confidence--proximity
+tradeoff; headline results using it are therefore selection-informed, not an unbiased confirmatory
+comparison." If Stage 12 retains its independently frozen setting, this disclosure is unnecessary.

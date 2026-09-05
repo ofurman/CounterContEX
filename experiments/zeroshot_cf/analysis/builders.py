@@ -125,6 +125,153 @@ def build_f4_confidence_pareto(
     return figure, data
 
 
+def _confidence_rows(
+    cells: tuple[dict[str, Any], ...],
+    *,
+    thresholds: tuple[float, ...],
+    source: str,
+) -> tuple[dict[str, Any], ...]:
+    rows: list[dict[str, Any]] = []
+    for cell in cells:
+        identity = json.loads(cell["scientific_group"])
+        method = identity["method"]
+        params = method.get("params", {})
+        generation_tau = params.get("search", {}).get("tau")
+        confidence_quantiles = params.get("foundation", {}).get(
+            "confidence_quantiles"
+        )
+        arrays = np.load(Path(cell["artifact_path"]) / "arrays.npz")
+        probabilities = np.asarray(
+            arrays["common.target_probabilities"], dtype=float
+        )
+        probabilities = probabilities[np.isfinite(probabilities)]
+        achieved_mean = (
+            float(np.mean(probabilities)) if len(probabilities) else None
+        )
+        for threshold in thresholds:
+            rows.append(
+                {
+                    "source": source,
+                    "dataset": identity["dataset"]["name"],
+                    "target_model": identity["target_model"]["name"],
+                    "method": method["name"],
+                    "seed": cell["seed"],
+                    "generation_tau": generation_tau,
+                    "confidence_conditioned": (
+                        None
+                        if generation_tau is None
+                        else confidence_quantiles is not None
+                    ),
+                    "evaluation_tau": threshold,
+                    "achieved_probability_mean": achieved_mean,
+                    "threshold_validity": (
+                        float(np.mean(probabilities >= threshold))
+                        if len(probabilities)
+                        else None
+                    ),
+                    "coverage": cell["coverage"],
+                    "proximity_grouped_gower": cell[
+                        "proximity_grouped_gower"
+                    ],
+                    "timing_total_s": cell.get("timing_total_s"),
+                }
+            )
+    return tuple(rows)
+
+
+def build_f4_confidence_campaign(
+    output_root: Path | str,
+    matrix_config: Path | str,
+    baseline_output_root: Path | str,
+    baseline_matrix_config: Path | str,
+    output_dir: Path | str,
+) -> tuple[Path, Path]:
+    """Build the confidence Pareto with comparable E1 method points."""
+    cells = load_published_cells(output_root, matrix_config)
+    config = load_matrix_config(matrix_config)
+    thresholds = tuple(
+        sorted(
+            {
+                float(run.scientific_payload()["method"]["params"]["search"]["tau"])
+                for run in config.runs
+            }
+        )
+    )
+    datasets = {cell["dataset"] for cell in cells}
+    target_models = {cell["target_model"] for cell in cells}
+    baseline_cells = tuple(
+        cell
+        for cell in load_published_cells(
+            baseline_output_root, baseline_matrix_config
+        )
+        if cell["dataset"] in datasets and cell["target_model"] in target_models
+    )
+    rows = (
+        *_confidence_rows(cells, thresholds=thresholds, source="e4"),
+        *_confidence_rows(
+            baseline_cells, thresholds=thresholds, source="e1_baseline"
+        ),
+    )
+    figure, data = _paths(output_dir, "f4_confidence_pareto")
+    write_rows(data, rows)
+    frame = pd.DataFrame(rows)
+    plotted = frame[frame["evaluation_tau"] == thresholds[0]]
+    curves = (
+        plotted[plotted["source"] == "e4"]
+        .groupby(["confidence_conditioned", "generation_tau"], as_index=False)
+        .agg(
+            proximity_grouped_gower=("proximity_grouped_gower", "mean"),
+            achieved_probability_mean=("achieved_probability_mean", "mean"),
+        )
+    )
+    baselines = (
+        plotted[plotted["source"] == "e1_baseline"]
+        .groupby("method", as_index=False)
+        .agg(
+            proximity_grouped_gower=("proximity_grouped_gower", "mean"),
+            achieved_probability_mean=("achieved_probability_mean", "mean"),
+        )
+    )
+    fig, axis = plt.subplots(figsize=(7.0, 4.6))
+    for conditioned, group in curves.groupby("confidence_conditioned"):
+        ordered = group.sort_values("generation_tau")
+        label = "confidence on" if conditioned else "confidence off"
+        axis.plot(
+            ordered["proximity_grouped_gower"],
+            ordered["achieved_probability_mean"],
+            marker="o",
+            label=label,
+        )
+        for row in ordered.itertuples():
+            axis.annotate(
+                f"τ={row.generation_tau:g}",
+                (row.proximity_grouped_gower, row.achieved_probability_mean),
+                fontsize="x-small",
+            )
+    axis.scatter(
+        baselines["proximity_grouped_gower"],
+        baselines["achieved_probability_mean"],
+        marker="x",
+        color="black",
+        label="E1 baselines",
+    )
+    for row in baselines.itertuples():
+        axis.annotate(
+            row.method,
+            (row.proximity_grouped_gower, row.achieved_probability_mean),
+            fontsize="x-small",
+        )
+    axis.set(
+        xlabel="Grouped-Gower proximity",
+        ylabel="Mean achieved target probability",
+    )
+    axis.legend(fontsize="small")
+    fig.tight_layout()
+    fig.savefig(figure)
+    plt.close(fig)
+    return figure, data
+
+
 def build_f5_cost_quality(
     output_root: Path | str, matrix_config: Path | str, output_dir: Path | str
 ) -> tuple[Path, Path]:

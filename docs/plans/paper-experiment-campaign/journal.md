@@ -59,7 +59,6 @@ older n=1000 timing table NOT MEASURED on this host because its ignored source t
 those historical values remain attributed only to the frozen positioning draft/prior run.
 **Commit**: `HEAD` (this stage commit)
 
-
 ## 2026-09-01 22:55 -- Stage 2: Target-model registry -- DONE
 **Did**: Added a dataset-owned fixed target-model registry for LR, MLP, and XGBoost; added the
 lazy XGBoost discriminator arm and explicit locked dependency; replaced the orchestration
@@ -389,4 +388,58 @@ supported; both outcomes are reported unchanged. Full suite: 292 passed.
 A fresh independent audit reproduced exact membership, all 18 identity diffs, table values,
 timings, hashes, byte-identical T2/T3 rebuilds, amendment mechanics, and the 292-test gate; its
 interpretation caveats are incorporated above.
+**Commit**: `HEAD` (this stage commit)
+
+## 2026-09-05 02:25 -- Stage 9: E4 confidence and threshold Pareto -- DONE
+**Did**: Executed `campaign_e4_confidence.yaml` on `gx10-bdc5`: four datasets x five seeds x
+five generation thresholds x confidence conditioning off/on, for 200/200 complete cells. Strict
+aggregation accepted the exact resolved matrix. Added the path-only E1 baseline input to the
+analysis CLI and produced F4 with 1,600 rows: 200 E4 cells and 120 comparable E1 cells, each
+reported at five evaluation thresholds. D-12 freezes the required disclosure if Stage 12 uses
+E4 to select its headline generation threshold.
+
+**Verification**: GATE achieved target probability increased monotonically with generation
+tau for all eight dataset/conditioning arms, both as seed-macro and candidate-pooled summaries;
+all 40 individual seed curves also had zero decreases. Generation tau came from the search
+specification, while every persisted evaluator remained fixed at tau 0.7; F4's five evaluation
+thresholds were recomputed from candidate probabilities. The defect that turns this gate red is
+any downward adjacent achieved-probability step or any generation/evaluation-threshold identity
+mix. Focused tests (13), changed-file Ruff, offline CLI, 200-cell dry-run, `git diff --check`,
+and the 294-test full suite passed.
+
+**Report**: Across datasets, the off-arm achieved probability / coverage / grouped-Gower
+proximity / mean total seconds progresses from `.583196/.969/.061883/190.411` at tau .5 to
+`.917131/.596/.154544/654.918` at tau .9. The on arm progresses from
+`.551453/.988/.054408/511.939` to `.914701/.666/.139549/2751.191`. Thus raising generation tau
+does buy confidence, with worse proximity and often collapsed coverage. Confidence conditioning
+does **not** raise mean achieved probability at a fixed tau; it generally buys better proximity
+and coverage, particularly in difficult high-tau cells, at substantial runtime cost. E4 consumed
+47.3591 total cell-hours, of which 47.2846 were generation.
+
+The Stage 7 per-candidate distributions establish that boundary hugging is field-wide in the
+four-dataset comparable slice: 70.7--85.2% of candidates from every method lie in [0.5, 0.6),
+and every method median is at most .537. Median / mean / fraction below .6 are CounterContEx
+`.509904/.547890/.820821`, DiCE `.504055/.568154/.718377`, FACE
+`.536742/.601131/.707000`, Growing Spheres `.500023/.554207/.778200`, NICE
+`.533168/.592495/.710033`, and Wachter `.500042/.533893/.852113`. The finding is therefore about
+sparse counterfactual methods broadly, not a CounterContEx-only defect.
+
+**Artifacts**: Exact required-file digest `d8c28929...18d07`; aggregate-summary SHA-256
+`208776cd...59cc`; F4 CSV `ea5c2415...5900`; F4 PDF `d0e2abbc...867d`; E4 probability CSV
+`96c66120...e63`; analysis manifest `8b13f4ac...f423`. The managed launcher published
+`launch/stage09.DONE` only after strict aggregation; its log is `launch/stage09.log`.
+
+**Provenance**: A fresh independent audit re-resolved exact 200/200 membership, found exactly
+200 run directories and 1,200 required files, recomputed every cell/run identity, rebuilt all
+four retained LR cases/models, and reproduced all 42,190 finite candidate probabilities
+bit-exactly with zero class, target, availability, denominator, or threshold-mask mismatch. It
+independently rebuilt all 1,600 F4 rows with maximum numeric delta zero and a byte-identical CSV,
+and passed 27 focused tests plus the 294-test suite. PDF bytes vary only by Matplotlib
+`CreationDate`; page geometry and extracted text are identical, so CSV/content hashes are the
+reproducibility evidence. No failures were hidden or padded.
+
+**Problems**: The original analysis command accepted only one matrix, so it could not place E1
+method baselines on F4. A focused witness led to the minimal optional `--baseline-config` path;
+both roots still pass strict, read-only membership validation. The hypothesis that confidence
+conditioning itself raises achieved confidence was not supported and is reported unchanged.
 **Commit**: `HEAD` (this stage commit)
