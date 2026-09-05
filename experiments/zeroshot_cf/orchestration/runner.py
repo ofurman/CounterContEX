@@ -238,6 +238,61 @@ class GenericRunner:
             evaluation_version=spec.evaluation.metric_version,
         )
 
+    def _wandb_log(
+        self, spec: RunSpec, resolved_run_id: str, report: EvaluationReport
+    ) -> None:
+        """Push every metric in ``report`` to Weights & Biases, right where it
+        was computed.
+
+        No-op unless the matrix config sets ``wandb.project``. Athena's GPU
+        compute nodes are offline, so point them at wandb's own offline mode
+        (``WANDB_MODE=offline``) rather than skipping this: runs are written
+        locally and uploaded later with a plain ``wandb sync``, no bespoke
+        re-upload script required.
+        """
+        if not self.execution.wandb_project:
+            return
+        import pandas as pd
+        import wandb
+
+        scientific = spec.scientific_payload()
+        dataset_name = scientific["dataset"]["name"]
+        method_name = scientific["method"]["name"]
+        wandb.init(
+            project=self.execution.wandb_project,
+            entity=self.execution.wandb_entity,
+            group=self.execution.wandb_group,
+            job_type=method_name,
+            id=resolved_run_id,
+            resume="allow",
+            reinit=True,
+            name=(
+                f"{dataset_name}-{method_name}-{scientific['method']['variant']}"
+                f"-seed{scientific['seed']}"
+            ),
+            tags=[dataset_name, method_name, f"seed{scientific['seed']}"],
+            config={**scientific, "run_id": resolved_run_id, "cell_id": spec.cell_id},
+        )
+        try:
+            wandb.log(dict(report.summary.values))
+            point_rows = [{"point": row.point, **row.values} for row in report.points]
+            if point_rows:
+                wandb.log({"points": wandb.Table(dataframe=pd.DataFrame(point_rows))})
+            candidate_rows = [
+                {"point": row.point, "rank": row.rank, **row.values}
+                for row in report.candidates
+            ]
+            if candidate_rows:
+                wandb.log(
+                    {"candidates": wandb.Table(dataframe=pd.DataFrame(candidate_rows))}
+                )
+            for name, array in report.arrays.values.items():
+                flat = array.reshape(-1)
+                if flat.size:
+                    wandb.log({f"arrays/{name}": wandb.Histogram(flat)})
+        finally:
+            wandb.finish()
+
     def _method_params(self, spec: RunSpec) -> dict[str, Any]:
         """Add execution-only backend settings after scientific identity resolves."""
         return dict(self._method_runtime(spec).params)
@@ -285,6 +340,7 @@ class GenericRunner:
         if should_resume and (self.store.root / resolved_run_id / "COMPLETE").is_file():
             stored = self.store.read(resolved_run_id)
             self._validate_resumed_manifest(stored, spec, identity, resolved_run_id)
+            self._wandb_log(spec, resolved_run_id, stored.report)
             if self.execution.legacy_export:
                 ensure_generic_v1(
                     self.execution.output_root,
@@ -332,6 +388,7 @@ class GenericRunner:
         evaluate_started = time.perf_counter()
         report: EvaluationReport = evaluator.evaluate(generated)
         evaluate_s = time.perf_counter() - evaluate_started
+        self._wandb_log(spec, resolved_run_id, report)
 
         manifest = {
             "run_id": resolved_run_id,

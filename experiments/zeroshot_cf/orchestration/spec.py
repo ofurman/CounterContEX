@@ -233,6 +233,9 @@ class ExecutionSpec:
     host: str | None = None
     environment: Mapping[str, str] = field(default_factory=dict)
     legacy_export: bool = False
+    wandb_project: str | None = None
+    wandb_entity: str | None = None
+    wandb_group: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "output_root", Path(self.output_root))
@@ -256,4 +259,7 @@ class ExecutionSpec:
             "host": self.host,
             "environment": dict(self.environment),
             "legacy_export": self.legacy_export,
+            "wandb_project": self.wandb_project,
+            "wandb_entity": self.wandb_entity,
+            "wandb_group": self.wandb_group,
         }

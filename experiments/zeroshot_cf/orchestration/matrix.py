@@ -82,6 +82,7 @@ def load_matrix_config(path: Path | str) -> MatrixConfig:
         "legacy_export",
         "cache_paths",
         "device",
+        "wandb",
     }
     unknown = set(payload) - allowed
     if unknown:
@@ -147,6 +148,10 @@ def load_matrix_config(path: Path | str) -> MatrixConfig:
     output_root = payload.get("output_root")
     if not isinstance(output_root, str) or not output_root:
         raise ValueError("matrix output_root must be non-empty")
+    wandb_values = dict(payload.get("wandb", {}))
+    unknown_wandb = set(wandb_values) - {"project", "entity", "group"}
+    if unknown_wandb:
+        raise ValueError(f"unknown wandb fields: {sorted(unknown_wandb)}")
     execution = ExecutionSpec(
         output_root=Path(output_root),
         cache_paths={
@@ -155,6 +160,9 @@ def load_matrix_config(path: Path | str) -> MatrixConfig:
         },
         device=payload.get("device"),
         legacy_export=bool(payload.get("legacy_export", False)),
+        wandb_project=wandb_values.get("project"),
+        wandb_entity=wandb_values.get("entity"),
+        wandb_group=wandb_values.get("group", suite),
     )
     if execution.legacy_export:
         destinations = [

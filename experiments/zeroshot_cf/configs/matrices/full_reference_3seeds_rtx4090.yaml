@@ -1,0 +1,71 @@
+schema_version: countercontex.matrix.v1
+suite: architecture_full_reference_3seeds_rtx4090
+output_root: experiments/zeroshot_cf/results/rtx4090/full_reference_3seeds
+datasets:
+  - heloc
+  - bank_marketing
+  - give_me_some_credit
+  - lending_club
+methods:
+  - name: countercontex
+    variant: tabicl_sparse
+    n_counterfactuals: 3
+    params:
+      search:
+        cf_mode: sparse
+        candidate_quantiles: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+        max_validity_steps: 100
+      diversity:
+        beam_width: 8
+        candidate_pool_size: 16
+        max_extra_actions: 2
+        max_gower_ratio: 1.5
+        max_gower_increase: 0.02
+      foundation:
+        backend: tabicl
+        n_estimators: 1
+        temperature: 1.0e-9
+        confidence_quantiles: [0.1, 0.25, 0.5, 0.75, 0.9]
+        tabicl_joint_permutations: 1
+  - nice
+  - wachter
+  - growing_spheres
+  - dice
+  - face
+# Three seeds per (dataset, method) cell. `seed` only feeds each method's own
+# stochastic search (see GenerationRequest.seed in orchestration/runner.py) --
+# it never perturbs the classifier or the factual/target selection, both of
+# which are fixed by `target_model` and the case loader's hardcoded seed=42.
+seeds: [42, 43, 44]
+protocol:
+  max_test: 1000
+  test_selection: stratified
+# Every cell -- regardless of method or seed -- is scored against this exact
+# classifier. The default case loader trains and disk-caches it once per
+# dataset (experiments/zeroshot_cf/discriminator.py), keyed only by dataset
+# name, so as long as this block never changes, every method/seed shares the
+# identical checkpoint. Run `python -m experiments.zeroshot_cf.warm_classifier_cache`
+# once before submitting the array so all 72 tasks read that checkpoint
+# instead of racing to train it concurrently.
+target_model:
+  name: retained_logistic_regression
+  params:
+    C: 1.0
+    max_iter: 1000
+    seed: 42
+evaluation:
+  probability_threshold: 0.7
+cache_paths:
+  tabicl: experiments/zeroshot_cf/models/tabicl
+device: cuda
+# legacy_export is intentionally omitted (defaults to false): the legacy CSV
+# path is keyed by (method, dataset) only, so exporting it here across 3 seeds
+# per cell would collide. Use `cli.py aggregate` against this config instead.
+# GenericRunner.run() pushes every computed metric for every cell to this
+# wandb project the moment its EvaluationReport is produced (see
+# orchestration/runner.py::_wandb_log). `group` defaults to `suite` above.
+# This cluster's GPU nodes are also treated as offline (WANDB_MODE=offline
+# in the sbatch script below); `wandb sync` the local run directories
+# afterwards from a node with network access.
+wandb:
+  project: countercontex-full-reference

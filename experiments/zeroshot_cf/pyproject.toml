@@ -23,6 +23,7 @@ dependencies = [
   "omegaconf",
   "hydra-core",
   "pytest>=8.4.2",
+  "wandb>=0.17.0",
 ]
 
 [tool.uv]

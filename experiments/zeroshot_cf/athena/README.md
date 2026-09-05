@@ -111,6 +111,98 @@ quality-point variation as an architecture failure; record completeness,
 availability and validity denominators, phase timings, and stable artifact
 hashes. Report any missing cell with its exact run ID.
 
+## Full-matrix, 3-seed benchmark (all methods x all datasets)
+
+`full_reference_3seeds_array.sbatch` runs the complete reference matrix --
+all six registered methods (`countercontex`, `nice`, `wachter`,
+`growing_spheres`, `dice`, `face`) across all four datasets and three seeds
+(`42`, `43`, `44`) -- as one Slurm array of independent single-cell tasks.
+
+Unlike the four-task Exp9 launcher above, this is not a bespoke script: each
+array task slices exactly one `(dataset, method, seed)` cell out of
+[`configs/matrices/full_reference_3seeds.yaml`](../configs/matrices/full_reference_3seeds.yaml)
+with `select_matrix_cell.py --index "$SLURM_ARRAY_TASK_ID"` and runs it
+through the same generic `cli.py matrix` runner used locally. Index `N` in
+the array always names the same cell as row `N` of
+`cli.py matrix --config full_reference_3seeds.yaml --dry-run`, so the array
+size (4 datasets x 6 methods x 3 seeds = 72) is derived from the config
+itself rather than hardcoded.
+
+### Same classifier checkpoint everywhere
+
+Every cell for a given dataset -- any method, any seed -- must be scored
+against the identical classifier. The config's `target_model` block never
+varies across cells, and the default case loader trains and disk-caches that
+classifier once per dataset at `$ZEROSHOT_CF_MODELS_DIR/disc_<dataset>_lr.pkl`
+(`discriminator.py`), keyed only by dataset name. Because up to 3 array tasks
+per dataset (one per seed) could otherwise race to train and overwrite that
+file the first time they run, `submit_full_reference_3seeds.sh` first runs
+`warm_classifier_cache.py` synchronously for all four datasets *before*
+submitting the array, so every one of the 72 tasks only ever reads an
+already-populated, shared checkpoint. Set `SKIP_WARM=1` to skip this step if
+the cache directory is already warm.
+
+### Submit and aggregate
+
+```bash
+bash experiments/zeroshot_cf/athena/submit_full_reference_3seeds.sh
+```
+
+Override the walltime per task (default `10:00:00`, sized for the heaviest
+CounterContEx/TabICL cell) the same way as the Exp9 launcher:
+
+```bash
+WALLTIME=12:00:00 \
+  bash experiments/zeroshot_cf/athena/submit_full_reference_3seeds.sh
+```
+
+Outputs land under
+`experiments/zeroshot_cf/results/athena/full_reference_3seeds/`, content
+addressed by run ID, so all 72 concurrent array tasks can safely write into
+the same `output_root`. After every task finishes:
+
+```bash
+uv run --project experiments/zeroshot_cf \
+  python -m experiments.zeroshot_cf.cli aggregate \
+  --config experiments/zeroshot_cf/configs/matrices/full_reference_3seeds.yaml
+```
+
+`aggregate` validates that all 72 expected cells completed and rejects
+missing, partial, duplicate, or identity-mismatched results, reporting any
+missing cell by its exact run ID.
+
+### Metrics land in Weights & Biases automatically
+
+`GenericRunner.run()` pushes every computed metric to wandb the moment each
+cell's `EvaluationReport` is produced (`orchestration/runner.py::_wandb_log`)
+-- summary metrics, the per-point and per-candidate tables, and raw
+metric-array histograms -- for both a freshly computed cell and a
+`--resume`d one whose report was only just loaded from disk. This is wired
+into the config, not a separate script: any matrix config with a top-level
+`wandb.project` (see `full_reference_3seeds.yaml`) gets this for free; a
+config without that block skips wandb entirely.
+
+Athena's GPU compute nodes have no outbound network, so the array script
+exports `WANDB_MODE=offline` and `WANDB_DIR="$RESULTS_DIR/wandb"`: wandb
+still logs every metric locally as each task finishes, it just defers the
+upload. Once the array is done, sync everything from a node with network
+access (the login node, after `wandb login` or with `WANDB_API_KEY` set):
+
+```bash
+wandb sync experiments/zeroshot_cf/results/athena/full_reference_3seeds/wandb
+```
+
+Each cell is a stable wandb run keyed by its own scientific `run_id`, grouped
+by the config's `suite` name and tagged by dataset/method/seed, so re-syncing
+(or re-running a resumed cell) updates the same run instead of duplicating
+it. Running the matrix locally with network access needs no offline dance --
+just unset `WANDB_MODE` (or leave it unset) and metrics upload live.
+
+`wandb` was added as a dependency; if you already have a locked
+`experiments/zeroshot_cf/uv.lock` from before this change, run
+`uv lock --project experiments/zeroshot_cf` (needs network access) once
+before `uv sync --locked` will succeed again.
+
 For a direct offline TabICL run on Athena outside the array launcher:
 
 ```bash
