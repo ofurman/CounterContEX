@@ -252,6 +252,7 @@ class GenericRunner:
         """
         if not self.execution.wandb_project:
             return
+        import numpy as np
         import pandas as pd
         import wandb
 
@@ -288,6 +289,8 @@ class GenericRunner:
                 )
             for name, array in report.arrays.values.items():
                 flat = array.reshape(-1)
+                if np.issubdtype(flat.dtype, np.floating):
+                    flat = flat[np.isfinite(flat)]
                 if flat.size:
                     wandb.log({f"arrays/{name}": wandb.Histogram(flat)})
         finally:
