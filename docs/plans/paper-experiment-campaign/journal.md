@@ -518,3 +518,82 @@ F5 points with maximum numeric difference `4.26e-14` and reproduced every record
 focused tests, changed-file Ruff, and the 299-test suite passed. Its interpretation caveats are
 incorporated above.
 **Commit**: `HEAD` (this stage commit)
+
+## 2026-09-07 11:30 -- Stage 11: Second foundation backend and robustness -- DONE
+**Did**: Added a released `tabpfn==8.5.0` v2 proposal backend behind the unchanged
+`ProposalSession` contract. Numerical proposals use public regressor quantiles; atomic
+categorical groups use native multiclass conditionals through ten observed categories and
+normalized one-vs-rest conditionals above v2's ten-class limit. Confidence conditioning and
+joint scoring are declared unsupported. Staged and content-hashed the exact v2 classifier and
+regressor checkpoints, passed both estimator paths on the GB10, executed E9 12/12, and produced
+T3 through the path-only Stage 5 analysis layer. E8 retrained evaluation-only LR, MLP, and
+XGBoost instruments at seeds 137/271/811 and rescored 362,127 already-published Stage 7
+candidates without regenerating or mutating them.
+
+**Verification**: GATE a focused preparation witness requests unsupported TabPFN confidence
+conditioning and fails before the injected estimator factory or classifier oracle can be
+called; the backend advertises categorical distributions but not confidence conditioning or
+joint scoring. GATE E8's source digest is
+`cf79ad2b2b04ad277d7b124d08eb86f5be05d42b5ae723333158200ab3722008` both before and after,
+the Stage 7 top-level directory-set digest remains
+`e1f183c7a739f14becc2f541b15eb835776abe927127b69176e66d41f5283638`, and no directory was
+created below the E1 root. GATE E9 strict aggregation accepted exactly 12/12 matrix-resolved
+cells after the launcher exited zero and published `launch/stage11_e9.DONE`. Each of the six
+paired arms differs only in the declared backend and its required implementation/checkpoint
+identity bundle; no search, protocol, target, evaluation, dataset, or seed field differs.
+
+**Report**: TabPFN-minus-TabICL on Adult is coverage `0`, threshold validity `-.011670`,
+grouped-Gower distance `+.004892`, and neighbour-support distance `+.002420`; TabPFN seed
+standard deviations are `.0/.010184/.000344/.000532`, respectively. On HELOC the differences
+are coverage `-.018667`, threshold validity `0` (both backends return zero candidates above
+the .7 threshold), grouped-Gower `-.001145`, and neighbour-support `-.000068`; TabPFN seed
+standard deviations are `.006110/0/.000465/.000141`. Every nonzero delta exceeds Stage 1's
+zero HELOC/k=1 repeatability spread for the three Stage 1 metrics: coverage, threshold validity,
+and grouped-Gower. The neighbour-support noise floor is **NOT MEASURED** because Stage 1's v1
+artifacts predate that metric. The narrow zero-spread reference is not an inferential uncertainty
+bound. The swap therefore supports portability of the proposal contract, not a broad TabPFN
+quality gain: Adult threshold validity and proximity worsen, while HELOC proximity improves at
+lower coverage. Mean total seconds are Adult TabICL/TabPFN `699.054/3148.137` (4.50x) and HELOC
+`405.066/2892.578` (7.14x); E9 consumed 5.95403 total cell-hours.
+
+E8 pooled retention rises sharply with original target probability: `[.5,.6)` `.861959`
+(`n=263421`), `[.6,.7)` `.955004` (`52716`), `[.7,.8)` `.979365` (`24957`), `[.8,.9)`
+`.998815` (`12654`), and `[.9,1]` `.999642` (`8379`). This supports the predicted boundary-
+hugging fragility. Method-pooled retention is CounterContEx `.899113`, DiCE `.871230`, FACE
+`.927981`, Growing Spheres `.874213`, NICE `.912641`, and Wachter `.865323`. Dataset-pooled
+retention ranges from Bank `.794582` to Give Me Some Credit `.959727`. LR and XGBoost retention
+are exactly 1.0 because their fixed full-sample training procedures are deterministic despite
+the accepted `random_state`; MLP retention is `.673461`. These are evaluation-instrument
+outcomes, not new target-model identities, and the deterministic arms are disclosed rather than
+presented as independent retraining perturbations.
+
+**Artifacts**: TabPFN classifier/regressor SHA-256 values are
+`cf8c519c...210e49`/`2ab5a07d...10736`; E9 matrix `c2f4f569...2ba005`, canonical required-file
+set `0c451a58...af3001`, aggregate `abe833d8...9e808`, and T3 CSV `43af0290...c98df`. E8 table,
+candidate detail, and manifest are `c4beb207...1e3b`, `5c44865d...8163c`, and
+`610f3c74...f9d9`.
+
+**Provenance**: E9 membership was re-resolved from the tracked matrix and checked by strict
+aggregation, so a missing, extra, partial, duplicate, or identity-mismatched cell turns the gate
+red. Metrics came from canonical summaries through T3 and timings from manifest lifecycle
+blocks. E8 values were rebuilt from Stage 7 `arrays.npz` candidates/probabilities and fresh
+in-memory instruments; before/after tree hashes make source mutation red. The proposal contract
+did not require a change, so no new architecture decision was necessary.
+
+**Problems**: Current TabPFN constructors default to v3, so Stage 11 uses explicit local v2
+checkpoint paths and checksum enforcement rather than a bare constructor. Platform metadata
+alone did not establish GB10 kernel support; direct classifier/regressor and real CounterContEx
+smokes passed before E9. TabPFN was 4.50--7.14x slower and did not improve the two-dataset
+threshold-validity headline; this negative/mixed outcome is retained unchanged. In Adult's 250
+factual contexts, education exceeded ten observed classes 80 times and occupation 145 times, so
+the normalized one-vs-rest fallback is part of E9 rather than a dormant compatibility path.
+Focused tests passed 65; changed-file Ruff, offline retained CLI, the exact 12-row dry-run,
+`git diff --check`, and the 308-test full suite passed.
+The independent read-only audit initially found and drove three corrections: capability
+validation now precedes the target-oracle call, the Stage 1 noise floor no longer overclaims
+neighbour support, and the high-cardinality categorical path is disclosed and tested. It then
+accepted all checkpoint hashes, 12 E9 identities and payloads, C3 pairing, T3 values, lifecycle
+timings, and reported deltas. For E8 it independently joined all 362,127 detail rows to 120,709
+source candidates, retrained all 54 instruments, reproduced every validity boolean and all 407
+table rows, and confirmed the 3,385-file Stage 7 tree and 540 run directories remained intact.
+**Commit**: `HEAD` (this stage commit)

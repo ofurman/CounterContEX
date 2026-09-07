@@ -24,6 +24,7 @@ dependencies = [
   "omegaconf",
   "hydra-core",
   "pytest>=8.4.2",
+  "tabpfn==8.5.0",
 ]
 
 [tool.uv]

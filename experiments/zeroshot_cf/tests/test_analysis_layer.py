@@ -17,6 +17,7 @@ from experiments.zeroshot_cf.analysis import (
     core,
     holm_wilcoxon,
     load_published_cells,
+    robustness,
 )
 from experiments.zeroshot_cf.orchestration.matrix import load_matrix_config
 from experiments.zeroshot_cf.orchestration.spec import canonical_json
@@ -255,13 +256,37 @@ def test_paper_builders_accept_only_artifact_and_destination_paths():
         "build_t1_main",
         "build_t2_diversity",
         "build_t3_backend",
+        "build_e8_robustness",
     ]
     for name in names:
-        signature = inspect.signature(getattr(builders, name))
+        owner = robustness if name == "build_e8_robustness" else builders
+        signature = inspect.signature(getattr(owner, name))
         assert tuple(signature.parameters) == (
             "output_root",
             "matrix_config",
             "output_dir",
+        )
+
+
+def test_e8_probability_bins_keep_boundary_candidates_separate():
+    values = np.array([0.49, 0.5, 0.599, 0.6, 0.7, 0.8, 0.9, 1.0])
+
+    assert robustness._probability_bins(values).tolist() == [
+        "[0.0,0.5)",
+        "[0.5,0.6)",
+        "[0.5,0.6)",
+        "[0.6,0.7)",
+        "[0.7,0.8)",
+        "[0.8,0.9)",
+        "[0.9,1.0]",
+        "[0.9,1.0]",
+    ]
+
+
+def test_e8_refuses_to_write_under_source_artifacts(tmp_path):
+    with pytest.raises(ValueError, match="outside the source artifact root"):
+        robustness.build_e8_robustness(
+            tmp_path, "matrix.yaml", tmp_path / "analysis"
         )
 
 

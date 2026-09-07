@@ -23,6 +23,7 @@ from experiments.zeroshot_cf.methods.countercontex.backend import (
 from experiments.zeroshot_cf.methods.countercontex.backends.base import (
     PreparedBackend,
     ProposalBackend,
+    ProposalCapabilities,
     validate_backend_capabilities,
 )
 from experiments.zeroshot_cf.methods.countercontex.backends.empirical import (
@@ -218,6 +219,18 @@ class CounterContExMethod:
         return self.config.as_dict()
 
     def prepare(self, context: MethodContext) -> PreparedCounterContExMethod:
+        def validate(capabilities: ProposalCapabilities) -> None:
+            validate_backend_capabilities(
+                capabilities,
+                needs_confidence=(
+                    self.config.foundation.confidence_quantiles is not None
+                ),
+                needs_categorical=bool(
+                    context.feature_schema.actionable_groups
+                ),
+                needs_joint=self.config.search.cf_mode == "data_plausible",
+            )
+
         if self.proposal_backend is None:
             if self.config.foundation.backend == "tabicl":
                 inputs = CounterContExBackendInputs(
@@ -230,6 +243,29 @@ class CounterContExMethod:
                 backend = prepare_backend(inputs, self.config)
             elif self.config.foundation.backend == "empirical":
                 backend = EmpiricalBackend().prepare(context)
+            elif self.config.foundation.backend == "tabpfn":
+                from experiments.zeroshot_cf import (
+                    tabpfn_checkpoints,
+                )
+                from experiments.zeroshot_cf.methods.countercontex.backends import (
+                    tabpfn,
+                )
+
+                classifier_path, regressor_path = (
+                    tabpfn_checkpoints.require_checkpoints(
+                        self.config.foundation.cache_dir
+                    )
+                )
+                proposal_backend = tabpfn.TabPFNBackend(
+                    context_size=self.config.foundation.context_size,
+                    context_labels=self.config.foundation.context_labels,
+                    classifier_path=classifier_path,
+                    regressor_path=regressor_path,
+                    device=tabpfn_checkpoints.TABPFN_DEVICE,
+                    n_estimators=self.config.foundation.n_estimators,
+                )
+                validate(proposal_backend.capabilities)
+                backend = proposal_backend.prepare(context)
             else:
                 raise ValueError(
                     f"unknown CounterContEx proposal backend: "
@@ -243,13 +279,9 @@ class CounterContExMethod:
                 raise ValueError(
                     "foundation backend does not match the injected proposal backend"
                 )
+            validate(self.proposal_backend.capabilities)
             backend = self.proposal_backend.prepare(context)
-        validate_backend_capabilities(
-            backend.capabilities,
-            needs_confidence=self.config.foundation.confidence_quantiles is not None,
-            needs_categorical=bool(context.feature_schema.actionable_groups),
-            needs_joint=self.config.search.cf_mode == "data_plausible",
-        )
+        validate(backend.capabilities)
         return PreparedCounterContExMethod(
             context=context,
             config=self.config,

@@ -56,6 +56,17 @@ The classifier and regressor checkpoints are stored under
 `experiments/zeroshot_cf/models/tabicl/`. Runtime checksum verification stays
 enabled and the offline smoke test refuses missing or mismatched files.
 
+The optional TabPFN v2 proposal backend has its own exact checkpoint pair:
+
+```bash
+uv run --project experiments/zeroshot_cf \
+  python -m experiments.zeroshot_cf.tabpfn_checkpoints
+```
+
+It stores verified files under `experiments/zeroshot_cf/models/tabpfn/`. Both checkpoint
+digests and `tabpfn-v2-proposal-v1` enter scientific identity; normal runs pass absolute local
+paths and do not rely on the package's mutable default model version.
+
 The following `--help` commands are the documentation sanity checks for the
 locked environment. With `HF_HUB_OFFLINE=1`, they must stay free of network
 access and checkpoint loading:
@@ -268,7 +279,15 @@ quantiles and categorical frequencies without checkpoints. It provides a
 runnable backend ablation and intentionally declares no confidence or joint
 scoring capability, so incompatible search settings fail before generation.
 
-To add a TabPFN or TabFM adapter:
+The TabPFN v2 adapter fits feature-conditional models over the factual's nearest reference
+context. It uses public regression quantiles for numerical features. One-hot groups remain atomic:
+groups with at most ten observed categories use a native multiclass conditional, while wider
+groups use normalized positive probabilities from one-vs-rest conditionals because v2 has a
+ten-class limit. It declares categorical and numerical proposals, but no confidence conditioning
+or joint scoring. Model imports remain lazy and its runtime policy owns the separate checkpoint
+cache, content hashes, device scope, and implementation identity.
+
+To add another TabFM adapter:
 
 1. Implement `ProposalBackend.prepare()` and the prepared backend's
    `for_factual()` method in a new module under `methods/countercontex/backends/`.
@@ -333,6 +352,8 @@ Relevant environment variables:
 
 - `TABICL_LOCAL_CACHE`: default checkpoint directory.
 - `TABICL_DEVICE`: `auto`, `cpu`, `mps`, or `cuda`.
+- `TABPFN_LOCAL_CACHE`: default TabPFN v2 checkpoint directory.
+- `TABPFN_DEVICE`: `auto`, `cpu`, or `cuda`.
 - `HF_HUB_OFFLINE=1`: enforce offline operation after staging.
 - `ZEROSHOT_CF_MODELS_DIR`: override the discriminator cache/output model directory.
 

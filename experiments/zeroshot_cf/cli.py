@@ -69,6 +69,15 @@ def _analyze(
     return 0
 
 
+def _robustness(path: str, output: str) -> int:
+    config = _config(path)
+    from experiments.zeroshot_cf.analysis.robustness import build_e8_robustness
+
+    products = build_e8_robustness(config.execution.output_root, path, output)
+    print(f"wrote {len(products)} robustness products into {output}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -84,6 +93,11 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--config", required=True)
     analyze.add_argument("--output")
     analyze.add_argument("--baseline-config")
+    robustness = commands.add_parser(
+        "robustness", help="rescore published candidates after target retraining"
+    )
+    robustness.add_argument("--config", required=True)
+    robustness.add_argument("--output", required=True)
     commands.add_parser("list-methods", help="list registered method names")
     return parser
 
@@ -103,6 +117,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _aggregate(args.config)
     if args.command == "analyze":
         return _analyze(args.config, args.output, args.baseline_config)
+    if args.command == "robustness":
+        return _robustness(args.config, args.output)
     if args.command == "list-methods":
         from experiments.zeroshot_cf.methods.registry import DEFAULT_METHOD_REGISTRY
 

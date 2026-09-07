@@ -77,8 +77,50 @@ def _tabicl_runtime(
     )
 
 
+def _tabpfn_runtime(
+    params: dict[str, Any],
+    cache_paths: Mapping[str, Path],
+    device: str | None,
+) -> ResolvedMethodRuntime:
+    from experiments.zeroshot_cf import tabpfn_checkpoints
+    from experiments.zeroshot_cf.methods.countercontex.backends.tabpfn import (
+        TABPFN_BACKEND_IMPLEMENTATION_VERSION,
+    )
+
+    cache_dir = cache_paths.get("tabpfn")
+    paths = tabpfn_checkpoints.require_checkpoints(cache_dir)
+    foundation = dict(params.get("foundation", {}))
+    if cache_dir is not None:
+        foundation["cache_dir"] = cache_dir
+        params["foundation"] = foundation
+
+    @contextmanager
+    def activate():
+        if device is None:
+            with nullcontext():
+                yield
+            return
+        previous = tabpfn_checkpoints.TABPFN_DEVICE
+        try:
+            tabpfn_checkpoints.TABPFN_DEVICE = device
+            yield
+        finally:
+            tabpfn_checkpoints.TABPFN_DEVICE = previous
+
+    return ResolvedMethodRuntime(
+        params,
+        backend_implementation=TABPFN_BACKEND_IMPLEMENTATION_VERSION,
+        checkpoint_content_ids={
+            path.name: tabpfn_checkpoints._CHECKPOINT_SHA256[path.name]
+            for path in paths
+        },
+        activate=activate,
+    )
+
+
 _BACKEND_POLICIES = {
     "tabicl": BackendRuntimePolicy("tabicl-proposal-v1", _tabicl_runtime),
+    "tabpfn": BackendRuntimePolicy("tabpfn-v2-proposal-v1", _tabpfn_runtime),
     "empirical": BackendRuntimePolicy("empirical-reference-v1", _empirical_runtime),
 }
 

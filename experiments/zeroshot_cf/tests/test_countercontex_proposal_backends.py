@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -33,6 +33,10 @@ from experiments.zeroshot_cf.methods.countercontex.backends.empirical import (
 )
 from experiments.zeroshot_cf.methods.countercontex.backends.tabicl import (
     TabICLProposalSession,
+)
+from experiments.zeroshot_cf.methods.countercontex.backends.tabpfn import (
+    TabPFNBackend,
+    TabPFNProposalSession,
 )
 from experiments.zeroshot_cf.methods.countercontex.config import (
     CounterContExConfig,
@@ -306,6 +310,129 @@ def test_empirical_backend_runs_complete_countercontex_sparse_search() -> None:
     np.testing.assert_array_equal(result.available, [[True]])
     np.testing.assert_allclose(result.candidates, [[[0.9]]])
     assert result.run_diagnostics["proposal_backend"] == "empirical"
+
+
+def test_tabpfn_backend_proposes_target_conditioned_quantiles_and_categories() -> None:
+    fitted_designs = []
+
+    class FakeRegressor:
+        def fit(self, X, y):
+            fitted_designs.append((np.asarray(X).copy(), np.asarray(y).copy()))
+            return self
+
+        def predict(self, X, *, output_type, quantiles=None):
+            assert np.all(np.asarray(X)[:, -1] == 1)
+            if output_type == "quantiles":
+                return [np.full(len(X), level) for level in quantiles]
+            return np.full(len(X), 0.75)
+
+    class FakeClassifier:
+        classes_ = np.array([0, 1])
+
+        def fit(self, X, y):
+            fitted_designs.append((np.asarray(X).copy(), np.asarray(y).copy()))
+            return self
+
+        def predict_proba(self, X):
+            assert np.all(np.asarray(X)[:, -1] == 1)
+            return np.tile([0.25, 0.75], (len(X), 1))
+
+    backend = TabPFNBackend(
+        context_size=3,
+        context_labels="predictions",
+        classifier_factory=FakeClassifier,
+        regressor_factory=FakeRegressor,
+    ).prepare(_categorical_context())
+    session = backend.for_factual(
+        np.array([0.2, 1.0, 0.0]), target=1, seed=17
+    )
+
+    numerical = session.propose_numerical(
+        np.array([[0.2, 1.0, 0.0]]),
+        [0],
+        quantiles=(0.25, 0.75),
+        confidence=None,
+        temperature=0.0,
+    )
+    categorical = session.categorical_distribution(
+        np.array([0.2, 1.0, 0.0]),
+        OneHotActionGroup("segment", (1, 2)),
+        confidence=None,
+    )
+
+    np.testing.assert_allclose(numerical, [[0.25, 0.75]])
+    np.testing.assert_array_equal(categorical.categories, [0, 1])
+    np.testing.assert_allclose(categorical.probabilities, [0.25, 0.75])
+    assert all(np.array_equal(X[:, -1], [0, 0, 1]) for X, _y in fitted_designs)
+
+
+def test_tabpfn_wide_categorical_group_uses_normalized_one_vs_rest() -> None:
+    group = OneHotActionGroup("wide", tuple(range(11)))
+
+    class FakeBinaryClassifier:
+        classes_ = np.array([0, 1])
+
+        def fit(self, _X, y):
+            self.positive_row = int(np.flatnonzero(y)[0])
+            return self
+
+        def predict_proba(self, X):
+            positive = (self.positive_row + 1) / 12
+            return np.tile([1 - positive, positive], (len(X), 1))
+
+    session = TabPFNProposalSession(
+        reference=np.eye(11),
+        reference_labels=np.zeros(11),
+        target=1,
+        categorical_groups=(group,),
+        classifier_factory=FakeBinaryClassifier,
+        regressor_factory=lambda: None,
+    )
+
+    distribution = session.categorical_distribution(
+        np.eye(11)[0], group, confidence=None
+    )
+
+    np.testing.assert_array_equal(distribution.categories, np.arange(11))
+    np.testing.assert_allclose(
+        distribution.probabilities, np.arange(1, 12) / np.arange(1, 12).sum()
+    )
+
+
+def test_tabpfn_unsupported_capability_fails_before_estimator_construction() -> None:
+    calls = []
+
+    class ForbiddenOracle:
+        classes_ = np.array([0, 1])
+
+        def predict(self, _rows):
+            raise AssertionError("target oracle must not be called during rejection")
+
+        def predict_proba(self, _rows):
+            raise AssertionError("target oracle must not be called during rejection")
+
+    def forbidden_factory():
+        calls.append(True)
+        raise AssertionError("estimator must not be constructed during preparation")
+
+    config = CounterContExConfig(
+        search=CounterContExSearchConfig(candidate_quantiles=(0.5,)),
+        foundation=CounterContExFoundationConfig(
+            backend="tabpfn",
+            confidence_quantiles=(0.5,),
+        ),
+    )
+    backend = TabPFNBackend(
+        context_size=3,
+        context_labels="predictions",
+        classifier_factory=forbidden_factory,
+        regressor_factory=forbidden_factory,
+    )
+
+    context = replace(_categorical_context(), oracle=ForbiddenOracle())
+    with pytest.raises(ValueError, match="confidence conditioning"):
+        CounterContExMethod(config, backend).prepare(context)
+    assert calls == []
 
 
 @pytest.mark.parametrize(

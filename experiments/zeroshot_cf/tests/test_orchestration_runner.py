@@ -389,6 +389,47 @@ def test_empirical_countercontex_identity_does_not_require_tabicl_checkpoints(
     assert dict(versions.checkpoint_content_ids) == {}
 
 
+def test_tabpfn_countercontex_identity_uses_both_verified_checkpoints(
+    tmp_path, monkeypatch
+) -> None:
+    from experiments.zeroshot_cf import tabpfn_checkpoints
+    from experiments.zeroshot_cf.methods.registry import DEFAULT_METHOD_REGISTRY
+
+    paths = tuple(
+        tmp_path / name
+        for name in (
+            tabpfn_checkpoints.TABPFN_CLF_FILENAME,
+            tabpfn_checkpoints.TABPFN_REG_FILENAME,
+        )
+    )
+    for path in paths:
+        path.touch()
+    monkeypatch.setattr(
+        tabpfn_checkpoints, "require_checkpoints", lambda *_args, **_kwargs: paths
+    )
+    spec = replace(
+        _spec("one", "countercontex"),
+        method=MethodSpec(
+            "countercontex",
+            "default",
+            {"foundation": {"backend": "tabpfn"}},
+        ),
+    )
+    runner = GenericRunner(
+        ExecutionSpec(tmp_path, cache_paths={"tabpfn": tmp_path}),
+        registry=DEFAULT_METHOD_REGISTRY,
+        case_loader=lambda spec: _case(spec.dataset.name),
+    )
+
+    versions = runner._versions(spec, _case("one"))
+
+    assert versions.backend_implementation == "tabpfn-v2-proposal-v1"
+    assert dict(versions.checkpoint_content_ids) == {
+        path.name: tabpfn_checkpoints._CHECKPOINT_SHA256[path.name]
+        for path in paths
+    }
+
+
 def test_countercontex_does_not_select_or_resume_old_identity_manifest(
     tmp_path,
 ) -> None:

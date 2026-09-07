@@ -4,7 +4,7 @@ CounterContEX is a counterfactual-explanation benchmark for tabular classifiers.
 It has one execution path for dataset preparation, counterfactual generation,
 evaluation, persistence, and comparison across methods.
 
-The main research method is CounterContEx with a TabICL proposal backend. The repository
+The main research method is CounterContEx with TabICL and TabPFN v2 proposal backends. The repository
 also includes NICE, Wachter, Growing Spheres, DiCE, and FACE baselines. All methods
 use the same benchmark cases, evaluation metrics, artifact schema, and run identity
 rules.
@@ -36,7 +36,7 @@ The method registry contains:
 
 | Method | Registry name | Multiple CFs | Optional runtime |
 |---|---|---:|---|
-| CounterContEx | `countercontex` | Yes | TabICL checkpoints |
+| CounterContEx | `countercontex` | Yes | TabICL or TabPFN v2 checkpoints |
 | NICE | `nice` | No | None |
 | Wachter | `wachter` | No | None |
 | Growing Spheres | `growing_spheres` | No | None |
@@ -48,9 +48,9 @@ and `retained_xgboost`. Matrix files may use the backward-compatible singular
 `target_model` mapping or a `target_models` list to expand classifier family as a
 scientific axis.
 
-CounterContEx also has a deterministic `empirical` proposal backend. This backend is
-useful for checkpoint-free ablations. It does not support confidence conditioning
-or joint-density scoring.
+CounterContEx also has a deterministic `empirical` proposal backend for checkpoint-free
+ablations. TabPFN v2 and empirical do not support confidence conditioning or joint-density
+scoring; unsupported combinations fail during preparation.
 
 ## Setup
 
@@ -84,6 +84,15 @@ uv run python -m experiments.zeroshot_cf.tabicl_checkpoints
 The checkpoint command stores the files under
 `experiments/zeroshot_cf/models/tabicl/`. Normal benchmark runs can then operate
 with `HF_HUB_OFFLINE=1`.
+
+TabPFN v2 runs use a separate verified classifier/regressor pair:
+
+```bash
+uv run python -m experiments.zeroshot_cf.tabpfn_checkpoints
+```
+
+Those files are stored under `experiments/zeroshot_cf/models/tabpfn/` and their exact content
+hashes enter scientific run identity.
 
 ## Run experiments
 
@@ -181,7 +190,7 @@ CounterContEx has a second internal boundary under
 [`methods/countercontex/`](experiments/zeroshot_cf/methods/countercontex/):
 
 ```text
-CounterContEx method -> search -> ProposalSession -> TabICL or empirical backend
+CounterContEx method -> search -> ProposalSession -> TabICL, TabPFN, or empirical backend
                                       ^
                                       |
                     backend identity and runtime policy
@@ -189,7 +198,7 @@ CounterContEx method -> search -> ProposalSession -> TabICL or empirical backend
 
 The proposal contract covers numerical batches, confidence conditioning,
 categorical distributions, and optional joint scoring. The generic runner has no
-TabICL, empirical, or CounterContEx-specific policy.
+TabICL, TabPFN, empirical, or CounterContEx-specific policy.
 
 ### Evaluation
 
