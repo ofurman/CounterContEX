@@ -443,3 +443,78 @@ method baselines on F4. A focused witness led to the minimal optional `--baselin
 both roots still pass strict, read-only membership validation. The hypothesis that confidence
 conditioning itself raises achieved confidence was not supported and is reported unchanged.
 **Commit**: `HEAD` (this stage commit)
+
+## 2026-09-07 04:45 -- Stage 10: E5-E7 ablations and cost Pareto -- DONE
+**Did**: Executed E5 (210/210), E6 (240/240), and E7 (80/80) on `gx10-bdc5`; the managed
+launcher published each strict aggregate before `launch/stage10.DONE`. Added selectable DPP,
+seeded-random, and greedy-farthest pool selection within CounterContEx; exposed configurable
+TabICL context size and predicted/true training labels without exposing test labels; and fixed
+F5 so it retains the 4 datasets x 4 resolved E7 configurations rather than collapsing them by
+method name. D-13 freezes the observed E7 C3 point for E9/E10: sparse five-quantile proposals,
+context 256, predicted labels, k=3, default DPP, without confidence conditioning or joint scoring.
+
+**Verification**: GATE all 150 E5 paired comparisons differ in exactly one resolved scientific
+leaf: proposal quantiles, search mode, revisits, or selector. All 120 E6 label comparisons and
+180 adjacent-size comparisons differ only in `context_labels` or `context_size`, respectively.
+GATE the true-label path receives only `BenchmarkCase.dataset.y_train` as optional `y_reference`;
+`MethodContext` has no test/factual label or target-label member, and its focused contract test
+reads the constructed context. Focused tests passed 47; changed-file Ruff, both frozen-matrix
+dry-runs (E9 12 cells, E10 6), and `git diff --check` passed before the full gate.
+
+**Report**: E5 macro means for mode / nine quantiles / data-plausible / revisits-off are
+coverage `.911667/.981667/.981667/.965000`, threshold validity
+`.192876/.113092/.170572/.113589`, proximity `.083567/.069148/.082331/.067435`, and mean total
+seconds `119.825/69.633/139.833/68.483`. Thus quantiles improve coverage, proximity, and runtime
+but reduce conditional threshold validity; data-plausible recovers .057480 validity and improves
+neighbour support by .005199 at the cost of .013184 proximity and 70.200 s. Disabling revisits
+is nearly neutral. DPP / random / greedy-farthest selector means are threshold validity
+`.229431/.228002/.260906`, action Jaccard `.746894/.600300/.662453`, pairwise Gower
+`.080104/.066503/.085924`, and seconds `674.080/614.436/591.237`; greedy-farthest is the only
+alternative that improves both recorded diversity orientations over DPP, although its proximity
+is .004900 worse.
+
+For E6, predicted-label context sizes 64/128/256/512 give coverage
+`.889333/.875667/.896000/.912667`, threshold validity `.264025/.238881/.212070/.196353`,
+proximity `.118627/.104258/.095112/.082489`, and mean seconds
+`177.088/231.795/311.188/449.494`. Larger contexts buy proximity and eventually coverage while
+losing threshold validity and runtime. At sizes 64/128/256/512, true-minus-predicted differences
+are coverage `-.019000/-.026000/-.032667/-.051000`, validity
+`-.026687/-.015059/-.013501/-.013100`, proximity `+.008421/+.019732/+.031941/+.039188`, and
+seconds `+23.040/+29.995/+64.213/+159.871`; true training labels are not beneficial here.
+Actionability is 1.0 in every E5/E6/E7 arm.
+
+F5's C1/C2/C3/C4 macro coverage is `.864/.948/.983/1.000`, threshold validity
+`.296154/.217709/.291855/.172385`, proximity `.103595/.089681/.064201/.053046`, and mean total
+seconds `227.637/139.119/341.726/848.042`. C3 is the frozen balance; C4's mean is dominated by
+Lending Club at 2768.878 s/cell. E5/E6/E7 consumed 18.97938/21.80207/8.64736 cell-hours,
+respectively. Including Stage 1 feasibility and preserved superseded E1 DiCE attempts, measured
+campaign compute through E7 is a 124.91096 cell-hour lower bound, already above the ~120 h
+estimate. Stage 1's zero HELOC/k=1 spread makes every nonzero delta exceed that narrow repeatability
+reference, but none is presented as six-dataset significance.
+
+**Artifacts**: Aggregate SHA-256 values are E5 `e9875119...bfcb`, E6
+`ba8bc038...329f`, and E7 `77aaf820...3b4b`; F5 CSV is `c89e80d2...7a9a` and its PDF is
+`9cb7201b...230`. The F5 CSV contains 16 data rows and preserves five seeds per point.
+
+**Provenance**: Exact membership was re-resolved from all three tracked matrices and read through
+strict canonical aggregation; missing, extra, duplicate, partial, or identity-mismatched cells
+turn the gate red. Leaf differences were computed from every matched manifest identity rather
+than display labels. Metrics came from canonical summaries, timings from manifest lifecycle
+blocks, and F5 from the artifact-only builder. The compute lower bound sums Stage 1 manifests,
+canonical E1 once plus unique superseded DiCE identities, and E2-E7 once; copied quarantine rows
+are excluded.
+
+**Problems**: The original F5 grouped only by method and collapsed all four CounterContEx cost
+points. A focused failing witness led to dataset-by-resolved-configuration seed aggregation with
+mean, sample standard deviation, and actual n. The E5 alternatives and true-label hypothesis had
+mixed or negative results and are reported unchanged. The first label-boundary fixture used equal
+train/test labels and could not detect the leak it named; an independent audit caught it, and a
+delegated light fix made the labels distinct and asserted both equality to training labels and
+inequality to test labels. Full suite: 299 passed.
+The completed independent read-only audit accepted exact 530-cell membership, all six payloads
+and recomputed identities, all 150 E5 and 120+180 E6 one-axis pairs, the strengthened label
+boundary, every reported effect and timing, and the C3 freeze. It independently rebuilt all 16
+F5 points with maximum numeric difference `4.26e-14` and reproduced every recorded hash; 47
+focused tests, changed-file Ruff, and the 299-test suite passed. Its interpretation caveats are
+incorporated above.
+**Commit**: `HEAD` (this stage commit)

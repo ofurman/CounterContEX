@@ -333,6 +333,7 @@ def method_context(case: BenchmarkCase) -> MethodContext:
         X_reference=case.dataset.X_train,
         feature_schema=case.dataset.schema,
         oracle=case.oracle,
+        y_reference=case.dataset.y_train,
     )
 
 

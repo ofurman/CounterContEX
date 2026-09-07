@@ -198,6 +198,6 @@ def generate_with_backend(
     return generate_counterfactual_batch(
         inputs,
         discriminator=discriminator,
-        config=config.generator_config(n_counterfactuals),
+        config=config.generator_config(n_counterfactuals, seed=seed),
         point_backend_factory=point_backend_factory,
     )

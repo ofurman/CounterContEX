@@ -10,7 +10,6 @@ import numpy as np
 from experiments.zeroshot_cf.action_space import OneHotActionGroup
 from experiments.zeroshot_cf.core.contracts import MethodContext
 from experiments.zeroshot_cf.generator import (
-    ATHENA_CONTEXT_SIZE,
     DEFAULT_POINT_ESTIMATE,
     empirical_confidence_grid,
 )
@@ -36,6 +35,7 @@ class CounterContExBackendInputs:
     categorical_groups: tuple[OneHotActionGroup, ...]
     actionable_groups: tuple[OneHotActionGroup, ...]
     oracle: Any
+    y_reference: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -229,6 +229,7 @@ class PreparedTabICLBackend:
     categorical_codec: GroupedCategoricalCodec | None
     X_sampler_reference: np.ndarray
     reference_predictions: np.ndarray
+    reference_labels: np.ndarray
     reference_probabilities: np.ndarray | None
     oracle_classes: np.ndarray
     backend_id: str = "tabicl"
@@ -296,10 +297,10 @@ class PreparedTabICLBackend:
                 confidence_context = self.reference_probabilities[:, int(positions[0])]
             proposal_context.set_context(
                 self.X_sampler_reference,
-                y_context=self.reference_predictions,
+                y_context=self.reference_labels,
                 confidence_context=confidence_context,
                 target_class=None,
-                max_context=ATHENA_CONTEXT_SIZE,
+                max_context=foundation.context_size,
                 selection="knn",
                 query=query,
             )
@@ -324,10 +325,10 @@ class PreparedTabICLBackend:
                     raise RuntimeError("joint scorer is unavailable")
                 joint_context.set_context(
                     self.X_sampler_reference,
-                    y_context=self.reference_predictions,
+                    y_context=self.reference_labels,
                     confidence_context=None,
                     target_class=None,
-                    max_context=ATHENA_CONTEXT_SIZE,
+                    max_context=foundation.context_size,
                     selection="knn",
                     query=query,
                 )
@@ -394,6 +395,7 @@ class TabICLBackend:
         return prepare_backend(
             CounterContExBackendInputs(
                 X_reference=context.X_reference,
+                y_reference=context.y_reference,
                 categorical_groups=schema.categorical_groups,
                 actionable_groups=schema.actionable_groups,
                 oracle=context.oracle,
@@ -425,6 +427,14 @@ def prepare_backend(
         else categorical_codec.encode(inputs.X_reference)
     )
     predictions = np.asarray(inputs.oracle.predict(inputs.X_reference)).reshape(-1)
+    if config.foundation.context_labels == "true":
+        if inputs.y_reference is None:
+            raise ValueError("true context labels require training reference labels")
+        labels = np.asarray(inputs.y_reference).reshape(-1)
+        if len(labels) != len(inputs.X_reference):
+            raise ValueError("reference feature and label row counts differ")
+    else:
+        labels = predictions
     probabilities = (
         np.asarray(inputs.oracle.predict_proba(inputs.X_reference))
         if config.foundation.confidence_quantiles is not None
@@ -444,6 +454,7 @@ def prepare_backend(
         categorical_codec=categorical_codec,
         X_sampler_reference=X_sampler_reference,
         reference_predictions=predictions,
+        reference_labels=labels,
         reference_probabilities=probabilities,
         oracle_classes=classes,
     )

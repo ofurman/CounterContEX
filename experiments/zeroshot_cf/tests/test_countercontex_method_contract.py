@@ -79,6 +79,7 @@ def _context() -> MethodContext:
         X_reference=np.array([[0.0, 0.1], [0.4, 0.2], [0.8, 0.3], [1.0, 0.4]]),
         feature_schema=schema,
         oracle=_Oracle(),
+        y_reference=np.array([1, 1, 0, 0]),
     )
 
 
@@ -274,7 +275,57 @@ def test_method_prepare_owns_portable_backend_setup(
     assert isinstance(prepared, PreparedMethod)
     assert prepared.backend is backend
     assert captured["inputs"].oracle is context.oracle
+    np.testing.assert_array_equal(captured["inputs"].y_reference, context.y_reference)
     assert captured["config"] is method.config
+
+
+@pytest.mark.parametrize(
+    ("context_labels", "expected"),
+    (("predictions", [0, 0, 1, 1]), ("true", [1, 1, 0, 0])),
+)
+def test_tabicl_context_uses_only_selected_training_labels_and_size(
+    context_labels: str, expected: list[int]
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class _Sampler:
+        estimator_params: dict[str, object] = {}
+
+        def __init__(self, **kwargs):
+            del kwargs
+
+        def set_context(self, _X, **kwargs):
+            calls.append(kwargs)
+
+    class _JointScorer:
+        pass
+
+    context = _context()
+    config = CounterContExConfig(
+        foundation=CounterContExFoundationConfig(
+            context_size=64,
+            context_labels=context_labels,
+        )
+    )
+    backend = prepare_backend(
+        CounterContExBackendInputs(
+            X_reference=context.X_reference,
+            categorical_groups=(),
+            actionable_groups=(),
+            oracle=context.oracle,
+            y_reference=context.y_reference,
+        ),
+        config,
+        runtime=CounterContExBackendRuntime(
+            device="cpu", sampler_type=_Sampler, joint_scorer_type=_JointScorer
+        ),
+    )
+
+    backend.point_backend_factory(seed=17)(np.array([0.1, 0.1]), 1)
+
+    assert len(calls) == 1
+    np.testing.assert_array_equal(calls[0]["y_context"], expected)
+    assert calls[0]["max_context"] == 64
 
 
 def test_method_passes_request_k_seed_and_portable_domains_to_search(

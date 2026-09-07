@@ -38,6 +38,8 @@ class DiverseBeamSearchConfig:
     dpp_action_weight: float = 0.75
     dpp_gower_quality_weight: float = 4.0
     dpp_sparsity_quality_weight: float = 1.0
+    selection_strategy: str = "dpp"
+    selection_seed: int = 0
 
     def __post_init__(self) -> None:  # noqa: C901
         if self.n_counterfactuals < 1:
@@ -65,6 +67,12 @@ class DiverseBeamSearchConfig:
             raise ValueError("dpp_gower_quality_weight must be non-negative")
         if self.dpp_sparsity_quality_weight < 0:
             raise ValueError("dpp_sparsity_quality_weight must be non-negative")
+        if self.selection_strategy not in {"dpp", "random", "greedy_farthest"}:
+            raise ValueError(
+                "selection_strategy must be 'dpp', 'random', or 'greedy_farthest'"
+            )
+        if self.selection_seed < 0:
+            raise ValueError("selection_seed must be non-negative")
 
 
 @dataclass(frozen=True)
@@ -628,6 +636,98 @@ def select_dpp_subset(
     return np.asarray(ordered, dtype=int), best_logdet
 
 
+def _quality_order(
+    rows: np.ndarray,
+    probabilities: np.ndarray,
+    factual: np.ndarray,
+    numerical_columns: Sequence[int],
+    categorical_groups: Sequence[OneHotActionGroup],
+) -> list[int]:
+    gower = grouped_gower_distance(
+        rows, factual, numerical_columns, categorical_groups
+    )
+    sparsity = action_unit_change_count(
+        rows, factual, numerical_columns, categorical_groups
+    )
+    return sorted(
+        range(len(rows)),
+        key=lambda index: (
+            float(gower[index]),
+            int(sparsity[index]),
+            -float(probabilities[index]),
+            rows[index].tobytes(),
+        ),
+    )
+
+
+def select_candidate_subset(
+    rows: np.ndarray,
+    probabilities: np.ndarray,
+    factual: np.ndarray,
+    numerical_columns: Sequence[int],
+    categorical_groups: Sequence[OneHotActionGroup],
+    config: DiverseBeamSearchConfig,
+) -> tuple[np.ndarray, float | None]:
+    """Select a seeded or deterministic fixed-size subset from a valid pool."""
+    matrix = np.atleast_2d(np.asarray(rows, dtype=np.float64))
+    target_probabilities = np.asarray(probabilities, dtype=np.float64)
+    if len(matrix) != len(target_probabilities):
+        raise ValueError("rows and probabilities must have the same length")
+    k = min(config.n_counterfactuals, len(matrix))
+    if config.selection_strategy == "dpp":
+        return select_dpp_subset(
+            matrix,
+            target_probabilities,
+            factual,
+            numerical_columns,
+            categorical_groups,
+            config,
+        )
+    if k == 0:
+        return np.empty(0, dtype=int), None
+    quality_order = _quality_order(
+        matrix,
+        target_probabilities,
+        factual,
+        numerical_columns,
+        categorical_groups,
+    )
+    if config.selection_strategy == "random":
+        chosen = set(
+            np.random.default_rng(config.selection_seed)
+            .choice(len(matrix), k, replace=False)
+            .tolist()
+        )
+        return np.asarray(
+            [index for index in quality_order if index in chosen], dtype=int
+        ), None
+
+    selected = [quality_order[0]]
+    remaining = set(quality_order[1:])
+    quality_rank = {index: rank for rank, index in enumerate(quality_order)}
+    while len(selected) < k:
+        best = max(
+            remaining,
+            key=lambda index: (
+                min(
+                    float(
+                        grouped_gower_distance(
+                            matrix[index],
+                            matrix[chosen],
+                            numerical_columns,
+                            categorical_groups,
+                        )[0]
+                    )
+                    for chosen in selected
+                ),
+                -quality_rank[index],
+            ),
+        )
+        selected.append(best)
+        remaining.remove(best)
+    return np.asarray(selected, dtype=int), None
+
+
 def generate_diverse_counterfactuals(  # noqa: C901, PLR0912, PLR0913
     sampler: Any,
     disc: Any,
@@ -796,7 +896,7 @@ def generate_diverse_counterfactuals(  # noqa: C901, PLR0912, PLR0913
         pool_probabilities = np.asarray(
             [state.probability for state in pool], dtype=np.float64
         )
-        selected_indices, dpp_logdet = select_dpp_subset(
+        selected_indices, dpp_logdet = select_candidate_subset(
             pool_rows,
             pool_probabilities,
             factual,

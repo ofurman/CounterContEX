@@ -57,8 +57,11 @@ class CounterContExDiversityConfig:
     max_extra_actions: int = 2
     max_gower_ratio: float = 1.5
     max_gower_increase: float = 0.02
+    selection_strategy: str = "dpp"
 
-    def build(self, n_counterfactuals: int) -> DiverseBeamSearchConfig:
+    def build(
+        self, n_counterfactuals: int, *, selection_seed: int = 0
+    ) -> DiverseBeamSearchConfig:
         return DiverseBeamSearchConfig(
             n_counterfactuals=n_counterfactuals,
             beam_width=self.beam_width,
@@ -66,6 +69,8 @@ class CounterContExDiversityConfig:
             max_extra_actions=self.max_extra_actions,
             max_gower_ratio=self.max_gower_ratio,
             max_gower_increase=self.max_gower_increase,
+            selection_strategy=self.selection_strategy,
+            selection_seed=selection_seed,
         )
 
     def __post_init__(self) -> None:
@@ -83,6 +88,8 @@ class CounterContExFoundationConfig:
     tabicl_joint_permutations: int = 1
     cache_dir: Path | None = None
     backend: str = "tabicl"
+    context_size: int = 512
+    context_labels: str = "predictions"
 
     def __post_init__(self) -> None:
         if not self.backend:
@@ -93,6 +100,10 @@ class CounterContExFoundationConfig:
             raise ValueError("temperature must be non-negative")
         if self.tabicl_joint_permutations < 1:
             raise ValueError("tabicl_joint_permutations must be positive")
+        if self.context_size < 1:
+            raise ValueError("context_size must be positive")
+        if self.context_labels not in {"predictions", "true"}:
+            raise ValueError("context_labels must be 'predictions' or 'true'")
 
 
 @dataclass(frozen=True)
@@ -114,7 +125,9 @@ class CounterContExConfig:
         ):
             raise ValueError("confidence_quantiles require candidate_quantiles")
 
-    def generator_config(self, n_counterfactuals: int) -> TabICLGeneratorConfig:
+    def generator_config(
+        self, n_counterfactuals: int, *, seed: int = 0
+    ) -> TabICLGeneratorConfig:
         """Translate benchmark-facing settings to the retained search config."""
         return TabICLGeneratorConfig(
             tau=self.search.tau,
@@ -128,7 +141,9 @@ class CounterContExConfig:
             joint_shortlist_size=self.search.joint_shortlist_size,
             max_extra_actions=self.search.max_extra_actions,
             min_joint_log_gain=self.search.min_joint_log_gain,
-            diversity_config=self.diversity.build(n_counterfactuals),
+            diversity_config=self.diversity.build(
+                n_counterfactuals, selection_seed=seed
+            ),
             categorical_proposal_count=self.search.categorical_proposal_count,
         )
 

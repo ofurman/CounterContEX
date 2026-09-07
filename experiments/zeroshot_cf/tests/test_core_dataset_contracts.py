@@ -146,7 +146,7 @@ def test_factual_selection_keeps_unique_source_indices_and_is_deterministic() ->
 
 
 def test_case_targets_and_probability_columns_follow_predictor_classes() -> None:
-    dataset = _dataset()
+    dataset = replace(_dataset(), y_test=np.array([7, 2, 7, 2]))
     oracle = _ReversedLabelPredictor()
     case = build_benchmark_case(
         dataset,
@@ -182,6 +182,8 @@ def test_case_targets_and_probability_columns_follow_predictor_classes() -> None
     with pytest.raises(TypeError):
         case.protocol["target_model"]["revision"] = "changed"
     context = method_context(case)
+    np.testing.assert_array_equal(context.y_reference, dataset.y_train)
+    assert not np.array_equal(context.y_reference, dataset.y_test)
     assert not hasattr(context, "true_labels")
     assert not hasattr(context, "targets")
 

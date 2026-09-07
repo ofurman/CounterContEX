@@ -265,6 +265,46 @@ def test_paper_builders_accept_only_artifact_and_destination_paths():
         )
 
 
+def test_f5_preserves_resolved_configuration_points(tmp_path, monkeypatch):
+    rows = []
+    for dataset in ("heloc", "bank_marketing"):
+        for configuration, timing, validity in (
+            ("cheap", 1.0, 0.5),
+            ("expensive", 4.0, 0.8),
+        ):
+            scientific = {
+                "method": {
+                    "name": "countercontex",
+                    "variant": "default",
+                    "n_counterfactuals": 1,
+                    "params": {"configuration": configuration},
+                }
+            }
+            for seed in (17, 42):
+                rows.append(
+                    {
+                        "dataset": dataset,
+                        "method": "countercontex",
+                        "seed": seed,
+                        "scientific_group": canonical_json(scientific),
+                        "timing_total_s": timing,
+                        "validity_returned_threshold": validity,
+                    }
+                )
+    monkeypatch.setattr(builders, "load_published_cells", lambda *_: tuple(rows))
+
+    _figure, data = builders.build_f5_cost_quality(
+        "artifacts", "matrix", tmp_path
+    )
+    with data.open(newline="") as handle:
+        output = list(csv.DictReader(handle))
+
+    assert len(output) == 4
+    assert {row["dataset"] for row in output} == {"heloc", "bank_marketing"}
+    assert len({row["configuration"] for row in output}) == 2
+    assert {row["seed_n"] for row in output} == {"2"}
+
+
 def test_t2_reports_validity_and_proximity_with_diversity():
     assert builders._TABLE_METRICS["t2_diversity"] == (
         "set_coverage_at_k",

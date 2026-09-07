@@ -18,6 +18,7 @@ from experiments.zeroshot_cf.analysis.core import (
 )
 from experiments.zeroshot_cf.analysis.statistics import holm_wilcoxon
 from experiments.zeroshot_cf.orchestration.matrix import load_matrix_config
+from experiments.zeroshot_cf.orchestration.spec import canonical_json
 from scipy.stats import rankdata, studentized_range
 
 matplotlib.use("Agg")
@@ -277,20 +278,40 @@ def build_f5_cost_quality(
 ) -> tuple[Path, Path]:
     cells = load_published_cells(output_root, matrix_config)
     frame = _numeric(cells, "timing_total_s")
-    grouped = frame.groupby("method", as_index=False).agg(
-        timing_total_s=("timing_total_s", "mean"),
-        validity_returned_threshold=("validity_returned_threshold", "mean"),
+    frame["configuration"] = frame["scientific_group"].map(
+        lambda payload: canonical_json(json.loads(payload)["method"])
+    )
+    grouped = frame.groupby(
+        ["dataset", "method", "configuration"], as_index=False
+    ).agg(
+        seed_n=("seed", "count"),
+        timing_total_s_mean=("timing_total_s", "mean"),
+        timing_total_s_std=("timing_total_s", "std"),
+        validity_returned_threshold_mean=(
+            "validity_returned_threshold",
+            "mean",
+        ),
+        validity_returned_threshold_std=(
+            "validity_returned_threshold",
+            "std",
+        ),
     )
     figure, data = _paths(output_dir, "f5_cost_quality")
     grouped.to_csv(data, index=False)
-    _save_scatter(
-        grouped,
-        x="timing_total_s",
-        y="validity_returned_threshold",
-        figure=figure,
-        xlabel="Total runtime (s)",
-        ylabel="Threshold validity",
-    )
+    fig, axis = plt.subplots(figsize=(7.0, 4.2))
+    for dataset, block in grouped.groupby("dataset", sort=True):
+        ordered = block.sort_values("timing_total_s_mean")
+        axis.plot(
+            ordered["timing_total_s_mean"],
+            ordered["validity_returned_threshold_mean"],
+            marker="o",
+            label=dataset,
+        )
+    axis.set(xlabel="Mean total runtime (s)", ylabel="Threshold validity")
+    axis.legend(fontsize="small")
+    fig.tight_layout()
+    fig.savefig(figure)
+    plt.close(fig)
     return figure, data
 
 

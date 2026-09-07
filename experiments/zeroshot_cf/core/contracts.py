@@ -296,6 +296,7 @@ class MethodContext:
     X_reference: np.ndarray
     feature_schema: FeatureSchema
     oracle: Predictor
+    y_reference: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         X = readonly_array(
@@ -305,6 +306,11 @@ class MethodContext:
             raise ValueError("reference feature width must match schema")
         validate_predictor(self.oracle)
         object.__setattr__(self, "X_reference", X)
+        if self.y_reference is not None:
+            labels = readonly_array(self.y_reference, ndim=1, name="y_reference")
+            if len(labels) != len(X):
+                raise ValueError("reference feature and label row counts differ")
+            object.__setattr__(self, "y_reference", labels)
 
 
 @dataclass(frozen=True)

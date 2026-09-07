@@ -113,6 +113,9 @@ def test_pre_ablation_campaign_method_configs_are_registry_valid():
         "campaign_e2_diverse.yaml",
         "campaign_e3_backend.yaml",
         "campaign_e4_confidence.yaml",
+        "campaign_e5_search.yaml",
+        "campaign_e6_context.yaml",
+        "campaign_e7_cost.yaml",
         "campaign_e10_headline.yaml",
     ):
         config = load_matrix_config(_ROOT / filename)

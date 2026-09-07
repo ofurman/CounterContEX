@@ -222,6 +222,7 @@ class CounterContExMethod:
             if self.config.foundation.backend == "tabicl":
                 inputs = CounterContExBackendInputs(
                     X_reference=context.X_reference,
+                    y_reference=context.y_reference,
                     categorical_groups=context.feature_schema.categorical_groups,
                     actionable_groups=context.feature_schema.actionable_groups,
                     oracle=context.oracle,

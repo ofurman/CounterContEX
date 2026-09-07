@@ -132,3 +132,16 @@ the replacement preserves the intended one-axis ablation and makes all backend c
 "The headline generation threshold was selected after inspecting the E4 confidence--proximity
 tradeoff; headline results using it are therefore selection-informed, not an unbiased confirmatory
 comparison." If Stage 12 retains its independently frozen setting, this disclosure is unnecessary.
+
+### D-13: Freeze the Stage 12 configuration at E7 C3
+**Date**: 2026-09-07 - **Stage**: 10
+**Options**: A) cheap mode/context-128/k=1 B) five quantiles/context-128/k=1 C) five
+quantiles/context-256/k=3 D) the full-reference confidence-conditioned configuration
+**Chosen**: C, with predicted training-context labels and the default DPP selector
+**Rationale**: C3 is an observed E7 point with .983 coverage, .292 threshold validity, .064
+grouped-Gower proximity, and 341.726 mean seconds/cell. Against C4 it improves validity by
+.119 and is 2.48x faster, while conceding .017 coverage and .011 proximity. C2 is faster but
+has lower validity and returns k=1. E5's greedy-farthest selector was promising, but combining
+it with C3 was not measured, so the freeze does not construct a post-hoc configuration. E9 and
+E10 now encode this exact choice; no E4 threshold was adopted, so D-12's disclosure is not
+triggered.

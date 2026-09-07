@@ -13,6 +13,7 @@ from experiments.zeroshot_cf.diverse_search import (
     action_set_jaccard_distance,
     action_unit_signature,
     generate_diverse_counterfactuals,
+    select_candidate_subset,
     select_dpp_subset,
 )
 
@@ -135,6 +136,46 @@ def test_dpp_prefers_distinct_action_sets() -> None:
     }
     assert len(signatures) == 3
     assert logdet is not None
+
+
+def test_random_selector_is_seeded_and_without_replacement() -> None:
+    rows = np.arange(10, dtype=float).reshape(-1, 1) / 10.0
+    config = DiverseBeamSearchConfig(
+        n_counterfactuals=3,
+        candidate_pool_size=10,
+        selection_strategy="random",
+        selection_seed=17,
+    )
+
+    first, first_score = select_candidate_subset(
+        rows, np.full(10, 0.8), np.zeros(1), [0], [], config
+    )
+    second, second_score = select_candidate_subset(
+        rows, np.full(10, 0.8), np.zeros(1), [0], [], config
+    )
+
+    assert set(first) == set(np.random.default_rng(17).choice(10, 3, replace=False))
+    np.testing.assert_array_equal(first, second)
+    assert first_score is None and second_score is None
+
+
+def test_greedy_farthest_starts_with_best_quality_then_maximizes_distance() -> None:
+    rows = np.array([[0.1], [0.2], [1.0]])
+    selected, score = select_candidate_subset(
+        rows,
+        np.full(3, 0.8),
+        np.zeros(1),
+        [0],
+        [],
+        DiverseBeamSearchConfig(
+            n_counterfactuals=2,
+            candidate_pool_size=3,
+            selection_strategy="greedy_farthest",
+        ),
+    )
+
+    np.testing.assert_array_equal(selected, [0, 2])
+    assert score is None
 
 
 def test_beam_batches_all_numerical_pairs_per_depth() -> None:
