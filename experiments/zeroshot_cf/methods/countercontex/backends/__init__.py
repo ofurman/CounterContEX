@@ -10,11 +10,13 @@ from experiments.zeroshot_cf.methods.countercontex.backends.base import (
 )
 from experiments.zeroshot_cf.methods.countercontex.backends.empirical import (
     EmpiricalBackend,
+    LocalEmpiricalBackend,
 )
 
 __all__ = [
     "CategoryProposals",
     "EmpiricalBackend",
+    "LocalEmpiricalBackend",
     "PreparedBackend",
     "ProposalBackend",
     "ProposalCapabilities",

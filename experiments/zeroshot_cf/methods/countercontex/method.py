@@ -27,6 +27,7 @@ from experiments.zeroshot_cf.methods.countercontex.backends.base import (
 )
 from experiments.zeroshot_cf.methods.countercontex.backends.empirical import (
     EmpiricalBackend,
+    LocalEmpiricalBackend,
 )
 from experiments.zeroshot_cf.methods.countercontex.config import CounterContExConfig
 from experiments.zeroshot_cf.methods.countercontex.search import generate_with_backend
@@ -229,6 +230,8 @@ class CounterContExMethod:
                 backend = prepare_backend(inputs, self.config)
             elif self.config.foundation.backend == "empirical":
                 backend = EmpiricalBackend().prepare(context)
+            elif self.config.foundation.backend == "empirical_local":
+                backend = LocalEmpiricalBackend().prepare(context)
             else:
                 raise ValueError(
                     f"unknown CounterContEx proposal backend: "

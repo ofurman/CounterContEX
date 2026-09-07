@@ -55,6 +55,22 @@ def _analyze(path: str, output: str | None) -> int:
     return 0
 
 
+def _analyze_e3(path: str, output: str | None) -> int:
+    config = _config(path)
+    from experiments.zeroshot_cf.analysis.e3 import build_e3_analysis
+
+    destination = (
+        Path(output)
+        if output
+        else config.execution.output_root.with_name(
+            f"{config.execution.output_root.name}_analysis"
+        )
+    )
+    products = build_e3_analysis(config.execution.output_root, Path(path), destination)
+    print(f"wrote {len(products)} E3 analysis products into {destination}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -69,6 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
     analyze = commands.add_parser("analyze", help="build paper tables and figures")
     analyze.add_argument("--config", required=True)
     analyze.add_argument("--output")
+    analyze_e3 = commands.add_parser(
+        "analyze-e3", help="build paired clean-E3 analysis tables"
+    )
+    analyze_e3.add_argument("--config", required=True)
+    analyze_e3.add_argument("--output")
     commands.add_parser("list-methods", help="list registered method names")
     return parser
 
@@ -88,6 +109,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _aggregate(args.config)
     if args.command == "analyze":
         return _analyze(args.config, args.output)
+    if args.command == "analyze-e3":
+        return _analyze_e3(args.config, args.output)
     if args.command == "list-methods":
         from experiments.zeroshot_cf.methods.registry import DEFAULT_METHOD_REGISTRY
 

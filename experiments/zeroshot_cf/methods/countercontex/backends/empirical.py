@@ -8,12 +8,16 @@ from dataclasses import dataclass, field
 import numpy as np
 from experiments.zeroshot_cf.action_space import OneHotActionGroup
 from experiments.zeroshot_cf.core.contracts import MethodContext
+from experiments.zeroshot_cf.generator import ATHENA_CONTEXT_SIZE
+from experiments.zeroshot_cf.grouped_categorical import GroupedCategoricalCodec
 from experiments.zeroshot_cf.methods.countercontex.backends.base import (
     CategoryProposals,
     ProposalCapabilities,
 )
+from experiments.zeroshot_cf.mixed_distance import compact_gower_distance
 
 EMPIRICAL_BACKEND_IMPLEMENTATION_VERSION = "empirical-reference-v1"
+LOCAL_EMPIRICAL_BACKEND_IMPLEMENTATION_VERSION = "empirical-local-reference-v1"
 
 
 @dataclass(frozen=True)
@@ -161,3 +165,90 @@ class EmpiricalBackend:
         if reference.ndim != 2 or len(predictions) != len(reference):
             raise ValueError("empirical backend requires aligned reference predictions")
         return PreparedEmpiricalBackend(reference.copy(), predictions.copy())
+
+
+@dataclass(frozen=True)
+class PreparedLocalEmpiricalBackend:
+    reference: np.ndarray
+    encoded_reference: np.ndarray
+    reference_predictions: np.ndarray
+    categorical_codec: GroupedCategoricalCodec | None
+    backend_id: str = "empirical_local"
+    capabilities: ProposalCapabilities = ProposalCapabilities(
+        numerical_proposals=True,
+        categorical_distribution=True,
+    )
+
+    def for_factual(
+        self,
+        factual: np.ndarray,
+        target: int,
+        *,
+        seed: int,
+    ) -> EmpiricalProposalSession:
+        del seed
+        query = (
+            np.asarray(factual, dtype=np.float64)
+            if self.categorical_codec is None
+            else self.categorical_codec.encode_row(factual)
+        )
+        context_size = min(ATHENA_CONTEXT_SIZE, len(self.encoded_reference))
+        distances = compact_gower_distance(
+            self.encoded_reference,
+            query,
+            ()
+            if self.categorical_codec is None
+            else self.categorical_codec.categorical_columns,
+        )
+        nearest = np.argpartition(distances, context_size - 1)[:context_size]
+        nearest = np.sort(nearest)
+        target = int(target)
+        local_target = nearest[self.reference_predictions[nearest] == target]
+        global_target = np.flatnonzero(self.reference_predictions == target)
+        if len(global_target) == 0:
+            raise ValueError(
+                f"empirical_local has no reference rows for target class {target}"
+            )
+        fallback = len(local_target) == 0
+        selected = global_target if fallback else local_target
+        return EmpiricalProposalSession(
+            self.reference[selected],
+            diagnostics={
+                "categorical_confidence_batching": False,
+                "conditional_estimator_cache": False,
+                "tabicl_kv_cache": False,
+                "local_target_fallback": fallback,
+            },
+        )
+
+
+@dataclass(frozen=True)
+class LocalEmpiricalBackend:
+    """Target-class empirical proposals from TabICL's local Gower context."""
+
+    backend_id: str = "empirical_local"
+    capabilities: ProposalCapabilities = ProposalCapabilities(
+        numerical_proposals=True,
+        categorical_distribution=True,
+    )
+
+    def prepare(self, context: MethodContext) -> PreparedLocalEmpiricalBackend:
+        reference = np.asarray(context.X_reference, dtype=np.float64)
+        predictions = np.asarray(context.oracle.predict(reference)).reshape(-1)
+        if reference.ndim != 2 or len(predictions) != len(reference):
+            raise ValueError(
+                "empirical_local backend requires aligned reference predictions"
+            )
+        groups = context.feature_schema.categorical_groups
+        codec = (
+            None
+            if not groups
+            else GroupedCategoricalCodec.from_matrix(reference, groups)
+        )
+        encoded = reference if codec is None else codec.encode(reference)
+        return PreparedLocalEmpiricalBackend(
+            reference.copy(),
+            encoded.astype(np.float32, copy=True),
+            predictions.copy(),
+            codec,
+        )

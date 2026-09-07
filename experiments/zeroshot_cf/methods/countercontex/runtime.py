@@ -36,6 +36,22 @@ def _empirical_runtime(
     )
 
 
+def _local_empirical_runtime(
+    params: dict[str, Any],
+    cache_paths: Mapping[str, Path],
+    device: str | None,
+) -> ResolvedMethodRuntime:
+    del cache_paths, device
+    from experiments.zeroshot_cf.methods.countercontex.backends.empirical import (
+        LOCAL_EMPIRICAL_BACKEND_IMPLEMENTATION_VERSION,
+    )
+
+    return ResolvedMethodRuntime(
+        params,
+        backend_implementation=LOCAL_EMPIRICAL_BACKEND_IMPLEMENTATION_VERSION,
+    )
+
+
 def _tabicl_runtime(
     params: dict[str, Any],
     cache_paths: Mapping[str, Path],
@@ -80,6 +96,9 @@ def _tabicl_runtime(
 _BACKEND_POLICIES = {
     "tabicl": BackendRuntimePolicy("tabicl-proposal-v1", _tabicl_runtime),
     "empirical": BackendRuntimePolicy("empirical-reference-v1", _empirical_runtime),
+    "empirical_local": BackendRuntimePolicy(
+        "empirical-local-reference-v1", _local_empirical_runtime
+    ),
 }
 
 

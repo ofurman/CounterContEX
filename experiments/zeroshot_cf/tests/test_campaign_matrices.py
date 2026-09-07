@@ -1,5 +1,7 @@
 """Frozen paper-campaign matrix contracts."""
 
+from collections import Counter, defaultdict
+from copy import deepcopy
 from pathlib import Path
 
 from experiments.zeroshot_cf.datasets.target_models import (
@@ -11,6 +13,7 @@ from experiments.zeroshot_cf.orchestration.matrix import load_matrix_config
 
 _ROOT = Path(__file__).parents[1] / "configs" / "matrices"
 _DGX = Path(__file__).parents[1] / "dgx"
+_CLEAN_E3 = "campaign_e3_clean_backend.yaml"
 _EXPECTED = {
     "campaign_e1_main.yaml": 540,
     "campaign_e2_diverse.yaml": 60,
@@ -23,6 +26,87 @@ _EXPECTED = {
     "campaign_e9_fmswap.yaml": 12,
     "campaign_e10_headline.yaml": 6,
 }
+
+
+def test_clean_e3_backend_matrix_is_matched_and_frozen():
+    config = load_matrix_config(_ROOT / _CLEAN_E3)
+
+    assert len(config.runs) == len(set(config.expected_cells)) == 36
+    assert Counter(
+        run.method.params["foundation"]["backend"] for run in config.runs
+    ) == {"empirical": 12, "empirical_local": 12, "tabicl": 12}
+    assert config.execution.output_root.as_posix().endswith(
+        "results/campaign/e3_clean_backend"
+    )
+    assert not config.execution.legacy_export
+
+    by_block = defaultdict(list)
+    for run in config.runs:
+        assert run.dataset.name in {
+            "heloc",
+            "bank_marketing",
+            "give_me_some_credit",
+            "lending_club",
+        }
+        assert run.target_model.name in {
+            "retained_logistic_regression",
+            "retained_mlp",
+            "retained_xgboost",
+        }
+        assert run.seed == 42
+        assert run.protocol.max_test == 250
+        assert run.protocol.test_selection == "stratified"
+        assert run.method.n_counterfactuals == 1
+        assert run.method.params["search"] == {
+            "tau": 0.5,
+            "cf_mode": "sparse",
+            "candidate_quantiles": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+            "max_validity_steps": 100,
+            "allow_revisits": True,
+        }
+        assert run.method.params["foundation"] == {
+            "backend": run.method.params["foundation"]["backend"],
+            "n_estimators": 1,
+            "temperature": 1.0e-9,
+            "confidence_quantiles": None,
+        }
+        assert run.evaluation.metric_version == METRIC_SCHEMA_VERSION
+        assert run.evaluation.probability_threshold == 0.7
+        by_block[(run.dataset.name, run.target_model.name)].append(run)
+
+    for runs in by_block.values():
+        assert len(runs) == 3
+        normalized = []
+        for run in runs:
+            payload = deepcopy(run.scientific_payload())
+            payload["method"]["params"]["foundation"].pop("backend")
+            normalized.append(payload)
+        assert normalized[1:] == normalized[:-1]
+
+
+def test_clean_e3_backend_methods_are_registry_valid():
+    config = load_matrix_config(_ROOT / _CLEAN_E3)
+    for run in config.runs[:3]:
+        DEFAULT_METHOD_REGISTRY.create(
+            run.method.name,
+            run.method.params,
+            variant=run.method.variant,
+        )
+        backend = run.method.params["foundation"]["backend"]
+        if backend != "tabicl":
+            runtime = DEFAULT_METHOD_REGISTRY.resolve_runtime(
+                run.method.name,
+                run.method.params,
+                cache_paths={},
+                device="cuda",
+            )
+            assert runtime.params["foundation"]["backend"] == backend
+
+    for run in config.runs[::3]:
+        DEFAULT_TARGET_MODEL_REGISTRY.resolve(
+            run.target_model.name,
+            run.target_model.params,
+        )
 
 
 def test_campaign_matrices_have_frozen_counts_and_shared_protocol():
@@ -81,8 +165,7 @@ def test_campaign_target_model_specs_match_fixed_registry_params():
 def test_future_ablation_axes_have_unambiguous_raw_values():
     e5 = load_matrix_config(_ROOT / "campaign_e5_search.yaml")
     e5_searches = {
-        str(run.method.params["search"]): run.method.params["search"]
-        for run in e5.runs
+        str(run.method.params["search"]): run.method.params["search"] for run in e5.runs
     }
     assert all(
         "allow_revisits" not in search
@@ -91,9 +174,10 @@ def test_future_ablation_axes_have_unambiguous_raw_values():
     )
 
     e6 = load_matrix_config(_ROOT / "campaign_e6_context.yaml")
-    assert {
-        run.method.params["foundation"]["context_labels"] for run in e6.runs
-    } == {"predictions", "true"}
+    assert {run.method.params["foundation"]["context_labels"] for run in e6.runs} == {
+        "predictions",
+        "true",
+    }
 
     e7 = load_matrix_config(_ROOT / "campaign_e7_cost.yaml")
     full_reference = [
@@ -103,8 +187,7 @@ def test_future_ablation_axes_have_unambiguous_raw_values():
     ]
     assert full_reference
     assert all(
-        run.method.params["foundation"]["context_size"] == 512
-        for run in full_reference
+        run.method.params["foundation"]["context_size"] == 512 for run in full_reference
     )
 
 

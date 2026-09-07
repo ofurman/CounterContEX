@@ -30,6 +30,7 @@ from experiments.zeroshot_cf.methods.countercontex.backends.base import (
 )
 from experiments.zeroshot_cf.methods.countercontex.backends.empirical import (
     EmpiricalBackend,
+    LocalEmpiricalBackend,
 )
 from experiments.zeroshot_cf.methods.countercontex.backends.tabicl import (
     TabICLProposalSession,
@@ -40,6 +41,7 @@ from experiments.zeroshot_cf.methods.countercontex.config import (
     CounterContExSearchConfig,
 )
 from experiments.zeroshot_cf.methods.countercontex.method import CounterContExMethod
+from experiments.zeroshot_cf.methods.countercontex.runtime import resolve_runtime
 from experiments.zeroshot_cf.methods.countercontex.search import (
     _SessionSampler,
     generate_with_backend,
@@ -288,9 +290,200 @@ def test_empirical_backend_is_deterministic_and_conforms() -> None:
     np.testing.assert_allclose(proposals.probabilities, [1 / 3, 2 / 3])
 
 
+def test_local_empirical_backend_is_factual_local_and_seed_independent() -> None:
+    class MarkerOracle:
+        classes_ = np.array([0, 1])
+
+        def predict(self, X):
+            return (np.asarray(X)[:, 1] > 0.005).astype(int)
+
+        def predict_proba(self, X):
+            target = self.predict(X).astype(float)
+            return np.column_stack((1.0 - target, target))
+
+    local_non_targets = np.tile([0.2, 0.0], (502, 1))
+    local_targets = np.tile([0.2, 0.01], (10, 1))
+    distant_targets = np.tile([0.9, 0.01], (100, 1))
+    reference = np.vstack((local_non_targets, local_targets, distant_targets))
+    context = MethodContext(
+        X_reference=reference,
+        feature_schema=FeatureSchema(
+            names=("amount", "marker"),
+            numerical=(0, 1),
+            categorical_groups=(),
+            actionable_scalars=(0, 1),
+            actionable_groups=(),
+            immutable=(),
+            domains=FeatureDomains(
+                lower=np.zeros(2),
+                upper=np.ones(2),
+                discrete={},
+            ),
+        ),
+        oracle=MarkerOracle(),
+    )
+    prepared = LocalEmpiricalBackend().prepare(context)
+
+    near = prepared.for_factual(np.array([0.2, 0.0]), 1, seed=17)
+    repeated = prepared.for_factual(np.array([0.2, 0.0]), 1, seed=999)
+    distant = prepared.for_factual(np.array([0.9, 0.0]), 1, seed=17)
+    proposals = [
+        session.propose_numerical(
+            np.array([[0.0, 0.0]]),
+            [0],
+            quantiles=None,
+            confidence=None,
+            temperature=temperature,
+        )
+        for session, temperature in ((near, 0.0), (repeated, 1.0), (distant, 0.0))
+    ]
+
+    np.testing.assert_array_equal(proposals[0], proposals[1])
+    np.testing.assert_allclose(proposals[0], [0.2])
+    np.testing.assert_allclose(proposals[2], [0.9])
+
+
+def test_local_empirical_filters_target_before_categorical_frequencies() -> None:
+    class MarkerOracle:
+        classes_ = np.array([0, 1])
+
+        def predict(self, X):
+            return (np.asarray(X)[:, 0] > 0.5).astype(int)
+
+        def predict_proba(self, X):
+            target = self.predict(X).astype(float)
+            return np.column_stack((1.0 - target, target))
+
+    group = OneHotActionGroup("segment", (1, 2))
+    context = MethodContext(
+        X_reference=np.array(
+            [
+                [0.0, 1.0, 0.0],
+                [0.1, 1.0, 0.0],
+                [0.8, 1.0, 0.0],
+                [0.8, 0.0, 1.0],
+                [0.9, 0.0, 1.0],
+            ]
+        ),
+        feature_schema=FeatureSchema(
+            names=("marker", "segment_a", "segment_b"),
+            numerical=(0,),
+            categorical_groups=(group,),
+            actionable_scalars=(0,),
+            actionable_groups=(group,),
+            immutable=(),
+            domains=FeatureDomains(
+                lower=np.zeros(3),
+                upper=np.ones(3),
+                discrete={},
+            ),
+        ),
+        oracle=MarkerOracle(),
+    )
+
+    proposals = (
+        LocalEmpiricalBackend()
+        .prepare(context)
+        .for_factual(np.array([0.0, 1.0, 0.0]), 1, seed=3)
+        .categorical_distribution(np.array([0.0, 1.0, 0.0]), group, confidence=None)
+    )
+
+    np.testing.assert_array_equal(proposals.categories, [0, 1])
+    np.testing.assert_allclose(proposals.probabilities, [2 / 5, 3 / 5])
+
+
+def test_local_empirical_neighborhood_counts_one_hot_group_once() -> None:
+    class Oracle:
+        classes_ = np.array([0, 1])
+
+        def predict(self, X):
+            matrix = np.asarray(X)
+            return ((matrix[:, 0] + matrix[:, 1] > 0.5) | (matrix[:, 3] == 1)).astype(
+                int
+            )
+
+        def predict_proba(self, X):
+            target = self.predict(X).astype(float)
+            return np.column_stack((1.0 - target, target))
+
+    group = OneHotActionGroup("segment", (2, 3))
+    reference = np.vstack(
+        (
+            np.tile([0.0, 0.0, 1.0, 0.0], (511, 1)),
+            [0.75, 0.75, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        )
+    )
+    context = MethodContext(
+        X_reference=reference,
+        feature_schema=FeatureSchema(
+            names=("first", "second", "segment_a", "segment_b"),
+            numerical=(0, 1),
+            categorical_groups=(group,),
+            actionable_scalars=(0, 1),
+            actionable_groups=(group,),
+            immutable=(),
+            domains=FeatureDomains(
+                lower=np.zeros(4),
+                upper=np.ones(4),
+                discrete={},
+            ),
+        ),
+        oracle=Oracle(),
+    )
+
+    session = (
+        LocalEmpiricalBackend()
+        .prepare(context)
+        .for_factual(np.array([0.0, 0.0, 1.0, 0.0]), 1, seed=1)
+    )
+
+    np.testing.assert_array_equal(session.reference, [[0.0, 0.0, 0.0, 1.0]])
+
+
+def test_local_empirical_falls_back_to_global_target_rows() -> None:
+    reference = np.concatenate((np.zeros((512, 1)), np.ones((1, 1))))
+    prepared = LocalEmpiricalBackend().prepare(
+        MethodContext(
+            X_reference=reference,
+            feature_schema=_context().feature_schema,
+            oracle=_Oracle(),
+        )
+    )
+
+    session = prepared.for_factual(np.array([0.0]), 1, seed=1)
+
+    assert session.diagnostics["local_target_fallback"]
+    np.testing.assert_array_equal(
+        session.propose_numerical(
+            np.array([[0.0]]),
+            [0],
+            quantiles=None,
+            confidence=None,
+            temperature=0.0,
+        ),
+        [1.0],
+    )
+
+
+def test_local_empirical_rejects_target_absent_from_reference() -> None:
+    prepared = LocalEmpiricalBackend().prepare(_context())
+
+    with pytest.raises(ValueError, match="no reference rows for target class 2"):
+        prepared.for_factual(np.array([0.0]), 2, seed=1)
+
+
+def test_local_empirical_has_distinct_runtime_identity() -> None:
+    runtime = resolve_runtime({"foundation": {"backend": "empirical_local"}}, {}, None)
+
+    assert runtime.backend_implementation == "empirical-local-reference-v1"
+
+
 def test_empirical_backend_runs_complete_countercontex_sparse_search() -> None:
     method = CounterContExMethod(
-        CounterContExConfig(foundation=CounterContExFoundationConfig(backend="empirical"))
+        CounterContExConfig(
+            foundation=CounterContExFoundationConfig(backend="empirical")
+        )
     )
     prepared = method.prepare(_context())
 
@@ -325,6 +518,32 @@ def test_empirical_backend_runs_complete_countercontex_sparse_search() -> None:
 )
 def test_empirical_backend_rejects_unsupported_search_requests(config) -> None:
     with pytest.raises(ValueError, match="confidence conditioning|joint scoring"):
+        CounterContExMethod(config).prepare(_context())
+
+
+@pytest.mark.parametrize(
+    ("config", "message"),
+    [
+        (
+            CounterContExConfig(
+                search=CounterContExSearchConfig(candidate_quantiles=(0.5,)),
+                foundation=CounterContExFoundationConfig(
+                    backend="empirical_local", confidence_quantiles=(0.5,)
+                ),
+            ),
+            "confidence conditioning",
+        ),
+        (
+            CounterContExConfig(
+                search=CounterContExSearchConfig(cf_mode="data_plausible"),
+                foundation=CounterContExFoundationConfig(backend="empirical_local"),
+            ),
+            "joint scoring",
+        ),
+    ],
+)
+def test_local_empirical_rejects_unsupported_search_requests(config, message) -> None:
+    with pytest.raises(ValueError, match=message):
         CounterContExMethod(config).prepare(_context())
 
 

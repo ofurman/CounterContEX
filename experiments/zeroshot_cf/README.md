@@ -167,6 +167,23 @@ uv run python -m experiments.zeroshot_cf.cli analyze \
   --output experiments/zeroshot_cf/results/local/analysis
 ```
 
+The clean three-arm E3 matrix has a dedicated paired analysis. It reports raw summaries plus
+right-minus-left point-level contrasts for global empirical -> local empirical (locality), local
+empirical -> TabICL (learned conditioning, primary), and global empirical -> TabICL (the backend
+bundle):
+
+```bash
+uv run python -m experiments.zeroshot_cf.cli analyze-e3 \
+  --config experiments/zeroshot_cf/configs/matrices/campaign_e3_clean_backend.yaml
+```
+
+Its primary estimand is threshold success per requested slot at 0.7 over every matched factual.
+Conditional candidate metrics report the jointly defined population and count; target-model
+blocks are kept within datasets rather than treated as independent datasets. Deterministic 95%
+percentile intervals use 2,000 paired factual-level resamples with seed 42; they describe the
+selected factuals, not alternative data splits. By default, analysis is written beside the run
+root as `e3_clean_backend_analysis/`, never inside the strict canonical artifact root.
+
 Analysis refuses partial, missing, extra, duplicate, or identity-mismatched cells. Seed groups
 are keyed by the complete scientific specification except seed and report mean, sample standard
 deviation, and the actual finite `n` for each metric. Historical evaluation-v1 artifacts remain
@@ -279,6 +296,11 @@ The deterministic `empirical` adapter supplies target-class numerical
 quantiles and categorical frequencies without checkpoints. It provides a
 runnable backend ablation and intentionally declares no confidence or joint
 scoring capability, so incompatible search settings fail before generation.
+The deterministic `empirical_local` adapter computes the same marginals after
+selecting TabICL's up-to-512 Gower-nearest mixed-data context for each factual.
+If that context has no target-class row, it falls back to all global target-class
+rows; if the target class is absent globally, it fails rather than using rows
+from the wrong class. It has the same capability limits as `empirical`.
 
 To add a TabPFN or TabFM adapter:
 
