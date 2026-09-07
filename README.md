@@ -19,12 +19,14 @@ extension procedures, and Athena instructions.
 
 ## Supported benchmark
 
-The full reference benchmark uses four binary-classification datasets:
+The paper campaign uses six binary-classification datasets:
 
 - HELOC
 - Bank Marketing
 - Give Me Some Credit
 - Lending Club
+- Adult Census
+- German Credit
 
 The default protocol uses a deterministic 64/16/20 train, validation, and test
 split. It uses seed 42 and selects counterfactual targets from classifier
@@ -133,8 +135,26 @@ Available matrix files include:
 - `countercontex_ablation_example.yaml`: CounterContEx search and backend ablations.
 - `full_reference.yaml`: four datasets, all six methods, and 1,000 factuals.
 
+The tracked `campaign_e1_main.yaml` through `campaign_e10_headline.yaml`
+matrices define the six-dataset paper campaign (E8 is a read-only rescoring
+pass and has no generation matrix). E1 crosses all six methods with logistic
+regression, MLP, and XGBoost; E10 is the frozen logistic-regression continuity
+run at 1,000 factuals.
+
 The full reference matrix is expensive. A recorded run took about 9.42 hours,
 including 7.64 hours for the Lending Club CounterContEx cell.
+
+Regenerate the campaign's T1--T3 and F3--F7 paper products from published
+artifacts with:
+
+```bash
+SOURCE_DATE_EPOCH=0 uv run python -m experiments.zeroshot_cf.cli campaign-paper \
+  --matrix-dir experiments/zeroshot_cf/configs/matrices \
+  --output docs/papers/campaign-artifacts
+```
+
+The measured outcomes and exact artifact map are in
+[`docs/papers/campaign-results.md`](docs/papers/campaign-results.md).
 
 ## Architecture
 

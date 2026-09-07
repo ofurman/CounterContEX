@@ -145,3 +145,14 @@ has lower validity and returns k=1. E5's greedy-farthest selector was promising,
 it with C3 was not measured, so the freeze does not construct a post-hoc configuration. E9 and
 E10 now encode this exact choice; no E4 threshold was adopted, so D-12's disclosure is not
 triggered.
+
+### D-14: Authenticate and match the qualitative examples
+**Date**: 2026-09-07 - **Stage**: 12
+**Options**: A) plot normalized E10 candidates alone B) match E10 factual source indices to E1
+NICE and DiCE and reconstruct the pinned cases for inverse transformation
+**Chosen**: B
+**Rationale**: Existing arrays persist candidates but not factual values. The builder now reads
+published point/candidate tables and arrays, intersects deterministic source indices, and accepts
+reconstructed factuals only when their `case_id` matches the manifest. NICE is the conceptually
+adjacent nearest-neighbour baseline and DiCE is the campaign's native-set baseline. This produces
+the requested two contrasts without generating or rewriting historical evidence.

@@ -1,0 +1,5 @@
+dataset,target_model,method,method_variant,backend,n_counterfactuals,seed_n,coverage_mean,coverage_std,coverage_n,validity_returned_threshold_mean,validity_returned_threshold_std,validity_returned_threshold_n,proximity_grouped_gower_mean,proximity_grouped_gower_std,proximity_grouped_gower_n,plausibility_gower_kth_neighbor_mean_mean,plausibility_gower_kth_neighbor_mean_std,plausibility_gower_kth_neighbor_mean_n
+adult_census,retained_logistic_regression,countercontex,default,tabicl,3,3,1.0,0.0,3,0.17408906882591094,0.0,3,0.09531807082722743,0.0,3,0.11364450665592297,0.0,3
+adult_census,retained_logistic_regression,countercontex,default,tabpfn,3,3,1.0,0.0,3,0.16241872320595033,0.010184389907074067,3,0.10021045470301332,0.000344051014415863,3,0.11606446617157325,0.0005323954951646936,3
+heloc,retained_logistic_regression,countercontex,default,tabicl,3,3,0.932,0.0,3,0.0,0.0,3,0.02039272622994771,0.0,3,0.04646454898524419,0.0,3
+heloc,retained_logistic_regression,countercontex,default,tabpfn,3,3,0.9133333333333334,0.006110100926607792,3,0.0,0.0,3,0.019247349890039137,0.00046469533959789694,3,0.04639619130959393,0.0001413237030894914,3

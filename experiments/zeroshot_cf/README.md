@@ -1,4 +1,4 @@
-# TabICL counterfactual benchmark suite
+# CounterContEx counterfactual benchmark suite
 
 This directory is the retained CounterContEX surface: the TabICL generator,
 the Exp9 CounterContEx benchmark, four comparison baselines, pinned CEL dataset
@@ -103,12 +103,15 @@ diverse outputs exist.
 
 ## Benchmark and baselines
 
-Exp9 is the fixed four-dataset benchmark:
+The paper campaign extends the retained four-dataset Exp9 benchmark to six
+datasets:
 
 - `heloc`
 - `bank_marketing`
 - `give_me_some_credit`
 - `lending_club`
+- `adult_census`
+- `german_credit`
 
 The protocol uses one deterministic 64/16/20 train/validation/test split,
 seed 42, classifier-prediction targets, atomic categorical edits, immutable
@@ -186,6 +189,18 @@ uv run python -m experiments.zeroshot_cf.cli analyze \
   --config experiments/zeroshot_cf/configs/matrices/campaign_e4_confidence.yaml \
   --baseline-config experiments/zeroshot_cf/configs/matrices/campaign_e1_main.yaml \
   --output experiments/zeroshot_cf/results/campaign/analysis/e4_confidence
+```
+
+The complete campaign paper bundle has a dedicated artifact-only orchestrator.
+Only F7 additionally reconstructs the pinned dataset transform and cached target
+case, verifies its `case_id` against each manifest, and uses `points.csv`,
+`candidates.csv`, and `arrays.npz` to present matched HELOC and Adult values in
+original feature units:
+
+```bash
+SOURCE_DATE_EPOCH=0 uv run python -m experiments.zeroshot_cf.cli campaign-paper \
+  --matrix-dir experiments/zeroshot_cf/configs/matrices \
+  --output docs/papers/campaign-artifacts
 ```
 
 Analysis refuses partial, missing, extra, duplicate, or identity-mismatched cells. Seed groups

@@ -1,0 +1,1285 @@
+dataset,source_index,method,rank,target_probability,feature,factual_value,candidate_value,changed
+heloc,21,factual,-1,,ExternalRiskEstimate,77.99999577924613,77.99999577924613,False
+heloc,21,factual,-1,,MSinceOldestTradeOpen,84.00000490946707,84.00000490946707,False
+heloc,21,factual,-1,,MSinceMostRecentTradeOpen,2.0,2.0,False
+heloc,21,factual,-1,,AverageMInFile,24.999998588115034,24.999998588115034,False
+heloc,21,factual,-1,,NumSatisfactoryTrades,10.999999484978629,10.999999484978629,False
+heloc,21,factual,-1,,NumTrades60Ever2DerogPubRec,1.0,1.0,False
+heloc,21,factual,-1,,NumTrades90Ever2DerogPubRec,0.0,0.0,False
+heloc,21,factual,-1,,PercentTradesNeverDelq,91.99999776482576,91.99999776482576,False
+heloc,21,factual,-1,,MSinceMostRecentDelq,20.0000009946525,20.0000009946525,False
+heloc,21,factual,-1,,MaxDelq2PublicRecLast12M,6.00000013411045,6.00000013411045,False
+heloc,21,factual,-1,,MaxDelqEver,4.9999999105930355,4.9999999105930355,False
+heloc,21,factual,-1,,NumTotalTrades,12.999999515712279,12.999999515712279,False
+heloc,21,factual,-1,,NumTradesOpeninLast12M,1.0,1.0,False
+heloc,21,factual,-1,,PercentInstallTrades,14.999999441206443,14.999999441206443,False
+heloc,21,factual,-1,,MSinceMostRecentInqexcl7days,2.0,2.0,False
+heloc,21,factual,-1,,NumInqLast6M,4.0,4.0,False
+heloc,21,factual,-1,,NumInqLast6Mexcl7days,4.0,4.0,False
+heloc,21,factual,-1,,NetFractionRevolvingBurden,2.0,2.0,False
+heloc,21,factual,-1,,NetFractionInstallBurden,76.99999765795661,76.99999765795661,False
+heloc,21,factual,-1,,NumRevolvingTradesWBalance,1.0000002235174146,1.0000002235174146,False
+heloc,21,factual,-1,,NumInstallTradesWBalance,1.0000002011656746,1.0000002011656746,False
+heloc,21,factual,-1,,NumBank2NatlTradesWHighUtilization,0.0,0.0,False
+heloc,21,factual,-1,,PercentTradesWBalance,20.000002413988096,20.000002413988096,False
+heloc,21,countercontex,0,0.5043981835686133,ExternalRiskEstimate,77.99999577924613,76.96121146379772,True
+heloc,21,countercontex,0,0.5043981835686133,MSinceOldestTradeOpen,84.00000490946707,84.00000490946707,False
+heloc,21,countercontex,0,0.5043981835686133,MSinceMostRecentTradeOpen,2.0,2.0,False
+heloc,21,countercontex,0,0.5043981835686133,AverageMInFile,24.999998588115034,24.999998588115034,False
+heloc,21,countercontex,0,0.5043981835686133,NumSatisfactoryTrades,10.999999484978629,10.999999484978629,False
+heloc,21,countercontex,0,0.5043981835686133,NumTrades60Ever2DerogPubRec,1.0,1.0,False
+heloc,21,countercontex,0,0.5043981835686133,NumTrades90Ever2DerogPubRec,0.0,0.0,False
+heloc,21,countercontex,0,0.5043981835686133,PercentTradesNeverDelq,91.99999776482576,91.99999776482576,False
+heloc,21,countercontex,0,0.5043981835686133,MSinceMostRecentDelq,20.0000009946525,20.0000009946525,False
+heloc,21,countercontex,0,0.5043981835686133,MaxDelq2PublicRecLast12M,6.00000013411045,6.00000013411045,False
+heloc,21,countercontex,0,0.5043981835686133,MaxDelqEver,4.9999999105930355,4.9999999105930355,False
+heloc,21,countercontex,0,0.5043981835686133,NumTotalTrades,12.999999515712279,12.999999515712279,False
+heloc,21,countercontex,0,0.5043981835686133,NumTradesOpeninLast12M,1.0,1.0,False
+heloc,21,countercontex,0,0.5043981835686133,PercentInstallTrades,14.999999441206443,14.999999441206443,False
+heloc,21,countercontex,0,0.5043981835686133,MSinceMostRecentInqexcl7days,2.0,2.0,False
+heloc,21,countercontex,0,0.5043981835686133,NumInqLast6M,4.0,4.0,False
+heloc,21,countercontex,0,0.5043981835686133,NumInqLast6Mexcl7days,4.0,4.0,False
+heloc,21,countercontex,0,0.5043981835686133,NetFractionRevolvingBurden,2.0,2.0,False
+heloc,21,countercontex,0,0.5043981835686133,NetFractionInstallBurden,76.99999765795661,76.99999765795661,False
+heloc,21,countercontex,0,0.5043981835686133,NumRevolvingTradesWBalance,1.0000002235174146,1.0000002235174146,False
+heloc,21,countercontex,0,0.5043981835686133,NumInstallTradesWBalance,1.0000002011656746,1.0000002011656746,False
+heloc,21,countercontex,0,0.5043981835686133,NumBank2NatlTradesWHighUtilization,0.0,0.0,False
+heloc,21,countercontex,0,0.5043981835686133,PercentTradesWBalance,20.000002413988096,20.000002413988096,False
+heloc,21,countercontex,1,0.500396854401598,ExternalRiskEstimate,77.99999577924613,77.99999577924613,False
+heloc,21,countercontex,1,0.500396854401598,MSinceOldestTradeOpen,84.00000490946707,84.00000490946707,False
+heloc,21,countercontex,1,0.500396854401598,MSinceMostRecentTradeOpen,2.0,2.0,False
+heloc,21,countercontex,1,0.500396854401598,AverageMInFile,24.999998588115034,24.999998588115034,False
+heloc,21,countercontex,1,0.500396854401598,NumSatisfactoryTrades,10.999999484978629,10.999999484978629,False
+heloc,21,countercontex,1,0.500396854401598,NumTrades60Ever2DerogPubRec,1.0,1.0,False
+heloc,21,countercontex,1,0.500396854401598,NumTrades90Ever2DerogPubRec,0.0,0.0,False
+heloc,21,countercontex,1,0.500396854401598,PercentTradesNeverDelq,91.99999776482576,91.99999776482576,False
+heloc,21,countercontex,1,0.500396854401598,MSinceMostRecentDelq,20.0000009946525,20.0000009946525,False
+heloc,21,countercontex,1,0.500396854401598,MaxDelq2PublicRecLast12M,6.00000013411045,6.00000013411045,False
+heloc,21,countercontex,1,0.500396854401598,MaxDelqEver,4.9999999105930355,4.9999999105930355,False
+heloc,21,countercontex,1,0.500396854401598,NumTotalTrades,12.999999515712279,12.999999515712279,False
+heloc,21,countercontex,1,0.500396854401598,NumTradesOpeninLast12M,1.0,1.0,False
+heloc,21,countercontex,1,0.500396854401598,PercentInstallTrades,14.999999441206443,14.999999441206443,False
+heloc,21,countercontex,1,0.500396854401598,MSinceMostRecentInqexcl7days,2.0,2.0,False
+heloc,21,countercontex,1,0.500396854401598,NumInqLast6M,4.0,4.0,False
+heloc,21,countercontex,1,0.500396854401598,NumInqLast6Mexcl7days,4.0,4.0,False
+heloc,21,countercontex,1,0.500396854401598,NetFractionRevolvingBurden,2.0,2.0,False
+heloc,21,countercontex,1,0.500396854401598,NetFractionInstallBurden,76.99999765795661,76.99999765795661,False
+heloc,21,countercontex,1,0.500396854401598,NumRevolvingTradesWBalance,1.0000002235174146,1.7938059301107239,True
+heloc,21,countercontex,1,0.500396854401598,NumInstallTradesWBalance,1.0000002011656746,1.0000002011656746,False
+heloc,21,countercontex,1,0.500396854401598,NumBank2NatlTradesWHighUtilization,0.0,0.0,False
+heloc,21,countercontex,1,0.500396854401598,PercentTradesWBalance,20.000002413988096,20.000002413988096,False
+heloc,21,countercontex,2,0.5044438325311152,ExternalRiskEstimate,77.99999577924613,77.99999577924613,False
+heloc,21,countercontex,2,0.5044438325311152,MSinceOldestTradeOpen,84.00000490946707,84.00000490946707,False
+heloc,21,countercontex,2,0.5044438325311152,MSinceMostRecentTradeOpen,2.0,2.0,False
+heloc,21,countercontex,2,0.5044438325311152,AverageMInFile,24.999998588115034,24.999998588115034,False
+heloc,21,countercontex,2,0.5044438325311152,NumSatisfactoryTrades,10.999999484978629,10.999999484978629,False
+heloc,21,countercontex,2,0.5044438325311152,NumTrades60Ever2DerogPubRec,1.0,1.0,False
+heloc,21,countercontex,2,0.5044438325311152,NumTrades90Ever2DerogPubRec,0.0,0.0,False
+heloc,21,countercontex,2,0.5044438325311152,PercentTradesNeverDelq,91.99999776482576,88.37921220911768,True
+heloc,21,countercontex,2,0.5044438325311152,MSinceMostRecentDelq,20.0000009946525,20.0000009946525,False
+heloc,21,countercontex,2,0.5044438325311152,MaxDelq2PublicRecLast12M,6.00000013411045,6.00000013411045,False
+heloc,21,countercontex,2,0.5044438325311152,MaxDelqEver,4.9999999105930355,4.9999999105930355,False
+heloc,21,countercontex,2,0.5044438325311152,NumTotalTrades,12.999999515712279,12.999999515712279,False
+heloc,21,countercontex,2,0.5044438325311152,NumTradesOpeninLast12M,1.0,1.0,False
+heloc,21,countercontex,2,0.5044438325311152,PercentInstallTrades,14.999999441206443,14.999999441206443,False
+heloc,21,countercontex,2,0.5044438325311152,MSinceMostRecentInqexcl7days,2.0,2.0,False
+heloc,21,countercontex,2,0.5044438325311152,NumInqLast6M,4.0,4.0,False
+heloc,21,countercontex,2,0.5044438325311152,NumInqLast6Mexcl7days,4.0,4.0,False
+heloc,21,countercontex,2,0.5044438325311152,NetFractionRevolvingBurden,2.0,2.0,False
+heloc,21,countercontex,2,0.5044438325311152,NetFractionInstallBurden,76.99999765795661,76.99999765795661,False
+heloc,21,countercontex,2,0.5044438325311152,NumRevolvingTradesWBalance,1.0000002235174146,1.0000002235174146,False
+heloc,21,countercontex,2,0.5044438325311152,NumInstallTradesWBalance,1.0000002011656746,1.0000002011656746,False
+heloc,21,countercontex,2,0.5044438325311152,NumBank2NatlTradesWHighUtilization,0.0,0.0,False
+heloc,21,countercontex,2,0.5044438325311152,PercentTradesWBalance,20.000002413988096,20.000002413988096,False
+heloc,21,nice,0,0.5058935938442046,ExternalRiskEstimate,77.99999577924613,77.99999577924613,False
+heloc,21,nice,0,0.5058935938442046,MSinceOldestTradeOpen,84.00000490946707,84.00000490946707,False
+heloc,21,nice,0,0.5058935938442046,MSinceMostRecentTradeOpen,2.0,2.0,False
+heloc,21,nice,0,0.5058935938442046,AverageMInFile,24.999998588115034,24.999998588115034,False
+heloc,21,nice,0,0.5058935938442046,NumSatisfactoryTrades,10.999999484978629,10.999999484978629,False
+heloc,21,nice,0,0.5058935938442046,NumTrades60Ever2DerogPubRec,1.0,1.0,False
+heloc,21,nice,0,0.5058935938442046,NumTrades90Ever2DerogPubRec,0.0,0.0,False
+heloc,21,nice,0,0.5058935938442046,PercentTradesNeverDelq,91.99999776482576,91.99999776482576,False
+heloc,21,nice,0,0.5058935938442046,MSinceMostRecentDelq,20.0000009946525,20.0000009946525,False
+heloc,21,nice,0,0.5058935938442046,MaxDelq2PublicRecLast12M,6.00000013411045,6.00000013411045,False
+heloc,21,nice,0,0.5058935938442046,MaxDelqEver,4.9999999105930355,4.9999999105930355,False
+heloc,21,nice,0,0.5058935938442046,NumTotalTrades,12.999999515712279,12.999999515712279,False
+heloc,21,nice,0,0.5058935938442046,NumTradesOpeninLast12M,1.0,1.0,False
+heloc,21,nice,0,0.5058935938442046,PercentInstallTrades,14.999999441206443,24.0,True
+heloc,21,nice,0,0.5058935938442046,MSinceMostRecentInqexcl7days,2.0,2.0,False
+heloc,21,nice,0,0.5058935938442046,NumInqLast6M,4.0,4.0,False
+heloc,21,nice,0,0.5058935938442046,NumInqLast6Mexcl7days,4.0,4.0,False
+heloc,21,nice,0,0.5058935938442046,NetFractionRevolvingBurden,2.0,2.0,False
+heloc,21,nice,0,0.5058935938442046,NetFractionInstallBurden,76.99999765795661,76.99999765795661,False
+heloc,21,nice,0,0.5058935938442046,NumRevolvingTradesWBalance,1.0000002235174146,1.0000002235174146,False
+heloc,21,nice,0,0.5058935938442046,NumInstallTradesWBalance,1.0000002011656746,1.0000002011656746,False
+heloc,21,nice,0,0.5058935938442046,NumBank2NatlTradesWHighUtilization,0.0,0.0,False
+heloc,21,nice,0,0.5058935938442046,PercentTradesWBalance,20.000002413988096,20.000002413988096,False
+heloc,21,dice,0,0.5000074223007541,ExternalRiskEstimate,77.99999577924613,77.32470389013454,True
+heloc,21,dice,0,0.5000074223007541,MSinceOldestTradeOpen,84.00000490946707,84.00000490946707,False
+heloc,21,dice,0,0.5000074223007541,MSinceMostRecentTradeOpen,2.0,2.0,False
+heloc,21,dice,0,0.5000074223007541,AverageMInFile,24.999998588115034,24.999998588115034,False
+heloc,21,dice,0,0.5000074223007541,NumSatisfactoryTrades,10.999999484978629,10.999999484978629,False
+heloc,21,dice,0,0.5000074223007541,NumTrades60Ever2DerogPubRec,1.0,1.0,False
+heloc,21,dice,0,0.5000074223007541,NumTrades90Ever2DerogPubRec,0.0,0.0,False
+heloc,21,dice,0,0.5000074223007541,PercentTradesNeverDelq,91.99999776482576,91.99999776482576,False
+heloc,21,dice,0,0.5000074223007541,MSinceMostRecentDelq,20.0000009946525,20.0000009946525,False
+heloc,21,dice,0,0.5000074223007541,MaxDelq2PublicRecLast12M,6.00000013411045,6.00000013411045,False
+heloc,21,dice,0,0.5000074223007541,MaxDelqEver,4.9999999105930355,4.9999999105930355,False
+heloc,21,dice,0,0.5000074223007541,NumTotalTrades,12.999999515712279,12.999999515712279,False
+heloc,21,dice,0,0.5000074223007541,NumTradesOpeninLast12M,1.0,1.0,False
+heloc,21,dice,0,0.5000074223007541,PercentInstallTrades,14.999999441206443,14.999999441206443,False
+heloc,21,dice,0,0.5000074223007541,MSinceMostRecentInqexcl7days,2.0,2.0,False
+heloc,21,dice,0,0.5000074223007541,NumInqLast6M,4.0,4.0,False
+heloc,21,dice,0,0.5000074223007541,NumInqLast6Mexcl7days,4.0,4.0,False
+heloc,21,dice,0,0.5000074223007541,NetFractionRevolvingBurden,2.0,2.0,False
+heloc,21,dice,0,0.5000074223007541,NetFractionInstallBurden,76.99999765795661,76.99999765795661,False
+heloc,21,dice,0,0.5000074223007541,NumRevolvingTradesWBalance,1.0000002235174146,1.0000002235174146,False
+heloc,21,dice,0,0.5000074223007541,NumInstallTradesWBalance,1.0000002011656746,1.0000002011656746,False
+heloc,21,dice,0,0.5000074223007541,NumBank2NatlTradesWHighUtilization,0.0,0.0,False
+heloc,21,dice,0,0.5000074223007541,PercentTradesWBalance,20.000002413988096,20.000002413988096,False
+adult_census,10,factual,-1,,age,20.0,20.0,False
+adult_census,10,factual,-1,,capital-gain,4416.0,4416.0,False
+adult_census,10,factual,-1,,capital-loss,0.0,0.0,False
+adult_census,10,factual,-1,,hours-per-week,25.000000000000004,25.000000000000004,False
+adult_census,10,factual,-1,,workclass__ ?,0.0,0.0,False
+adult_census,10,factual,-1,,workclass__ Federal-gov,0.0,0.0,False
+adult_census,10,factual,-1,,workclass__ Local-gov,0.0,0.0,False
+adult_census,10,factual,-1,,workclass__ Never-worked,0.0,0.0,False
+adult_census,10,factual,-1,,workclass__ Private,1.0,1.0,False
+adult_census,10,factual,-1,,workclass__ Self-emp-inc,0.0,0.0,False
+adult_census,10,factual,-1,,workclass__ Self-emp-not-inc,0.0,0.0,False
+adult_census,10,factual,-1,,workclass__ State-gov,0.0,0.0,False
+adult_census,10,factual,-1,,workclass__ Without-pay,0.0,0.0,False
+adult_census,10,factual,-1,,workclass__?,0.0,0.0,False
+adult_census,10,factual,-1,,workclass__Federal-gov,0.0,0.0,False
+adult_census,10,factual,-1,,workclass__Local-gov,0.0,0.0,False
+adult_census,10,factual,-1,,workclass__Private,0.0,0.0,False
+adult_census,10,factual,-1,,workclass__Self-emp-inc,0.0,0.0,False
+adult_census,10,factual,-1,,workclass__Self-emp-not-inc,0.0,0.0,False
+adult_census,10,factual,-1,,workclass__State-gov,0.0,0.0,False
+adult_census,10,factual,-1,,education__ 10th,0.0,0.0,False
+adult_census,10,factual,-1,,education__ 11th,0.0,0.0,False
+adult_census,10,factual,-1,,education__ 12th,0.0,0.0,False
+adult_census,10,factual,-1,,education__ 1st-4th,0.0,0.0,False
+adult_census,10,factual,-1,,education__ 5th-6th,0.0,0.0,False
+adult_census,10,factual,-1,,education__ 7th-8th,0.0,0.0,False
+adult_census,10,factual,-1,,education__ 9th,0.0,0.0,False
+adult_census,10,factual,-1,,education__ Assoc-acdm,0.0,0.0,False
+adult_census,10,factual,-1,,education__ Assoc-voc,0.0,0.0,False
+adult_census,10,factual,-1,,education__ Bachelors,0.0,0.0,False
+adult_census,10,factual,-1,,education__ Doctorate,0.0,0.0,False
+adult_census,10,factual,-1,,education__ HS-grad,0.0,0.0,False
+adult_census,10,factual,-1,,education__ Masters,0.0,0.0,False
+adult_census,10,factual,-1,,education__ Preschool,0.0,0.0,False
+adult_census,10,factual,-1,,education__ Prof-school,0.0,0.0,False
+adult_census,10,factual,-1,,education__ Some-college,1.0,1.0,False
+adult_census,10,factual,-1,,education__10th,0.0,0.0,False
+adult_census,10,factual,-1,,education__11th,0.0,0.0,False
+adult_census,10,factual,-1,,education__12th,0.0,0.0,False
+adult_census,10,factual,-1,,education__1st-4th,0.0,0.0,False
+adult_census,10,factual,-1,,education__5th-6th,0.0,0.0,False
+adult_census,10,factual,-1,,education__7th-8th,0.0,0.0,False
+adult_census,10,factual,-1,,education__9th,0.0,0.0,False
+adult_census,10,factual,-1,,education__Assoc-acdm,0.0,0.0,False
+adult_census,10,factual,-1,,education__Assoc-voc,0.0,0.0,False
+adult_census,10,factual,-1,,education__Bachelors,0.0,0.0,False
+adult_census,10,factual,-1,,education__Doctorate,0.0,0.0,False
+adult_census,10,factual,-1,,education__HS-grad,0.0,0.0,False
+adult_census,10,factual,-1,,education__Masters,0.0,0.0,False
+adult_census,10,factual,-1,,education__Preschool,0.0,0.0,False
+adult_census,10,factual,-1,,education__Prof-school,0.0,0.0,False
+adult_census,10,factual,-1,,education__Some-college,0.0,0.0,False
+adult_census,10,factual,-1,,marital-status__ Divorced,0.0,0.0,False
+adult_census,10,factual,-1,,marital-status__ Married-AF-spouse,0.0,0.0,False
+adult_census,10,factual,-1,,marital-status__ Married-civ-spouse,0.0,0.0,False
+adult_census,10,factual,-1,,marital-status__ Married-spouse-absent,0.0,0.0,False
+adult_census,10,factual,-1,,marital-status__ Never-married,1.0,1.0,False
+adult_census,10,factual,-1,,marital-status__ Separated,0.0,0.0,False
+adult_census,10,factual,-1,,marital-status__ Widowed,0.0,0.0,False
+adult_census,10,factual,-1,,marital-status__Divorced,0.0,0.0,False
+adult_census,10,factual,-1,,marital-status__Married-AF-spouse,0.0,0.0,False
+adult_census,10,factual,-1,,marital-status__Married-civ-spouse,0.0,0.0,False
+adult_census,10,factual,-1,,marital-status__Married-spouse-absent,0.0,0.0,False
+adult_census,10,factual,-1,,marital-status__Never-married,0.0,0.0,False
+adult_census,10,factual,-1,,marital-status__Separated,0.0,0.0,False
+adult_census,10,factual,-1,,marital-status__Widowed,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__ ?,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__ Adm-clerical,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__ Armed-Forces,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__ Craft-repair,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__ Exec-managerial,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__ Farming-fishing,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__ Handlers-cleaners,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__ Machine-op-inspct,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__ Other-service,1.0,1.0,False
+adult_census,10,factual,-1,,occupation__ Priv-house-serv,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__ Prof-specialty,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__ Protective-serv,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__ Sales,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__ Tech-support,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__ Transport-moving,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__?,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__Adm-clerical,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__Armed-Forces,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__Craft-repair,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__Exec-managerial,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__Farming-fishing,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__Handlers-cleaners,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__Machine-op-inspct,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__Other-service,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__Priv-house-serv,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__Prof-specialty,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__Protective-serv,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__Sales,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__Tech-support,0.0,0.0,False
+adult_census,10,factual,-1,,occupation__Transport-moving,0.0,0.0,False
+adult_census,10,factual,-1,,relationship__ Husband,0.0,0.0,False
+adult_census,10,factual,-1,,relationship__ Not-in-family,0.0,0.0,False
+adult_census,10,factual,-1,,relationship__ Other-relative,1.0,1.0,False
+adult_census,10,factual,-1,,relationship__ Own-child,0.0,0.0,False
+adult_census,10,factual,-1,,relationship__ Unmarried,0.0,0.0,False
+adult_census,10,factual,-1,,relationship__ Wife,0.0,0.0,False
+adult_census,10,factual,-1,,relationship__Husband,0.0,0.0,False
+adult_census,10,factual,-1,,relationship__Not-in-family,0.0,0.0,False
+adult_census,10,factual,-1,,relationship__Other-relative,0.0,0.0,False
+adult_census,10,factual,-1,,relationship__Own-child,0.0,0.0,False
+adult_census,10,factual,-1,,relationship__Unmarried,0.0,0.0,False
+adult_census,10,factual,-1,,relationship__Wife,0.0,0.0,False
+adult_census,10,factual,-1,,race__ Amer-Indian-Eskimo,0.0,0.0,False
+adult_census,10,factual,-1,,race__ Asian-Pac-Islander,0.0,0.0,False
+adult_census,10,factual,-1,,race__ Black,0.0,0.0,False
+adult_census,10,factual,-1,,race__ Other,0.0,0.0,False
+adult_census,10,factual,-1,,race__ White,1.0,1.0,False
+adult_census,10,factual,-1,,race__Amer-Indian-Eskimo,0.0,0.0,False
+adult_census,10,factual,-1,,race__Asian-Pac-Islander,0.0,0.0,False
+adult_census,10,factual,-1,,race__Black,0.0,0.0,False
+adult_census,10,factual,-1,,race__Other,0.0,0.0,False
+adult_census,10,factual,-1,,race__White,0.0,0.0,False
+adult_census,10,factual,-1,,sex__ Female,1.0,1.0,False
+adult_census,10,factual,-1,,sex__ Male,0.0,0.0,False
+adult_census,10,factual,-1,,sex__Female,0.0,0.0,False
+adult_census,10,factual,-1,,sex__Male,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ ?,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Cambodia,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Canada,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ China,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Columbia,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Cuba,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Dominican-Republic,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Ecuador,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ El-Salvador,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ England,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ France,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Germany,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Greece,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Guatemala,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Haiti,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Holand-Netherlands,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Honduras,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Hong,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Hungary,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ India,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Iran,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Ireland,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Italy,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Jamaica,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Japan,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Laos,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Mexico,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Nicaragua,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Outlying-US(Guam-USVI-etc),0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Peru,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Philippines,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Poland,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Portugal,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Puerto-Rico,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Scotland,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ South,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Taiwan,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Thailand,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Trinadad&Tobago,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ United-States,1.0,1.0,False
+adult_census,10,factual,-1,,native-country__ Vietnam,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__ Yugoslavia,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__?,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__Cambodia,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__Canada,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__Columbia,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__Cuba,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__Dominican-Republic,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__Ecuador,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__El-Salvador,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__England,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__France,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__Germany,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__Haiti,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__Honduras,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__India,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__Iran,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__Italy,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__Jamaica,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__Laos,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__Mexico,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__Philippines,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__Poland,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__Portugal,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__Puerto-Rico,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__South,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__Taiwan,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__Thailand,0.0,0.0,False
+adult_census,10,factual,-1,,native-country__United-States,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,age,20.0,20.0,False
+adult_census,10,countercontex,0,0.662286752549878,capital-gain,4416.0,4416.0,False
+adult_census,10,countercontex,0,0.662286752549878,capital-loss,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,hours-per-week,25.000000000000004,25.000000000000004,False
+adult_census,10,countercontex,0,0.662286752549878,workclass__ ?,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,workclass__ Federal-gov,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,workclass__ Local-gov,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,workclass__ Never-worked,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,workclass__ Private,1.0,1.0,False
+adult_census,10,countercontex,0,0.662286752549878,workclass__ Self-emp-inc,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,workclass__ Self-emp-not-inc,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,workclass__ State-gov,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,workclass__ Without-pay,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,workclass__?,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,workclass__Federal-gov,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,workclass__Local-gov,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,workclass__Private,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,workclass__Self-emp-inc,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,workclass__Self-emp-not-inc,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,workclass__State-gov,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__ 10th,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__ 11th,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__ 12th,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__ 1st-4th,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__ 5th-6th,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__ 7th-8th,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__ 9th,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__ Assoc-acdm,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__ Assoc-voc,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__ Bachelors,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__ Doctorate,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__ HS-grad,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__ Masters,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__ Preschool,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__ Prof-school,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__ Some-college,1.0,1.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__10th,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__11th,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__12th,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__1st-4th,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__5th-6th,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__7th-8th,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__9th,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__Assoc-acdm,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__Assoc-voc,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__Bachelors,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__Doctorate,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__HS-grad,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__Masters,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__Preschool,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__Prof-school,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,education__Some-college,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,marital-status__ Divorced,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,marital-status__ Married-AF-spouse,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,marital-status__ Married-civ-spouse,0.0,1.0,True
+adult_census,10,countercontex,0,0.662286752549878,marital-status__ Married-spouse-absent,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,marital-status__ Never-married,1.0,0.0,True
+adult_census,10,countercontex,0,0.662286752549878,marital-status__ Separated,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,marital-status__ Widowed,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,marital-status__Divorced,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,marital-status__Married-AF-spouse,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,marital-status__Married-civ-spouse,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,marital-status__Married-spouse-absent,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,marital-status__Never-married,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,marital-status__Separated,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,marital-status__Widowed,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__ ?,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__ Adm-clerical,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__ Armed-Forces,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__ Craft-repair,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__ Exec-managerial,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__ Farming-fishing,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__ Handlers-cleaners,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__ Machine-op-inspct,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__ Other-service,1.0,0.0,True
+adult_census,10,countercontex,0,0.662286752549878,occupation__ Priv-house-serv,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__ Prof-specialty,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__ Protective-serv,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__ Sales,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__ Tech-support,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__ Transport-moving,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__?,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__Adm-clerical,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__Armed-Forces,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__Craft-repair,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__Exec-managerial,0.0,1.0,True
+adult_census,10,countercontex,0,0.662286752549878,occupation__Farming-fishing,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__Handlers-cleaners,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__Machine-op-inspct,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__Other-service,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__Priv-house-serv,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__Prof-specialty,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__Protective-serv,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__Sales,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__Tech-support,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,occupation__Transport-moving,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,relationship__ Husband,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,relationship__ Not-in-family,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,relationship__ Other-relative,1.0,0.0,True
+adult_census,10,countercontex,0,0.662286752549878,relationship__ Own-child,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,relationship__ Unmarried,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,relationship__ Wife,0.0,1.0,True
+adult_census,10,countercontex,0,0.662286752549878,relationship__Husband,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,relationship__Not-in-family,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,relationship__Other-relative,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,relationship__Own-child,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,relationship__Unmarried,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,relationship__Wife,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,race__ Amer-Indian-Eskimo,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,race__ Asian-Pac-Islander,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,race__ Black,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,race__ Other,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,race__ White,1.0,1.0,False
+adult_census,10,countercontex,0,0.662286752549878,race__Amer-Indian-Eskimo,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,race__Asian-Pac-Islander,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,race__Black,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,race__Other,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,race__White,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,sex__ Female,1.0,1.0,False
+adult_census,10,countercontex,0,0.662286752549878,sex__ Male,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,sex__Female,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,sex__Male,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ ?,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Cambodia,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Canada,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ China,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Columbia,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Cuba,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Dominican-Republic,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Ecuador,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ El-Salvador,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ England,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ France,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Germany,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Greece,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Guatemala,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Haiti,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Holand-Netherlands,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Honduras,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Hong,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Hungary,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ India,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Iran,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Ireland,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Italy,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Jamaica,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Japan,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Laos,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Mexico,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Nicaragua,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Outlying-US(Guam-USVI-etc),0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Peru,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Philippines,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Poland,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Portugal,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Puerto-Rico,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Scotland,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ South,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Taiwan,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Thailand,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Trinadad&Tobago,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ United-States,1.0,1.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Vietnam,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__ Yugoslavia,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__?,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__Cambodia,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__Canada,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__Columbia,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__Cuba,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__Dominican-Republic,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__Ecuador,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__El-Salvador,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__England,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__France,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__Germany,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__Haiti,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__Honduras,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__India,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__Iran,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__Italy,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__Jamaica,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__Laos,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__Mexico,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__Philippines,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__Poland,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__Portugal,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__Puerto-Rico,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__South,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__Taiwan,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__Thailand,0.0,0.0,False
+adult_census,10,countercontex,0,0.662286752549878,native-country__United-States,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,age,20.0,20.0,False
+adult_census,10,countercontex,1,0.5826328194268727,capital-gain,4416.0,4416.0,False
+adult_census,10,countercontex,1,0.5826328194268727,capital-loss,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,hours-per-week,25.000000000000004,25.000000000000004,False
+adult_census,10,countercontex,1,0.5826328194268727,workclass__ ?,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,workclass__ Federal-gov,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,workclass__ Local-gov,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,workclass__ Never-worked,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,workclass__ Private,1.0,1.0,False
+adult_census,10,countercontex,1,0.5826328194268727,workclass__ Self-emp-inc,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,workclass__ Self-emp-not-inc,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,workclass__ State-gov,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,workclass__ Without-pay,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,workclass__?,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,workclass__Federal-gov,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,workclass__Local-gov,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,workclass__Private,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,workclass__Self-emp-inc,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,workclass__Self-emp-not-inc,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,workclass__State-gov,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__ 10th,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__ 11th,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__ 12th,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__ 1st-4th,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__ 5th-6th,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__ 7th-8th,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__ 9th,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__ Assoc-acdm,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__ Assoc-voc,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__ Bachelors,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__ Doctorate,0.0,1.0,True
+adult_census,10,countercontex,1,0.5826328194268727,education__ HS-grad,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__ Masters,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__ Preschool,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__ Prof-school,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__ Some-college,1.0,0.0,True
+adult_census,10,countercontex,1,0.5826328194268727,education__10th,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__11th,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__12th,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__1st-4th,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__5th-6th,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__7th-8th,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__9th,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__Assoc-acdm,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__Assoc-voc,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__Bachelors,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__Doctorate,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__HS-grad,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__Masters,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__Preschool,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__Prof-school,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,education__Some-college,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,marital-status__ Divorced,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,marital-status__ Married-AF-spouse,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,marital-status__ Married-civ-spouse,0.0,1.0,True
+adult_census,10,countercontex,1,0.5826328194268727,marital-status__ Married-spouse-absent,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,marital-status__ Never-married,1.0,0.0,True
+adult_census,10,countercontex,1,0.5826328194268727,marital-status__ Separated,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,marital-status__ Widowed,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,marital-status__Divorced,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,marital-status__Married-AF-spouse,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,marital-status__Married-civ-spouse,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,marital-status__Married-spouse-absent,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,marital-status__Never-married,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,marital-status__Separated,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,marital-status__Widowed,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__ ?,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__ Adm-clerical,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__ Armed-Forces,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__ Craft-repair,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__ Exec-managerial,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__ Farming-fishing,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__ Handlers-cleaners,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__ Machine-op-inspct,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__ Other-service,1.0,1.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__ Priv-house-serv,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__ Prof-specialty,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__ Protective-serv,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__ Sales,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__ Tech-support,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__ Transport-moving,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__?,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__Adm-clerical,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__Armed-Forces,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__Craft-repair,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__Exec-managerial,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__Farming-fishing,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__Handlers-cleaners,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__Machine-op-inspct,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__Other-service,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__Priv-house-serv,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__Prof-specialty,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__Protective-serv,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__Sales,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__Tech-support,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,occupation__Transport-moving,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,relationship__ Husband,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,relationship__ Not-in-family,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,relationship__ Other-relative,1.0,0.0,True
+adult_census,10,countercontex,1,0.5826328194268727,relationship__ Own-child,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,relationship__ Unmarried,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,relationship__ Wife,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,relationship__Husband,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,relationship__Not-in-family,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,relationship__Other-relative,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,relationship__Own-child,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,relationship__Unmarried,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,relationship__Wife,0.0,1.0,True
+adult_census,10,countercontex,1,0.5826328194268727,race__ Amer-Indian-Eskimo,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,race__ Asian-Pac-Islander,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,race__ Black,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,race__ Other,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,race__ White,1.0,1.0,False
+adult_census,10,countercontex,1,0.5826328194268727,race__Amer-Indian-Eskimo,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,race__Asian-Pac-Islander,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,race__Black,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,race__Other,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,race__White,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,sex__ Female,1.0,1.0,False
+adult_census,10,countercontex,1,0.5826328194268727,sex__ Male,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,sex__Female,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,sex__Male,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ ?,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Cambodia,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Canada,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ China,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Columbia,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Cuba,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Dominican-Republic,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Ecuador,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ El-Salvador,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ England,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ France,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Germany,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Greece,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Guatemala,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Haiti,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Holand-Netherlands,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Honduras,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Hong,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Hungary,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ India,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Iran,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Ireland,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Italy,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Jamaica,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Japan,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Laos,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Mexico,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Nicaragua,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Outlying-US(Guam-USVI-etc),0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Peru,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Philippines,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Poland,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Portugal,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Puerto-Rico,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Scotland,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ South,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Taiwan,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Thailand,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Trinadad&Tobago,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ United-States,1.0,1.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Vietnam,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__ Yugoslavia,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__?,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__Cambodia,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__Canada,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__Columbia,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__Cuba,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__Dominican-Republic,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__Ecuador,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__El-Salvador,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__England,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__France,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__Germany,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__Haiti,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__Honduras,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__India,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__Iran,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__Italy,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__Jamaica,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__Laos,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__Mexico,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__Philippines,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__Poland,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__Portugal,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__Puerto-Rico,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__South,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__Taiwan,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__Thailand,0.0,0.0,False
+adult_census,10,countercontex,1,0.5826328194268727,native-country__United-States,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,age,20.0,20.0,False
+adult_census,10,countercontex,2,0.5470806640852418,capital-gain,4416.0,4416.0,False
+adult_census,10,countercontex,2,0.5470806640852418,capital-loss,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,hours-per-week,25.000000000000004,25.000000000000004,False
+adult_census,10,countercontex,2,0.5470806640852418,workclass__ ?,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,workclass__ Federal-gov,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,workclass__ Local-gov,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,workclass__ Never-worked,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,workclass__ Private,1.0,1.0,False
+adult_census,10,countercontex,2,0.5470806640852418,workclass__ Self-emp-inc,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,workclass__ Self-emp-not-inc,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,workclass__ State-gov,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,workclass__ Without-pay,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,workclass__?,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,workclass__Federal-gov,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,workclass__Local-gov,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,workclass__Private,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,workclass__Self-emp-inc,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,workclass__Self-emp-not-inc,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,workclass__State-gov,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__ 10th,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__ 11th,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__ 12th,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__ 1st-4th,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__ 5th-6th,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__ 7th-8th,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__ 9th,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__ Assoc-acdm,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__ Assoc-voc,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__ Bachelors,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__ Doctorate,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__ HS-grad,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__ Masters,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__ Preschool,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__ Prof-school,0.0,1.0,True
+adult_census,10,countercontex,2,0.5470806640852418,education__ Some-college,1.0,0.0,True
+adult_census,10,countercontex,2,0.5470806640852418,education__10th,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__11th,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__12th,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__1st-4th,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__5th-6th,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__7th-8th,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__9th,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__Assoc-acdm,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__Assoc-voc,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__Bachelors,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__Doctorate,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__HS-grad,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__Masters,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__Preschool,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__Prof-school,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,education__Some-college,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,marital-status__ Divorced,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,marital-status__ Married-AF-spouse,0.0,1.0,True
+adult_census,10,countercontex,2,0.5470806640852418,marital-status__ Married-civ-spouse,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,marital-status__ Married-spouse-absent,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,marital-status__ Never-married,1.0,0.0,True
+adult_census,10,countercontex,2,0.5470806640852418,marital-status__ Separated,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,marital-status__ Widowed,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,marital-status__Divorced,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,marital-status__Married-AF-spouse,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,marital-status__Married-civ-spouse,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,marital-status__Married-spouse-absent,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,marital-status__Never-married,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,marital-status__Separated,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,marital-status__Widowed,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__ ?,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__ Adm-clerical,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__ Armed-Forces,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__ Craft-repair,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__ Exec-managerial,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__ Farming-fishing,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__ Handlers-cleaners,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__ Machine-op-inspct,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__ Other-service,1.0,0.0,True
+adult_census,10,countercontex,2,0.5470806640852418,occupation__ Priv-house-serv,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__ Prof-specialty,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__ Protective-serv,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__ Sales,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__ Tech-support,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__ Transport-moving,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__?,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__Adm-clerical,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__Armed-Forces,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__Craft-repair,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__Exec-managerial,0.0,1.0,True
+adult_census,10,countercontex,2,0.5470806640852418,occupation__Farming-fishing,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__Handlers-cleaners,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__Machine-op-inspct,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__Other-service,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__Priv-house-serv,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__Prof-specialty,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__Protective-serv,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__Sales,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__Tech-support,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,occupation__Transport-moving,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,relationship__ Husband,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,relationship__ Not-in-family,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,relationship__ Other-relative,1.0,1.0,False
+adult_census,10,countercontex,2,0.5470806640852418,relationship__ Own-child,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,relationship__ Unmarried,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,relationship__ Wife,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,relationship__Husband,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,relationship__Not-in-family,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,relationship__Other-relative,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,relationship__Own-child,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,relationship__Unmarried,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,relationship__Wife,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,race__ Amer-Indian-Eskimo,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,race__ Asian-Pac-Islander,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,race__ Black,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,race__ Other,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,race__ White,1.0,1.0,False
+adult_census,10,countercontex,2,0.5470806640852418,race__Amer-Indian-Eskimo,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,race__Asian-Pac-Islander,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,race__Black,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,race__Other,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,race__White,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,sex__ Female,1.0,1.0,False
+adult_census,10,countercontex,2,0.5470806640852418,sex__ Male,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,sex__Female,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,sex__Male,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ ?,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Cambodia,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Canada,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ China,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Columbia,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Cuba,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Dominican-Republic,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Ecuador,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ El-Salvador,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ England,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ France,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Germany,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Greece,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Guatemala,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Haiti,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Holand-Netherlands,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Honduras,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Hong,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Hungary,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ India,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Iran,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Ireland,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Italy,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Jamaica,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Japan,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Laos,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Mexico,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Nicaragua,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Outlying-US(Guam-USVI-etc),0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Peru,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Philippines,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Poland,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Portugal,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Puerto-Rico,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Scotland,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ South,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Taiwan,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Thailand,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Trinadad&Tobago,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ United-States,1.0,1.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Vietnam,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__ Yugoslavia,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__?,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__Cambodia,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__Canada,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__Columbia,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__Cuba,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__Dominican-Republic,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__Ecuador,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__El-Salvador,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__England,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__France,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__Germany,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__Haiti,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__Honduras,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__India,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__Iran,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__Italy,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__Jamaica,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__Laos,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__Mexico,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__Philippines,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__Poland,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__Portugal,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__Puerto-Rico,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__South,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__Taiwan,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__Thailand,0.0,0.0,False
+adult_census,10,countercontex,2,0.5470806640852418,native-country__United-States,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,age,20.0,20.0,False
+adult_census,10,nice,0,0.999691535954176,capital-gain,4416.0,99999.0,True
+adult_census,10,nice,0,0.999691535954176,capital-loss,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,hours-per-week,25.000000000000004,25.000000000000004,False
+adult_census,10,nice,0,0.999691535954176,workclass__ ?,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,workclass__ Federal-gov,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,workclass__ Local-gov,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,workclass__ Never-worked,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,workclass__ Private,1.0,1.0,False
+adult_census,10,nice,0,0.999691535954176,workclass__ Self-emp-inc,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,workclass__ Self-emp-not-inc,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,workclass__ State-gov,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,workclass__ Without-pay,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,workclass__?,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,workclass__Federal-gov,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,workclass__Local-gov,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,workclass__Private,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,workclass__Self-emp-inc,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,workclass__Self-emp-not-inc,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,workclass__State-gov,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__ 10th,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__ 11th,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__ 12th,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__ 1st-4th,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__ 5th-6th,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__ 7th-8th,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__ 9th,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__ Assoc-acdm,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__ Assoc-voc,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__ Bachelors,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__ Doctorate,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__ HS-grad,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__ Masters,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__ Preschool,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__ Prof-school,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__ Some-college,1.0,1.0,False
+adult_census,10,nice,0,0.999691535954176,education__10th,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__11th,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__12th,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__1st-4th,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__5th-6th,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__7th-8th,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__9th,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__Assoc-acdm,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__Assoc-voc,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__Bachelors,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__Doctorate,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__HS-grad,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__Masters,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__Preschool,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__Prof-school,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,education__Some-college,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,marital-status__ Divorced,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,marital-status__ Married-AF-spouse,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,marital-status__ Married-civ-spouse,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,marital-status__ Married-spouse-absent,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,marital-status__ Never-married,1.0,1.0,False
+adult_census,10,nice,0,0.999691535954176,marital-status__ Separated,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,marital-status__ Widowed,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,marital-status__Divorced,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,marital-status__Married-AF-spouse,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,marital-status__Married-civ-spouse,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,marital-status__Married-spouse-absent,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,marital-status__Never-married,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,marital-status__Separated,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,marital-status__Widowed,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__ ?,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__ Adm-clerical,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__ Armed-Forces,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__ Craft-repair,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__ Exec-managerial,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__ Farming-fishing,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__ Handlers-cleaners,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__ Machine-op-inspct,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__ Other-service,1.0,1.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__ Priv-house-serv,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__ Prof-specialty,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__ Protective-serv,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__ Sales,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__ Tech-support,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__ Transport-moving,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__?,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__Adm-clerical,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__Armed-Forces,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__Craft-repair,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__Exec-managerial,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__Farming-fishing,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__Handlers-cleaners,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__Machine-op-inspct,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__Other-service,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__Priv-house-serv,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__Prof-specialty,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__Protective-serv,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__Sales,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__Tech-support,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,occupation__Transport-moving,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,relationship__ Husband,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,relationship__ Not-in-family,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,relationship__ Other-relative,1.0,1.0,False
+adult_census,10,nice,0,0.999691535954176,relationship__ Own-child,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,relationship__ Unmarried,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,relationship__ Wife,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,relationship__Husband,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,relationship__Not-in-family,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,relationship__Other-relative,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,relationship__Own-child,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,relationship__Unmarried,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,relationship__Wife,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,race__ Amer-Indian-Eskimo,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,race__ Asian-Pac-Islander,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,race__ Black,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,race__ Other,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,race__ White,1.0,1.0,False
+adult_census,10,nice,0,0.999691535954176,race__Amer-Indian-Eskimo,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,race__Asian-Pac-Islander,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,race__Black,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,race__Other,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,race__White,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,sex__ Female,1.0,1.0,False
+adult_census,10,nice,0,0.999691535954176,sex__ Male,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,sex__Female,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,sex__Male,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ ?,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Cambodia,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Canada,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ China,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Columbia,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Cuba,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Dominican-Republic,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Ecuador,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ El-Salvador,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ England,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ France,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Germany,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Greece,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Guatemala,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Haiti,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Holand-Netherlands,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Honduras,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Hong,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Hungary,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ India,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Iran,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Ireland,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Italy,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Jamaica,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Japan,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Laos,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Mexico,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Nicaragua,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Outlying-US(Guam-USVI-etc),0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Peru,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Philippines,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Poland,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Portugal,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Puerto-Rico,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Scotland,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ South,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Taiwan,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Thailand,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Trinadad&Tobago,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ United-States,1.0,1.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Vietnam,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__ Yugoslavia,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__?,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__Cambodia,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__Canada,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__Columbia,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__Cuba,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__Dominican-Republic,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__Ecuador,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__El-Salvador,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__England,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__France,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__Germany,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__Haiti,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__Honduras,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__India,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__Iran,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__Italy,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__Jamaica,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__Laos,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__Mexico,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__Philippines,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__Poland,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__Portugal,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__Puerto-Rico,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__South,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__Taiwan,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__Thailand,0.0,0.0,False
+adult_census,10,nice,0,0.999691535954176,native-country__United-States,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,age,20.0,20.0,False
+adult_census,10,dice,0,0.5000057698722855,capital-gain,4416.0,6362.898078812134,True
+adult_census,10,dice,0,0.5000057698722855,capital-loss,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,hours-per-week,25.000000000000004,31.99999982118607,True
+adult_census,10,dice,0,0.5000057698722855,workclass__ ?,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,workclass__ Federal-gov,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,workclass__ Local-gov,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,workclass__ Never-worked,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,workclass__ Private,1.0,1.0,False
+adult_census,10,dice,0,0.5000057698722855,workclass__ Self-emp-inc,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,workclass__ Self-emp-not-inc,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,workclass__ State-gov,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,workclass__ Without-pay,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,workclass__?,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,workclass__Federal-gov,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,workclass__Local-gov,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,workclass__Private,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,workclass__Self-emp-inc,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,workclass__Self-emp-not-inc,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,workclass__State-gov,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__ 10th,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__ 11th,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__ 12th,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__ 1st-4th,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__ 5th-6th,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__ 7th-8th,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__ 9th,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__ Assoc-acdm,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__ Assoc-voc,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__ Bachelors,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__ Doctorate,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__ HS-grad,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__ Masters,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__ Preschool,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__ Prof-school,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__ Some-college,1.0,1.0,False
+adult_census,10,dice,0,0.5000057698722855,education__10th,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__11th,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__12th,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__1st-4th,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__5th-6th,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__7th-8th,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__9th,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__Assoc-acdm,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__Assoc-voc,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__Bachelors,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__Doctorate,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__HS-grad,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__Masters,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__Preschool,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__Prof-school,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,education__Some-college,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,marital-status__ Divorced,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,marital-status__ Married-AF-spouse,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,marital-status__ Married-civ-spouse,0.0,1.0,True
+adult_census,10,dice,0,0.5000057698722855,marital-status__ Married-spouse-absent,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,marital-status__ Never-married,1.0,0.0,True
+adult_census,10,dice,0,0.5000057698722855,marital-status__ Separated,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,marital-status__ Widowed,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,marital-status__Divorced,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,marital-status__Married-AF-spouse,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,marital-status__Married-civ-spouse,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,marital-status__Married-spouse-absent,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,marital-status__Never-married,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,marital-status__Separated,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,marital-status__Widowed,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__ ?,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__ Adm-clerical,0.0,1.0,True
+adult_census,10,dice,0,0.5000057698722855,occupation__ Armed-Forces,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__ Craft-repair,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__ Exec-managerial,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__ Farming-fishing,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__ Handlers-cleaners,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__ Machine-op-inspct,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__ Other-service,1.0,0.0,True
+adult_census,10,dice,0,0.5000057698722855,occupation__ Priv-house-serv,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__ Prof-specialty,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__ Protective-serv,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__ Sales,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__ Tech-support,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__ Transport-moving,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__?,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__Adm-clerical,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__Armed-Forces,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__Craft-repair,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__Exec-managerial,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__Farming-fishing,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__Handlers-cleaners,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__Machine-op-inspct,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__Other-service,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__Priv-house-serv,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__Prof-specialty,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__Protective-serv,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__Sales,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__Tech-support,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,occupation__Transport-moving,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,relationship__ Husband,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,relationship__ Not-in-family,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,relationship__ Other-relative,1.0,0.0,True
+adult_census,10,dice,0,0.5000057698722855,relationship__ Own-child,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,relationship__ Unmarried,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,relationship__ Wife,0.0,1.0,True
+adult_census,10,dice,0,0.5000057698722855,relationship__Husband,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,relationship__Not-in-family,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,relationship__Other-relative,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,relationship__Own-child,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,relationship__Unmarried,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,relationship__Wife,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,race__ Amer-Indian-Eskimo,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,race__ Asian-Pac-Islander,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,race__ Black,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,race__ Other,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,race__ White,1.0,1.0,False
+adult_census,10,dice,0,0.5000057698722855,race__Amer-Indian-Eskimo,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,race__Asian-Pac-Islander,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,race__Black,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,race__Other,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,race__White,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,sex__ Female,1.0,1.0,False
+adult_census,10,dice,0,0.5000057698722855,sex__ Male,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,sex__Female,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,sex__Male,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ ?,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Cambodia,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Canada,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ China,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Columbia,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Cuba,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Dominican-Republic,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Ecuador,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ El-Salvador,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ England,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ France,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Germany,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Greece,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Guatemala,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Haiti,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Holand-Netherlands,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Honduras,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Hong,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Hungary,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ India,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Iran,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Ireland,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Italy,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Jamaica,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Japan,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Laos,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Mexico,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Nicaragua,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Outlying-US(Guam-USVI-etc),0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Peru,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Philippines,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Poland,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Portugal,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Puerto-Rico,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Scotland,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ South,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Taiwan,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Thailand,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Trinadad&Tobago,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ United-States,1.0,1.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Vietnam,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__ Yugoslavia,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__?,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__Cambodia,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__Canada,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__Columbia,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__Cuba,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__Dominican-Republic,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__Ecuador,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__El-Salvador,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__England,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__France,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__Germany,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__Haiti,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__Honduras,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__India,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__Iran,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__Italy,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__Jamaica,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__Laos,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__Mexico,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__Philippines,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__Poland,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__Portugal,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__Puerto-Rico,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__South,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__Taiwan,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__Thailand,0.0,0.0,False
+adult_census,10,dice,0,0.5000057698722855,native-country__United-States,0.0,0.0,False

@@ -78,6 +78,14 @@ def _robustness(path: str, output: str) -> int:
     return 0
 
 
+def _campaign_paper(matrix_dir: str, output: str) -> int:
+    from experiments.zeroshot_cf.analysis.campaign import build_campaign_paper
+
+    products = build_campaign_paper(matrix_dir, output)
+    print(f"wrote {len(products)} campaign paper products into {output}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -98,6 +106,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     robustness.add_argument("--config", required=True)
     robustness.add_argument("--output", required=True)
+    campaign = commands.add_parser(
+        "campaign-paper", help="build the complete campaign paper product set"
+    )
+    campaign.add_argument("--matrix-dir", required=True)
+    campaign.add_argument("--output", required=True)
     commands.add_parser("list-methods", help="list registered method names")
     return parser
 
@@ -119,6 +132,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _analyze(args.config, args.output, args.baseline_config)
     if args.command == "robustness":
         return _robustness(args.config, args.output)
+    if args.command == "campaign-paper":
+        return _campaign_paper(args.matrix_dir, args.output)
     if args.command == "list-methods":
         from experiments.zeroshot_cf.methods.registry import DEFAULT_METHOD_REGISTRY
 

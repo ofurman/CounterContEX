@@ -597,3 +597,84 @@ timings, and reported deltas. For E8 it independently joined all 362,127 detail 
 source candidates, retrained all 54 instruments, reproduced every validity boolean and all 407
 table rows, and confirmed the 3,385-file Stage 7 tree and 540 run directories remained intact.
 **Commit**: `HEAD` (this stage commit)
+
+## 2026-09-07 14:18 -- Stage 12: Headline run and paper artifacts -- DONE
+**Did**: Executed the frozen C3 E10 once on `gx10-bdc5`: six datasets, logistic regression,
+seed 42, n=1000, k=3. The managed launcher exited zero, published
+`launch/stage12_e10.DONE`, and strict aggregation accepted 6/6 exact cells. Added a campaign
+paper builder and CLI that map T1/F3/F6 to E1, T2 to E2, T3 to E9, F4 to E4 plus E1, F5 to
+E7, and F7 to E10 plus matched E1 NICE/DiCE baselines. D-14 records why F7 reconstructs the
+pinned HELOC/Adult cases, authenticates their manifest `case_id`, matches source indices, and
+inverse-transforms candidate/factual values. Published the 17 generated products under
+`docs/papers/campaign-artifacts`, the traceable experiment summary in
+`docs/papers/campaign-results.md`, and updated both READMEs and the method protocol/hypotheses.
+
+**Verification**: GATE the original launcher process completed all six matrix-resolved run IDs;
+every directory has all six required payloads and `COMPLETE`, the DONE marker exists, and a fresh
+strict aggregate accepted 6/6. Missing/extra/partial/mismatched cells turn this gate red. GATE
+all 17 committed T1--T3/F3--F7 products were regenerated from canonical artifacts in a fresh
+`/tmp` directory under `SOURCE_DATE_EPOCH=0` and `diff -qr` returned no difference; deleting a
+marker, changing a matrix identity, or hard-coding a product value makes loading or byte diff
+fail. F7 selected shared source index 21 for HELOC and 10 for Adult, includes three
+CounterContEx ranks and one available NICE and DiCE row, reads `points.csv`, `candidates.csv`,
+and arrays, and rejects any reconstructed case-ID or table/array probability mismatch. The
+focused TDD witnesses distinguish normalized from inverse feature units and corrupt case metadata
+in any one of the three source artifacts. Analysis tests passed 19; changed-package Ruff, offline
+Exp9 help, six-row E10 dry-run, lock/diff checks, and the full 311-test suite passed (five known
+dependency warnings).
+
+**Report**: E10 coverage/class validity/threshold validity/grouped-Gower/neighbour support/
+actionability/seconds are Adult `1/1/.176272/.097852/.115369/1/2367.934`, Bank
+`1/1/.496662/.038434/.061442/1/1806.811`, German
+`1/1/.002778/.063975/.250785/1/686.165`, GMSC
+`1/1/.449667/.092073/.049263/1/452.274`, HELOC
+`.925/1/0/.021709/.046502/1/1733.816`, and Lending Club
+`1/1/.206296/.101839/.057693/1/1051.546`. E10 phase totals are prepare `.108`, generate
+`8027.883`, evaluate `66.745`, write `.376`, and total `8098.546` seconds (2.24960 h). Its
+aggregate SHA-256 is `df781753...2941b`; no configuration was revised after inspection.
+
+The measured campaign compute lower bound is **133.11459 cell-hours** versus the approximately
+120 h estimate: the independently audited 124.91096 h through E7, plus E9's 5.95403 h and
+E10's 2.24960 h. It sums canonical manifest `total_s` once plus unique published superseded E1
+DiCE identities, excludes copied quarantine rows, and calls E8 separately because its read-only
+rescoring has no generic lifecycle manifest. This is compute consumption, not elapsed wall time
+or a claim that every phase occupied the GPU.
+
+The four predeclared answers are: (1) broad TabICL-over-empirical improvement **not supported**;
+the small mean validity/support gains came with lower coverage, worse proximity, heterogeneous
+datasets, and 8.09x runtime. (2) confidence-anchor improvement **not supported as confidence**;
+generation tau raised probability, whereas conditioning chiefly preserved coverage/proximity at
+large runtime cost. (3) DPP diversity improvement **not supported**; CounterContEx was less
+diverse than DiCE in E2 and greedy-farthest beat DPP's two diversity orientations in E5. (4)
+joint-density improvement is **supported mechanistically but the full guardrail claim is not
+established**: 2,945 scored E5 factuals had 98.71% positive gains (mean 4.2683), while the matched
+arm added .3670 action units and .013184 Gower with no prespecified acceptability threshold.
+
+**Artifacts**: E10 run IDs are Adult `00cea69e...bf1`, Bank `9119b938...3af`, German
+`40d888cb...023`, GMSC `993dcadb...c1b8`, HELOC `0eb68d5b...a9a55`, and Lending Club
+`8890a2c3...39d29`. The paper source hashes include T1 `df9f35ce...8605f`, T2
+`68cf8529...223e`, T3 `43af0290...c98df`, F3 `1f3d2cb8...abd0`, F4
+`ea5c2415...5900`, F5 `c89e80d2...37a9a`, F6 `0c2446ed...ba9c`, and F7
+`dc6ec35f...d707`. The source CSVs, LaTeX, deterministic PDFs, and analysis manifest are all
+tracked; raw campaign runs remain immutable and ignored.
+
+**Backlog**: The full sweep leaves B-1 open because a single faster frozen C3 Lending result is
+not the dedicated stopping-policy comparison, and B-2 open because cache-side training-identity
+validation remains a separate reproducibility change. B-12 directional constraints, B-13
+multiclass targets, B-14 a formal search statement, and B-15 human evaluation are explicitly
+carried forward as out of scope. No backlog item was falsely closed. Four cross-plan lessons were
+added to `docs/plans/LESSONS.md`.
+
+**Problems**: The generic Stage 5 F7 emitted normalized candidate vectors and historical arrays
+do not store factual values. A focused failing test led to the smallest non-destructive solution:
+reconstruct the deterministic case, authenticate it by content identity, and leave all historical
+artifacts untouched. The first focused assertion omitted the intentionally emitted factual row
+and Ruff found line wraps; the protocol's delegated light fix corrected only those issues, after
+which the root reran the complete gates. The independent audit then found that F7 authenticated
+only one baseline artifact and relied on shared matrix identity for the other; a second delegated
+red witness now corrupts DiCE alone, and the builder authenticates all headline/NICE/DiCE outer
+manifest case IDs without reconstructing the model repeatedly. The auditor rechecked the fix and
+independently passed 19 focused and 311 full tests. The old E1 T1 copy predates the later
+backend-column addition, so the final bundle regenerates the current schema rather than copying
+its stale hash.
+**Commit**: `HEAD` (this stage commit)

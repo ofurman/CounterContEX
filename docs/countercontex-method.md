@@ -355,31 +355,37 @@ preparation.
 
 ## 9. Reference experimental protocol
 
-The tracked full reference matrix evaluates four datasets:
+The paper campaign evaluates six datasets:
 
 - HELOC
 - Bank Marketing
 - Give Me Some Credit
 - Lending Club
+- Adult Census
+- German Credit
 
 The dataset pipeline uses a deterministic 64/16/20 train, validation, and test
 split with seed 42. It fits preprocessing on training data. Numerical features
 use MinMax scaling, and categorical variables use grouped one-hot encodings.
 
-The target classifier is logistic regression with `C=1.0`, `max_iter=1000`, and
-seed 42. The protocol selects up to 1,000 factuals through deterministic
-stratified sampling.
+E1 crosses fixed logistic-regression, MLP, and XGBoost target families, five
+generation seeds, all six methods, and 250 factuals. The frozen E10 continuity
+run uses logistic regression with `C=1.0`, `max_iter=1000`, and seed 42, and
+selects up to 1,000 factuals through deterministic stratified sampling.
 
-The CounterContEx cell requests three counterfactuals. It uses nine numerical
-quantiles from 0.1 through 0.9 and five confidence quantiles. Its beam width is
-8, and its candidate pool size is 16.
+The frozen E10 CounterContEx cell requests three counterfactuals. It uses five
+numerical quantiles from 0.1 through 0.9, context size 256, predicted training
+labels, beam width 8, and candidate pool size 16. Confidence conditioning and
+joint refinement are disabled in this selected configuration.
 
 The cell uses one TabICL estimator, temperature `1e-9`, and at most 100 validity
 steps. It permits two extra actions inside the diverse-pool quality bound.
 
-The generation threshold is $\tau=0.5$. The evaluator separately reports
-threshold validity at 0.7. Generation and evaluation thresholds must remain
-distinct when interpreting results.
+The generation class-crossing threshold is $\tau=0.5$. The evaluator separately
+reports threshold validity at 0.7. Generation and evaluation thresholds remain
+distinct when interpreting results. The older four-dataset
+`full_reference.yaml` matrix is retained as a compatibility benchmark and is
+not the paper campaign protocol.
 
 ## 10. Evaluation and denominators
 
@@ -406,22 +412,34 @@ Diversity metrics include action-set Jaccard distance and pairwise grouped
 Gower distance. Set coverage at $k$ requires all requested ranks to be
 available.
 
-## 11. Testable research hypotheses
+## 11. Research hypotheses and campaign answers
 
-The implementation supports controlled tests of these hypotheses:
+The campaign held the dataset, factuals, classifier, target policy, action
+schema, seed, and requested set size constant within each comparison. Its four
+predeclared hypotheses had mixed or negative answers:
 
-1. Target-conditioned TabICL proposals improve coverage or proximity over
-   target-class empirical quantiles.
-2. Confidence anchors improve high-threshold validity without unacceptable
-   losses in coverage, proximity, or runtime.
-3. Beam search and DPP selection improve set diversity while preserving
-   validity and bounded factual distance.
-4. Joint-density refinement improves within-factual TabICL density without
-   unacceptable increases in action count or grouped Gower distance.
-
-These statements are hypotheses, not conclusions. Tests must hold the dataset,
-factuals, classifier, target policy, action schema, seed, and requested set size
-constant.
+1. **TabICL proposals over empirical quantiles: not supported broadly.** E3
+   improved mean threshold validity by 0.005716 and neighbour support by
+   0.000432, but reduced coverage by 0.003333, worsened grouped-Gower distance
+   by 0.007875, and was 8.09 times slower. The validity gain was dominated by
+   Lending Club and was negative on four other datasets.
+2. **Confidence anchors: not supported as a confidence mechanism.** In E4,
+   increasing the generation threshold raised achieved probability, but at a
+   fixed threshold confidence conditioning did not. Conditioning generally
+   preserved more coverage and improved proximity in difficult cells, at a
+   substantial runtime cost.
+3. **Beam search and DPP diversity: not supported against DiCE.** In E2,
+   CounterContEx had higher action-set overlap by 0.133904 and lower pairwise
+   grouped-Gower diversity by 0.030302, despite better coverage, threshold
+   validity, and proximity. E5 found greedy-farthest stronger than DPP on both
+   recorded diversity orientations.
+4. **Joint-density refinement: density improvement supported, full guardrail
+   claim not established.** Across 2,945 E5 factuals with a scored sparse
+   starting point, refinement increased TabICL joint log-density in 98.71% of
+   cases (mean gain 4.2683). Against the matched nine-quantile sparse arm it
+   added 0.3670 action units and 0.013184 grouped-Gower distance on average;
+   because no acceptance threshold for those costs was prespecified, the full
+   “without unacceptable increases” claim is not made.
 
 ## 12. Limitations
 

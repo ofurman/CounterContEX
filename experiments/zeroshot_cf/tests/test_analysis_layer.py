@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 from experiments.zeroshot_cf.analysis import (
     builders,
+    campaign,
     core,
     holm_wilcoxon,
     load_published_cells,
@@ -266,6 +267,64 @@ def test_paper_builders_accept_only_artifact_and_destination_paths():
             "matrix_config",
             "output_dir",
         )
+
+
+def test_qualitative_rows_report_inverse_feature_values_and_changes():
+    factual = np.array([0.25, 1.0])
+    candidates = {
+        "countercontex": ((0, np.array([0.75, 1.0]), 0.8),),
+        "nice": ((0, np.array([0.25, 0.0]), 0.6),),
+    }
+
+    rows = campaign._qualitative_rows(
+        dataset="fixture",
+        source_index=7,
+        feature_names=("income", "employed"),
+        factual=factual,
+        candidates=candidates,
+        inverse_transform=lambda values: values * np.array([100_000.0, 1.0]),
+    )
+
+    assert {row["method"] for row in rows} == {"factual", "countercontex", "nice"}
+    income = next(
+        row
+        for row in rows
+        if row["method"] == "countercontex" and row["feature"] == "income"
+    )
+    assert income["factual_value"] == 25_000.0
+    assert income["candidate_value"] == 75_000.0
+    assert income["changed"] is True
+    unchanged = next(
+        row
+        for row in rows
+        if row["method"] == "countercontex" and row["feature"] == "employed"
+    )
+    assert unchanged["changed"] is False
+
+
+def test_campaign_f7_builder_accepts_only_artifact_and_destination_paths():
+    assert tuple(inspect.signature(campaign.build_f7_campaign).parameters) == (
+        "headline_output_root",
+        "headline_matrix_config",
+        "baseline_output_root",
+        "baseline_matrix_config",
+        "output_dir",
+    )
+
+
+def test_campaign_authenticates_every_artifact_against_reconstructed_case(tmp_path):
+    loaded = SimpleNamespace(case=SimpleNamespace(case_id="expected-case"))
+    artifacts = []
+    for name, case_id in (("nice", "expected-case"), ("dice", "corrupt-case")):
+        artifact = tmp_path / name
+        artifact.mkdir()
+        (artifact / "manifest.json").write_text(
+            json.dumps({"report_metadata": {"case_id": case_id}})
+        )
+        artifacts.append(artifact)
+
+    with pytest.raises(ValueError, match="artifact case_id"):
+        campaign._authenticate_case_artifacts(loaded, artifacts)
 
 
 def test_e8_probability_bins_keep_boundary_candidates_separate():
