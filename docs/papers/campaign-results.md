@@ -117,6 +117,12 @@ in generation and 6.90165 total cell-hours.
 - Artifacts: `results/campaign/e3_backend/`; aggregate SHA-256
   `4683d367...960a49`.
 
+The empirical baseline derives each requested quantile from reference rows that the classifier assigns to the target class.
+It ranks categorical proposals by their target-class frequencies.
+Every factual with the same target therefore gets the same proposals.
+TabICL instead conditions each masked feature on the current row, target class, and local context.
+Both arms use the same quantile grid and sparse search, so E3 isolates the proposal backend.
+
 | Metric | TabICL − empirical | Stage 1 spread | Direction for TabICL |
 |---|---:|---:|---|
 | Coverage | -.003333 | 0 | Adverse |
