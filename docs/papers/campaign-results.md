@@ -8,15 +8,33 @@ committed in [`campaign-artifacts/`](campaign-artifacts/).
 
 ## Reading the metrics
 
-Coverage divides factuals with at least one returned candidate by all factuals.
-Returned-class and returned-threshold validity divide successes by available
-candidates only. Per-requested-slot rates retain unavailable slots in their
-denominator; per-factual rates count factuals with at least one success. Primary
-metrics use rank 0 and set metrics use the full returned set. Grouped-Gower and
-continuous proximity use returned target-class candidates; sparsity,
-actionability, bounds, LOF, Isolation Forest, and neighbour support use every
-available candidate. Detectability always travels with its measured arm counts
-and status.
+| Metric | Concise meaning | Better |
+|---|---|:---:|
+| Coverage | Fraction of factuals with at least one returned candidate. | Higher |
+| Set coverage@k | Fraction of factuals for which all `k` requested candidates were returned. | Higher |
+| Class validity | Fraction of returned candidates predicted as the requested target class. | Higher |
+| Threshold validity | Fraction of returned candidates that reach the target class and its probability threshold, normally .7. | Higher |
+| Achieved probability | Mean target-class probability of returned candidates. | Higher |
+| Grouped-Gower | Mixed-type distance from a factual to a target-class candidate; a one-hot group counts as one feature. | Lower |
+| Action units | Mean number of changed numerical features or atomic categorical groups per returned candidate. | Lower |
+| Actionability | Fraction of returned candidates that preserve every immutable feature. | Higher |
+| Neighbour support | Grouped-Gower distance to the fifth-nearest training row. | Lower |
+| Out-of-bounds fraction | Fraction of returned candidates with any normalized feature outside `[0, 1]`. | Lower |
+| Action Jaccard distance | Dissimilarity between the changed-action sets within a returned set. | Higher diversity |
+| Pairwise Gower | Mixed-type distance between candidates within a returned set. | Higher diversity |
+| Robustness retention | Fraction still predicted as the target class after evaluation-only model retraining. | Higher |
+| Detectability AUC | Orientation-independent linear-probe separation of real and counterfactual rows; .5 is indistinguishable and 1 is fully separable. | Lower |
+| Runtime | Measured prepare, generate, evaluate, write, or total elapsed seconds. | Lower |
+
+Coverage and validity use different denominators: unavailable slots reduce
+coverage but do not enter returned-candidate validity. Per-requested-slot rates
+do include those slots, while per-factual rates ask whether each factual has at
+least one success. `Primary` means rank 0; `set` means all returned ranks.
+Grouped-Gower and continuous proximity use target-class candidates, whereas
+sparsity, actionability, bounds, LOF, Isolation Forest, and neighbour support
+use every returned candidate. Larger stored LOF values are more outlying;
+larger Isolation Forest values are more inlying. Detectability is reported only
+with its arm counts and measurement status.
 
 Unless a table says otherwise, values are macro means over the dataset,
 classifier, and/or seed blocks named in the experiment configuration. `±` is
