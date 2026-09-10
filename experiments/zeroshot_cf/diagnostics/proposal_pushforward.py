@@ -128,6 +128,46 @@ def _validated_quantile_banks(
     return normalized
 
 
+def _reference_category_support(
+    X_reference: np.ndarray, group: OneHotActionGroup
+) -> list[int]:
+    values = np.asarray(X_reference, dtype=np.float64)[:, list(group.columns)]
+    if values.ndim != 2 or not len(values):
+        raise ValueError("categorical support requires non-empty reference rows")
+    if np.any(~np.isfinite(values)) or np.any(~np.isclose(values.sum(axis=1), 1.0)):
+        raise ValueError(f"reference group {group.name} must be atomic one-hot")
+    return sorted(np.unique(np.argmax(values, axis=1)).astype(int).tolist())
+
+
+def _validate_record_inventory(
+    metadata: Mapping[str, Any], records: Sequence[Mapping[str, Any]]
+) -> None:
+    expected_inventory = {
+        (item["action_type"], item["action_unit"], item["sampling_bank"]): item
+        for item in metadata["action_unit_inventory"]
+    }
+    actual_inventory: dict[tuple[str, str, str], list[Mapping[str, Any]]] = {}
+    for record in records:
+        key = (
+            record["action_type"],
+            record["action_unit"],
+            record["sampling_bank"],
+        )
+        actual_inventory.setdefault(key, []).append(record)
+    if set(actual_inventory) != set(expected_inventory):
+        raise ValueError("diagnostic proposal action inventory is incomplete")
+    for key, expected in expected_inventory.items():
+        observed = actual_inventory[key]
+        if sorted(int(record["draw"]) for record in observed) != list(
+            range(int(expected["draw_count"]))
+        ):
+            raise ValueError("diagnostic proposal action inventory is incomplete")
+        if "categories" in expected and sorted(
+            int(record["category"]) for record in observed
+        ) != list(expected["categories"]):
+            raise ValueError("diagnostic categorical support is incomplete")
+
+
 def trace_fixed_state_pushforward(
     session: Any,
     classifier: Any,
@@ -345,6 +385,7 @@ def write_diagnostic_bundle(
         raise ValueError(f"diagnostic metadata is missing required fields: {missing}")
     if metadata["expected_record_count"] != len(records):
         raise ValueError("diagnostic proposal rows do not match expected record count")
+    _validate_record_inventory(metadata, records)
     output.mkdir(parents=True)
     epoch = int(os.environ.get("SOURCE_DATE_EPOCH", "0"))
     frozen_metadata = {
@@ -409,25 +450,7 @@ def read_diagnostic_bundle(
     required_ids = list(range(len(records)))
     if [record.get("record_id") for record in records] != required_ids:
         raise ValueError("diagnostic proposal rows are missing or out of order")
-    expected_inventory = {
-        (item["action_type"], item["action_unit"], item["sampling_bank"]): int(
-            item["draw_count"]
-        )
-        for item in metadata["action_unit_inventory"]
-    }
-    actual_inventory: dict[tuple[str, str, str], list[int]] = {}
-    for record in records:
-        key = (
-            record["action_type"],
-            record["action_unit"],
-            record["sampling_bank"],
-        )
-        actual_inventory.setdefault(key, []).append(int(record["draw"]))
-    if set(actual_inventory) != set(expected_inventory) or any(
-        sorted(draws) != list(range(expected_inventory[key]))
-        for key, draws in actual_inventory.items()
-    ):
-        raise ValueError("diagnostic proposal action inventory is incomplete")
+    _validate_record_inventory(metadata, records)
     identity_fields = ("factual_partition", "factual_source_index", "target")
     for record in records:
         for field in identity_fields:
@@ -571,7 +594,10 @@ def run_matrix_cell(
             "action_type": "categorical",
             "action_unit": group.name,
             "sampling_bank": "exact",
-            "draw_count": len(group.columns),
+            "draw_count": len(
+                _reference_category_support(context.X_reference, group)
+            ),
+            "categories": _reference_category_support(context.X_reference, group),
         }
         for group in context.feature_schema.actionable_groups
     ]

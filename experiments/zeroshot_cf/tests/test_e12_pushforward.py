@@ -21,6 +21,7 @@ from experiments.zeroshot_cf.analysis.proposal_pushforward import (
 )
 from experiments.zeroshot_cf.core.contracts import FeatureDomains, FeatureSchema
 from experiments.zeroshot_cf.diagnostics.proposal_pushforward import (
+    _reference_category_support,
     read_diagnostic_bundle,
     run_matrix_cell,
     trace_fixed_state_pushforward,
@@ -76,6 +77,19 @@ def _record(
         "crosses_generation_threshold": before < 0.5 <= before + delta,
         "crosses_evaluation_threshold": before < 0.7 <= before + delta,
     }
+
+
+def test_reference_category_support_allows_sparse_learned_classes() -> None:
+    group = OneHotActionGroup("segment", (0, 1, 2))
+    X_reference = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+        ]
+    )
+
+    assert _reference_category_support(X_reference, group) == [0, 2]
 
 
 def _unit(action_type: str, name: str, delta: float, count: int, **kwargs):
