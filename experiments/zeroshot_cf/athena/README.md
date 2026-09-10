@@ -121,3 +121,34 @@ uv run --project experiments/zeroshot_cf \
   --max-test 10 \
   --cache-dir experiments/zeroshot_cf/models/tabicl
 ```
+
+## E11-E13 managed campaign launcher
+
+`run_distribution_campaign.sh` defaults to dry-run and prints every resolved
+cell. Execute mode requires an external authorization record containing the
+exact matrix SHA-256 and either `scope=pilot` or `scope=confirmation`:
+
+```bash
+bash experiments/zeroshot_cf/athena/run_distribution_campaign.sh \
+  experiments/zeroshot_cf/configs/matrices/campaign_e11_distribution_sampling.yaml
+
+CAMPAIGN_MODE=execute AUTHORIZATION_RECORD=/secure/e11-pilot.authorization \
+  bash experiments/zeroshot_cf/athena/run_distribution_campaign.sh \
+  experiments/zeroshot_cf/configs/matrices/campaign_e11_distribution_sampling.yaml
+```
+
+The launcher refuses a non-empty output root unless `RESUME=1`, verifies local
+TabICL checkpoints, records elapsed campaign time, strictly aggregates the
+declared cells, and then publishes an external hash inventory. Confirmation
+matrices require a separate record with `scope=confirmation`; pilot authority
+does not cross that boundary.
+
+E12 uses its proposal-only driver rather than the common evaluator. Its managed
+launcher runs and re-verifies every resolved diagnostic cell, uses five 64-draw
+Monte Carlo banks only for the validation pilot, and leaves confirmation at the
+deterministic 256-point integration:
+
+```bash
+bash experiments/zeroshot_cf/athena/run_e12_diagnostic_campaign.sh \
+  experiments/zeroshot_cf/configs/diagnostics/campaign_e12_pushforward.yaml
+```

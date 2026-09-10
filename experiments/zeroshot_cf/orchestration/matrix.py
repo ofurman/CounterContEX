@@ -104,6 +104,7 @@ def load_matrix_config(path: Path | str) -> MatrixConfig:
     protocol = ProtocolSpec(
         max_test=protocol_values.pop("max_test", 1000),
         test_selection=protocol_values.pop("test_selection", "stratified"),
+        factual_partition=protocol_values.pop("factual_partition", "test"),
         params=protocol_values,
     )
     if "target_model" in payload and "target_models" in payload:

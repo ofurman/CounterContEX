@@ -82,6 +82,7 @@ class ProtocolSpec:
     max_test: int | None = 1000
     test_selection: str = "stratified"
     params: Mapping[str, Any] = field(default_factory=dict)
+    factual_partition: str = "test"
 
     def __post_init__(self) -> None:
         if self.max_test is not None and (
@@ -90,8 +91,12 @@ class ProtocolSpec:
             raise TypeError("max_test must be an integer or null")
         if self.max_test is not None and self.max_test <= 0:
             raise ValueError("max_test must be positive or null")
-        if self.test_selection not in {"first", "stratified"}:
-            raise ValueError("test_selection must be first or stratified")
+        if self.test_selection not in {"first", "stratified", "target_stratified"}:
+            raise ValueError(
+                "test_selection must be first, stratified, or target_stratified"
+            )
+        if self.factual_partition not in {"validation", "test"}:
+            raise ValueError("factual_partition must be validation or test")
         _reject_execution_only_params(self.params, kind="protocol")
         object.__setattr__(self, "params", _frozen_params(self.params))
 
@@ -149,6 +154,7 @@ class RunSpec:
             "protocol": {
                 "max_test": self.protocol.max_test,
                 "test_selection": self.protocol.test_selection,
+                "factual_partition": self.protocol.factual_partition,
                 "params": dict(self.protocol.params),
             },
             "target_model": {

@@ -420,7 +420,19 @@ def test_real_matrix_driver_runs_and_resumes_without_repeating_backend_work(
     spec = SimpleNamespace(
         method=SimpleNamespace(name="countercontex", variant="default"),
         dataset=SimpleNamespace(name="synthetic"),
-        protocol=SimpleNamespace(factual_partition="validation"),
+        protocol=SimpleNamespace(
+            factual_partition="validation",
+            params={
+                "proposal_pushforward": {
+                    "diagnostic_version": "proposal-diagnostic-v1",
+                    "numerical_integration_points": 256,
+                    "categorical_policy": "exact-support",
+                    "mc_bank_count": 2,
+                    "mc_bank_size": 3,
+                    "best_of_b_budgets": [9, 49],
+                }
+            },
+        ),
         evaluation=SimpleNamespace(probability_threshold=0.7),
         seed=17,
         cell_id="cell-v1",

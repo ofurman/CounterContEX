@@ -482,8 +482,8 @@ def run_matrix_cell(
     cell_index: int,
     output: Path,
     *,
-    mc_bank_count: int = 0,
-    mc_bank_size: int = 64,
+    mc_bank_count: int | None = None,
+    mc_bank_size: int | None = None,
 ) -> Path:
     """Run or resume one real E12 matrix cell through the prepared TabICL backend."""
     from experiments.zeroshot_cf.datasets.benchmark import method_context
@@ -494,14 +494,49 @@ def run_matrix_cell(
     from experiments.zeroshot_cf.orchestration.matrix import load_matrix_config
     from experiments.zeroshot_cf.orchestration.runner import GenericRunner
 
-    if mc_bank_count < 0 or mc_bank_size < 1:
-        raise ValueError("Monte Carlo bank count/size must be non-negative/positive")
     matrix = load_matrix_config(matrix_path)
     if not 0 <= cell_index < len(matrix.runs):
         raise IndexError("diagnostic matrix cell index is out of range")
     spec = matrix.runs[cell_index]
     if spec.method.name != "countercontex":
         raise ValueError("E12 requires the CounterContEx method")
+    diagnostic = dict(spec.protocol.params).get("proposal_pushforward")
+    required_policy = {
+        "diagnostic_version",
+        "numerical_integration_points",
+        "categorical_policy",
+        "mc_bank_count",
+        "mc_bank_size",
+        "best_of_b_budgets",
+    }
+    if not isinstance(diagnostic, Mapping) or set(diagnostic) != required_policy:
+        raise ValueError(
+            "E12 matrix must identify the complete proposal_pushforward policy"
+        )
+    if (
+        diagnostic["diagnostic_version"] != PROPOSAL_DIAGNOSTIC_VERSION
+        or diagnostic["numerical_integration_points"] != 256
+        or diagnostic["categorical_policy"] != "exact-support"
+        or diagnostic["best_of_b_budgets"] != [9, 49]
+    ):
+        raise ValueError("E12 matrix proposal_pushforward policy is unsupported")
+    configured_bank_count = diagnostic["mc_bank_count"]
+    configured_bank_size = diagnostic["mc_bank_size"]
+    if (
+        isinstance(configured_bank_count, bool)
+        or not isinstance(configured_bank_count, int)
+        or configured_bank_count < 0
+        or isinstance(configured_bank_size, bool)
+        or not isinstance(configured_bank_size, int)
+        or configured_bank_size < 1
+    ):
+        raise ValueError("Monte Carlo bank count/size must be non-negative/positive")
+    if mc_bank_count is not None and mc_bank_count != configured_bank_count:
+        raise ValueError("mc_bank_count override conflicts with matrix identity")
+    if mc_bank_size is not None and mc_bank_size != configured_bank_size:
+        raise ValueError("mc_bank_size override conflicts with matrix identity")
+    mc_bank_count = configured_bank_count
+    mc_bank_size = configured_bank_size
     runner = GenericRunner(matrix.execution)
     case = runner._case(spec)
     runtime = runner._method_runtime(spec)
@@ -754,8 +789,8 @@ def main() -> None:
     run.add_argument("--matrix", required=True, type=Path)
     run.add_argument("--cell-index", required=True, type=int)
     run.add_argument("--output", required=True, type=Path)
-    run.add_argument("--mc-bank-count", type=int, default=0)
-    run.add_argument("--mc-bank-size", type=int, default=64)
+    run.add_argument("--mc-bank-count", type=int)
+    run.add_argument("--mc-bank-size", type=int)
     verify = subparsers.add_parser("verify", help="verify an existing bundle")
     verify.add_argument("directory", type=Path)
     verify.add_argument("--expected-metadata", required=True, type=Path)

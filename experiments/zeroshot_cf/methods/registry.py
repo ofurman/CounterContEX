@@ -50,6 +50,14 @@ class RegistryEntry:
         None
     )
     runtime_resolver: RuntimeResolver | None = None
+    variant_implementation_versions: Mapping[str, str] = field(default_factory=dict)
+
+    def implementation_for_variant(self, variant: str) -> str:
+        if variant not in self.supported_variants:
+            raise ValueError(f"unsupported variant for {self.name}: {variant!r}")
+        return self.variant_implementation_versions.get(
+            variant, self.implementation_version
+        )
 
 
 class MethodRegistry:
@@ -67,6 +75,15 @@ class MethodRegistry:
             or len(set(entry.supported_variants)) != len(entry.supported_variants)
         ):
             raise ValueError("method registry variants must be unique and non-empty")
+        unknown_versions = set(entry.variant_implementation_versions) - set(
+            entry.supported_variants
+        )
+        if unknown_versions or any(
+            not value for value in entry.variant_implementation_versions.values()
+        ):
+            raise ValueError(
+                "variant implementation versions require supported non-empty values"
+            )
         self._entries[entry.name] = entry
 
     def names(self) -> tuple[str, ...]:
@@ -147,6 +164,16 @@ def _countercontex_variant(
     variant: str,
     values: Mapping[str, Any],
 ) -> Mapping[str, Any]:
+    if variant == "tabicl_distribution":
+        resolved = dict(values)
+        search = dict(resolved.get("search", {}))
+        if not search.get("strict_proposal_budget", False):
+            raise ValueError(
+                "countercontex tabicl_distribution variant requires "
+                "strict_proposal_budget=true"
+            )
+        resolved["search"] = search
+        return resolved
     if variant != "tabicl_sparse":
         return values
     resolved = dict(values)
@@ -180,9 +207,10 @@ DEFAULT_METHOD_REGISTRY = MethodRegistry(
             "CounterContExConfig",
             "countercontex-v3",
             _countercontex_factory,
-            ("default", "tabicl_sparse"),
+            ("default", "tabicl_sparse", "tabicl_distribution"),
             _countercontex_variant,
             _countercontex_runtime,
+            {"tabicl_distribution": "countercontex-v4-distribution-sampling"},
         ),
         RegistryEntry(
             "nice",

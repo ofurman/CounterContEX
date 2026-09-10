@@ -389,6 +389,128 @@ def test_empirical_countercontex_identity_does_not_require_tabicl_checkpoints(
     assert dict(versions.checkpoint_content_ids) == {}
 
 
+def test_distribution_variant_gets_new_method_and_tabicl_backend_identity(
+    tmp_path, monkeypatch
+) -> None:
+    from experiments.zeroshot_cf import tabicl_checkpoints
+    from experiments.zeroshot_cf.methods.registry import DEFAULT_METHOD_REGISTRY
+
+    paths = tuple(
+        tmp_path / name
+        for name in (
+            tabicl_checkpoints.TABICL_CLF_FILENAME,
+            tabicl_checkpoints.TABICL_REG_FILENAME,
+        )
+    )
+    monkeypatch.setattr(
+        tabicl_checkpoints, "require_checkpoints", lambda *_args, **_kwargs: paths
+    )
+    runner = GenericRunner(
+        ExecutionSpec(tmp_path, cache_paths={"tabicl": tmp_path}),
+        registry=DEFAULT_METHOD_REGISTRY,
+        case_loader=lambda spec: _case(spec.dataset.name),
+    )
+    historical = replace(
+        _spec("one", "countercontex"),
+        method=MethodSpec(
+            "countercontex",
+            "default",
+            {"foundation": {"backend": "tabicl"}},
+        ),
+    )
+    distribution = replace(
+        historical,
+        method=MethodSpec(
+            "countercontex",
+            "tabicl_distribution",
+            {
+                "search": {"strict_proposal_budget": True},
+                "foundation": {"backend": "tabicl"},
+            },
+        ),
+    )
+
+    historical_versions = runner._versions(historical, _case("one"))
+    distribution_versions = runner._versions(distribution, _case("one"))
+
+    assert historical_versions.method_implementation == "countercontex-v3"
+    assert historical_versions.backend_implementation == "tabicl-proposal-v1"
+    assert distribution_versions.method_implementation == (
+        "countercontex-v4-distribution-sampling"
+    )
+    assert distribution_versions.backend_implementation == (
+        "tabicl-proposal-v2-distributions"
+    )
+
+
+def test_distribution_identity_cannot_resume_or_aggregate_historical_run(
+    tmp_path,
+) -> None:
+    calls: list[str] = []
+
+    def runtime_resolver(params, cache_paths, device):
+        del cache_paths, device
+        strict = bool(dict(params.get("search", {})).get("strict_proposal_budget"))
+        return ResolvedMethodRuntime(
+            params,
+            backend_implementation=(
+                "tabicl-proposal-v2-distributions"
+                if strict
+                else "tabicl-proposal-v1"
+            ),
+        )
+
+    registry = MethodRegistry(
+        (
+            RegistryEntry(
+                name="countercontex",
+                module="fake",
+                method_class="Fake",
+                config_class="Config",
+                implementation_version="countercontex-v3",
+                factory=lambda params: _FakeMethod("countercontex", calls),
+                supported_variants=("default", "tabicl_distribution"),
+                variant_resolver=lambda variant, params: params,
+                runtime_resolver=runtime_resolver,
+                variant_implementation_versions={
+                    "tabicl_distribution": "countercontex-v4-distribution-sampling"
+                },
+            ),
+        )
+    )
+    runner = GenericRunner(
+        ExecutionSpec(tmp_path),
+        registry=registry,
+        case_loader=lambda spec: _case(spec.dataset.name),
+    )
+    historical = _spec("one", "countercontex")
+    distribution = replace(
+        historical,
+        method=MethodSpec(
+            "countercontex",
+            "tabicl_distribution",
+            {"search": {"strict_proposal_budget": True}},
+        ),
+    )
+
+    old_outcome = runner.run(historical)
+    new_outcome = runner.run(distribution, resume=True)
+
+    assert not new_outcome.skipped
+    assert historical.cell_id != distribution.cell_id
+    assert old_outcome.run_id != new_outcome.run_id
+    assert calls.count("generate:countercontex") == 2
+    with pytest.raises(ValueError, match="extra"):
+        ArtifactStore(tmp_path).aggregate_expected([distribution.cell_id])
+
+    shutil.copyfile(
+        old_outcome.stored.path / "manifest.json",
+        new_outcome.stored.path / "manifest.json",
+    )
+    with pytest.raises(ValueError, match="identity|run_id|cell_id"):
+        runner.run(distribution, resume=True)
+
+
 def test_tabpfn_countercontex_identity_uses_both_verified_checkpoints(
     tmp_path, monkeypatch
 ) -> None:
@@ -607,6 +729,11 @@ def test_default_case_loader_uses_portable_provider_without_benchmark_runner(
     monkeypatch.setattr(discriminator_module, "train_discriminator", fake_train)
     spec = replace(
         _spec("one", "alpha"),
+        protocol=ProtocolSpec(
+            max_test=1,
+            test_selection="first",
+            factual_partition="validation",
+        ),
         target_model=TargetModelSpec(
             "retained_logistic_regression",
             {"C": 1.0, "max_iter": 1000, "seed": 42},
@@ -617,6 +744,8 @@ def test_default_case_loader_uses_portable_provider_without_benchmark_runner(
 
     assert loaded.case.dataset is source_case.dataset
     assert loaded.case.protocol["test_selection"] == "first"
+    assert loaded.case.protocol["factual_partition"] == "validation"
+    assert loaded.case.factuals.partition == "validation"
     assert loaded.runtime_context["dataset_adapter"].prepared is source_case.dataset
     assert isinstance(loaded.runtime_context["oracle"], _Oracle)
     assert captured["provider_spec"].validation_fraction == 0.2

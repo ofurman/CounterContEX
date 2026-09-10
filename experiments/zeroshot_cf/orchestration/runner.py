@@ -141,6 +141,7 @@ def _default_case_loader(spec: RunSpec) -> LoadedCase:
             oracle,
             max_test=spec.protocol.max_test,
             test_selection=spec.protocol.test_selection,
+            factual_partition=spec.protocol.factual_partition,
             seed=42,
             target_model={
                 "kind": target_model.model_kind,
@@ -225,7 +226,9 @@ class GenericRunner:
         return IdentityVersions(
             dataset_fingerprint=case.dataset.provenance.fingerprint,
             case_fingerprint=case.case_id,
-            method_implementation=entry.implementation_version,
+            method_implementation=entry.implementation_for_variant(
+                spec.method.variant
+            ),
             backend_implementation=runtime.backend_implementation,
             model_content_id=target_fingerprint,
             checkpoint_content_ids=runtime.checkpoint_content_ids,

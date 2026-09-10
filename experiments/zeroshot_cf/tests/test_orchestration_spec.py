@@ -68,6 +68,29 @@ def test_run_identity_is_order_independent_and_excludes_execution_metadata() -> 
     assert run_id(spec, _versions()) == first
 
 
+def test_factual_partition_and_target_selection_are_scientific_identity_axes() -> None:
+    baseline = _spec()
+    assert ProtocolSpec().factual_partition == "test"
+    assert ProtocolSpec(5, "first", {"legacy": True}).params["legacy"] is True
+
+    validation = replace(
+        baseline,
+        protocol=replace(baseline.protocol, factual_partition="validation"),
+    )
+    target_stratified = replace(
+        baseline,
+        protocol=replace(baseline.protocol, test_selection="target_stratified"),
+    )
+
+    assert validation.cell_id != baseline.cell_id
+    assert target_stratified.cell_id != baseline.cell_id
+    assert validation.scientific_payload()["protocol"]["factual_partition"] == (
+        "validation"
+    )
+    with pytest.raises(ValueError, match="factual_partition"):
+        ProtocolSpec(factual_partition="train")
+
+
 @pytest.mark.parametrize(
     "params",
     (

@@ -43,6 +43,7 @@ def _tabicl_runtime(
 ) -> ResolvedMethodRuntime:
     from experiments.zeroshot_cf import tabicl_checkpoints
     from experiments.zeroshot_cf.methods.countercontex.backends.tabicl import (
+        TABICL_BACKEND_HISTORICAL_IMPLEMENTATION_VERSION,
         TABICL_BACKEND_IMPLEMENTATION_VERSION,
     )
 
@@ -66,9 +67,16 @@ def _tabicl_runtime(
         finally:
             tabicl_checkpoints.TABICL_DEVICE = previous
 
+    strict_distribution = bool(
+        dict(params.get("search", {})).get("strict_proposal_budget", False)
+    )
     return ResolvedMethodRuntime(
         params,
-        backend_implementation=TABICL_BACKEND_IMPLEMENTATION_VERSION,
+        backend_implementation=(
+            TABICL_BACKEND_IMPLEMENTATION_VERSION
+            if strict_distribution
+            else TABICL_BACKEND_HISTORICAL_IMPLEMENTATION_VERSION
+        ),
         checkpoint_content_ids={
             path.name: tabicl_checkpoints._CHECKPOINT_SHA256[path.name]
             for path in paths
@@ -119,7 +127,7 @@ def _tabpfn_runtime(
 
 
 _BACKEND_POLICIES = {
-    "tabicl": BackendRuntimePolicy("tabicl-proposal-v1", _tabicl_runtime),
+    "tabicl": BackendRuntimePolicy("tabicl-proposal-v2-distributions", _tabicl_runtime),
     "tabpfn": BackendRuntimePolicy("tabpfn-v2-proposal-v1", _tabpfn_runtime),
     "empirical": BackendRuntimePolicy("empirical-reference-v1", _empirical_runtime),
 }
@@ -142,6 +150,12 @@ def resolve_runtime(
             f"unknown CounterContEx proposal backend: {backend!r}"
         ) from error
     resolved = policy.resolve(params, cache_paths, device)
-    if resolved.backend_implementation != policy.implementation_version:
+    compatible_implementation = (
+        resolved.backend_implementation
+        in {"tabicl-proposal-v1", policy.implementation_version}
+        if str(backend) == "tabicl"
+        else resolved.backend_implementation == policy.implementation_version
+    )
+    if not compatible_implementation:
         raise RuntimeError("CounterContEx backend runtime identity is inconsistent")
     return resolved

@@ -1,0 +1,34 @@
+schema_version: countercontex.matrix.v1
+suite: campaign_e11_distribution_sampling_confirmation
+output_root: experiments/zeroshot_cf/results/campaign/e11_distribution_sampling_confirmation
+datasets: [heloc, bank_marketing, give_me_some_credit, lending_club]
+methods:
+  - name: countercontex
+    variant: tabicl_distribution
+    params:
+      search: &strict_search
+        {cf_mode: sparse, tau: 0.5, strict_proposal_budget: true, numerical_decoder: mode, numerical_proposal_budget: 1, categorical_decoder: iid, categorical_proposal_budget: 9, truncation_k: 5, truncation_p: 0.9}
+      foundation: &foundation
+        {backend: tabicl, n_estimators: 1, temperature: 1.0, context_size: 512, context_labels: predictions}
+  - {name: countercontex, variant: tabicl_distribution, params: {search: {<<: *strict_search, numerical_decoder: grid, numerical_proposal_budget: 9, candidate_quantiles: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]}, foundation: *foundation}}
+  - {name: countercontex, variant: tabicl_distribution, params: {search: {<<: *strict_search, numerical_decoder: iid, numerical_proposal_budget: 9}, foundation: *foundation}}
+  - {name: countercontex, variant: tabicl_distribution, params: {search: {<<: *strict_search, numerical_decoder: top-k, numerical_proposal_budget: 9}, foundation: *foundation}}
+  - {name: countercontex, variant: tabicl_distribution, params: {search: {<<: *strict_search, numerical_decoder: top-p, numerical_proposal_budget: 9}, foundation: *foundation}}
+  - name: countercontex
+    variant: tabicl_distribution
+    params:
+      search: {<<: *strict_search, numerical_decoder: grid, numerical_proposal_budget: 49, candidate_quantiles: [0.02, 0.04, 0.06, 0.08, 0.10, 0.12, 0.14, 0.16, 0.18, 0.20, 0.22, 0.24, 0.26, 0.28, 0.30, 0.32, 0.34, 0.36, 0.38, 0.40, 0.42, 0.44, 0.46, 0.48, 0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.62, 0.64, 0.66, 0.68, 0.70, 0.72, 0.74, 0.76, 0.78, 0.80, 0.82, 0.84, 0.86, 0.88, 0.90, 0.92, 0.94, 0.96, 0.98]}
+      foundation: *foundation
+  - {name: countercontex, variant: tabicl_distribution, params: {search: {<<: *strict_search, numerical_decoder: iid, numerical_proposal_budget: 49}, foundation: *foundation}}
+  - {name: countercontex, variant: tabicl_distribution, params: {search: {<<: *strict_search, numerical_decoder: top-k, numerical_proposal_budget: 49}, foundation: *foundation}}
+  - {name: countercontex, variant: tabicl_distribution, params: {search: {<<: *strict_search, numerical_decoder: top-p, numerical_proposal_budget: 49}, foundation: *foundation}}
+  - {name: countercontex, variant: tabicl_distribution, params: {search: {<<: *strict_search, numerical_decoder: iid, numerical_proposal_budget: 9, categorical_decoder: greedy, categorical_proposal_budget: 1}, foundation: *foundation}}
+  - {name: countercontex, variant: tabicl_distribution, params: {search: {<<: *strict_search, numerical_decoder: iid, numerical_proposal_budget: 9, categorical_decoder: top-k, categorical_proposal_budget: 9}, foundation: *foundation}}
+  - {name: countercontex, variant: tabicl_distribution, params: {search: {<<: *strict_search, numerical_decoder: iid, numerical_proposal_budget: 9, categorical_decoder: top-p, categorical_proposal_budget: 9}, foundation: *foundation}}
+seeds: [17, 42, 101, 202, 303]
+protocol: {max_test: 100, test_selection: target_stratified, factual_partition: test}
+target_model: {name: retained_logistic_regression, params: {C: 1.0, max_iter: 1000, seed: 42}}
+evaluation: {probability_threshold: 0.7}
+cache_paths: {tabicl: experiments/zeroshot_cf/models/tabicl}
+device: cuda
+legacy_export: false

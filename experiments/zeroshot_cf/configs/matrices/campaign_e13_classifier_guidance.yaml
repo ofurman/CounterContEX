@@ -1,0 +1,32 @@
+schema_version: countercontex.matrix.v1
+suite: campaign_e13_classifier_guidance_pilot
+output_root: experiments/zeroshot_cf/results/campaign/e13_classifier_guidance_pilot
+datasets: [heloc, bank_marketing, give_me_some_credit, lending_club]
+methods:
+  - &beta0
+    name: countercontex
+    variant: tabicl_distribution
+    params:
+      search: &guided
+        {cf_mode: sparse, tau: 0.5, strict_proposal_budget: true, numerical_decoder: iid, numerical_proposal_budget: 9, categorical_decoder: iid, categorical_proposal_budget: 9, guidance_policy: pi-beta, guidance_beta: 0.0, guidance_pool_size: 64, guidance_epsilon: 1.0e-12}
+      foundation: &foundation
+        {backend: tabicl, n_estimators: 1, temperature: 1.0, context_size: 512, context_labels: predictions}
+  - name: countercontex
+    variant: tabicl_distribution
+    params: {search: {<<: *guided, guidance_beta: 0.5}, foundation: *foundation}
+  - name: countercontex
+    variant: tabicl_distribution
+    params: {search: {<<: *guided, guidance_beta: 1.0}, foundation: *foundation}
+  - name: countercontex
+    variant: tabicl_distribution
+    params: {search: {<<: *guided, guidance_beta: 2.0}, foundation: *foundation}
+  - name: countercontex
+    variant: tabicl_distribution
+    params: {search: {<<: *guided, guidance_policy: classifier-top-b, guidance_beta: 0.0}, foundation: *foundation}
+seeds: [17, 42, 101]
+protocol: {max_test: 20, test_selection: target_stratified, factual_partition: validation}
+target_model: {name: retained_logistic_regression, params: {C: 1.0, max_iter: 1000, seed: 42}}
+evaluation: {probability_threshold: 0.7}
+cache_paths: {tabicl: experiments/zeroshot_cf/models/tabicl}
+device: cuda
+legacy_export: false

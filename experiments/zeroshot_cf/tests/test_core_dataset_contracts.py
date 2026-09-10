@@ -145,6 +145,86 @@ def test_factual_selection_keeps_unique_source_indices_and_is_deterministic() ->
     assert not first.flags.writeable
 
 
+def test_validation_factuals_are_partition_bound_and_qualified() -> None:
+    dataset = _dataset()
+    case = build_benchmark_case(
+        dataset,
+        _ReversedLabelPredictor(),
+        max_test=None,
+        test_selection="first",
+        factual_partition="validation",
+        target_model={"kind": "fixture", "revision": "one"},
+    )
+
+    assert case.factuals.partition == "validation"
+    assert case.factuals.qualified_indices == (("validation", 0), ("validation", 1))
+    np.testing.assert_array_equal(case.factuals.values, dataset.X_validation)
+    np.testing.assert_array_equal(case.factuals.true_labels, dataset.y_validation)
+    assert case.protocol["factual_partition"] == "validation"
+
+    test_case = build_benchmark_case(
+        dataset,
+        _ReversedLabelPredictor(),
+        max_test=2,
+        test_selection="first",
+        factual_partition="test",
+        target_model={"kind": "fixture", "revision": "one"},
+    )
+    assert case.factuals.indices.tolist() == test_case.factuals.indices.tolist()
+    assert case.factuals.qualified_indices != test_case.factuals.qualified_indices
+    assert case.case_id != test_case.case_id
+
+
+def test_target_stratified_scores_complete_partition_before_selection() -> None:
+    class RecordingPredictor(_ReversedLabelPredictor):
+        def __init__(self) -> None:
+            self.predict_batch_sizes: list[int] = []
+
+        def predict(self, X: np.ndarray) -> np.ndarray:
+            self.predict_batch_sizes.append(len(X))
+            return super().predict(X)
+
+    dataset = replace(_dataset(), y_test=np.full(4, 2))
+    oracle = RecordingPredictor()
+    case = build_benchmark_case(
+        dataset,
+        oracle,
+        max_test=2,
+        test_selection="target_stratified",
+        target_model={"kind": "fixture", "revision": "one"},
+    )
+
+    assert oracle.predict_batch_sizes == [len(dataset.X_test)]
+    assert set(case.targets.tolist()) == {2, 7}
+    np.testing.assert_array_equal(
+        case.factual_predictions,
+        oracle.predict(dataset.X_test)[case.factuals.indices],
+    )
+
+    repeated = build_benchmark_case(
+        dataset,
+        RecordingPredictor(),
+        max_test=2,
+        test_selection="target_stratified",
+        target_model={"kind": "fixture", "revision": "one"},
+    )
+    np.testing.assert_array_equal(repeated.factuals.indices, case.factuals.indices)
+
+    historical_oracle = RecordingPredictor()
+    historical = build_benchmark_case(
+        dataset,
+        historical_oracle,
+        max_test=2,
+        test_selection="stratified",
+        target_model={"kind": "fixture", "revision": "one"},
+    )
+    np.testing.assert_array_equal(
+        historical.factuals.indices,
+        select_factual_indices(dataset.y_test, 2, "stratified", seed=42),
+    )
+    assert historical_oracle.predict_batch_sizes == [2]
+
+
 def test_case_targets_and_probability_columns_follow_predictor_classes() -> None:
     dataset = replace(_dataset(), y_test=np.array([7, 2, 7, 2]))
     oracle = _ReversedLabelPredictor()
@@ -257,6 +337,19 @@ def test_case_requires_factuals_to_bind_exactly_to_source_test_rows() -> None:
         targets=np.array([7]),
         protocol={"target_policy": "opposite_classifier_prediction"},
     )
+
+    with pytest.raises(ValueError, match="partition"):
+        replace(
+            case,
+            factuals=FactualSelection(
+                indices=np.array([0]),
+                values=dataset.X_validation[[0]],
+                true_labels=dataset.y_validation[[0]],
+                partition="validation",
+            ),
+            factual_predictions=np.array([2]),
+            targets=np.array([7]),
+        )
 
 
 def test_case_identity_covers_selection_model_config_and_fitted_content() -> None:

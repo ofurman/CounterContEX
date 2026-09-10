@@ -82,13 +82,19 @@ def select_factuals(
     selection: str = "stratified",
     *,
     seed: int = 42,
+    partition: str = "test",
 ) -> FactualSelection:
     """Select factual values and truth once while retaining source indices."""
-    indices = select_factual_indices(dataset.y_test, limit, selection, seed=seed)
+    if partition not in {"validation", "test"}:
+        raise ValueError("factual_partition must be validation or test")
+    partition_values = getattr(dataset, f"X_{partition}")
+    partition_labels = getattr(dataset, f"y_{partition}")
+    indices = select_factual_indices(partition_labels, limit, selection, seed=seed)
     return FactualSelection(
         indices=indices,
-        values=dataset.X_test[indices],
-        true_labels=dataset.y_test[indices],
+        values=partition_values[indices],
+        true_labels=partition_labels[indices],
+        partition=partition,
     )
 
 
@@ -254,21 +260,59 @@ def build_benchmark_case(
     *,
     max_test: int | None = 1000,
     test_selection: str = "stratified",
+    factual_partition: str = "test",
     seed: int = 42,
     target_model: Mapping[str, Any] | None = None,
 ) -> BenchmarkCase:
     """Build one immutable, reusable case from real dataset and model inputs."""
     predictor = oracle if hasattr(oracle, "classes_") else PredictorAdapter(oracle)
     model_identity, model_fingerprint = _model_identity(predictor, target_model)
-    factuals = select_factuals(dataset, max_test, test_selection, seed=seed)
-    predictions = np.asarray(predictor.predict(factuals.values)).reshape(-1)
-    if len(predictions) != len(factuals.values):
-        raise ValueError("classifier returned the wrong number of factual predictions")
     classes = np.asarray(predictor.classes_)
-    targets = _opposite_binary_labels(classes, predictions)
+    if factual_partition not in {"validation", "test"}:
+        raise ValueError("factual_partition must be validation or test")
+    partition_values = getattr(dataset, f"X_{factual_partition}")
+    partition_labels = getattr(dataset, f"y_{factual_partition}")
+    if test_selection == "target_stratified":
+        partition_predictions = np.asarray(
+            predictor.predict(partition_values)
+        ).reshape(-1)
+        if len(partition_predictions) != len(partition_values):
+            raise ValueError(
+                "classifier returned the wrong number of partition predictions"
+            )
+        partition_targets = _opposite_binary_labels(classes, partition_predictions)
+        indices = select_factual_indices(
+            partition_targets,
+            max_test,
+            "stratified",
+            seed=seed,
+        )
+        factuals = FactualSelection(
+            indices=indices,
+            values=partition_values[indices],
+            true_labels=partition_labels[indices],
+            partition=factual_partition,
+        )
+        predictions = partition_predictions[indices]
+        targets = partition_targets[indices]
+    else:
+        factuals = select_factuals(
+            dataset,
+            max_test,
+            test_selection,
+            seed=seed,
+            partition=factual_partition,
+        )
+        predictions = np.asarray(predictor.predict(factuals.values)).reshape(-1)
+        if len(predictions) != len(factuals.values):
+            raise ValueError(
+                "classifier returned the wrong number of factual predictions"
+            )
+        targets = _opposite_binary_labels(classes, predictions)
     protocol = {
         "max_test": max_test,
         "test_selection": test_selection,
+        "factual_partition": factual_partition,
         "selection_seed": seed,
         "target_policy": "opposite_classifier_prediction",
         "target_model": dict(target_model or {}),
@@ -283,10 +327,14 @@ def build_benchmark_case(
         "selection_inputs": {
             "max_test": max_test,
             "test_selection": test_selection,
+            "factual_partition": factual_partition,
             "selection_seed": seed,
-            "test_pool_size": len(dataset.y_test),
-            "test_labels": _array_digest(dataset.y_test),
+            "factual_pool_size": len(partition_labels),
+            "factual_pool_labels": _array_digest(partition_labels),
         },
+        "qualified_factual_indices": [
+            [partition, index] for partition, index in factuals.qualified_indices
+        ],
         "factual_indices": _array_digest(factuals.indices),
         "factual_values": _array_digest(factuals.values),
         "factual_true_labels": _array_digest(factuals.true_labels),

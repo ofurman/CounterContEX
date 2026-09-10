@@ -34,6 +34,11 @@ predictions. The target-model registry provides fixed logistic-regression, MLP,
 and XGBoost families. Numerical features and atomic one-hot groups define the
 action space. Immutable features must remain unchanged.
 
+Historical runs use truth-label-stratified test factuals. Experiment matrices
+may explicitly select validation factuals and target-stratify them from the
+fixed classifier predictions; partition and selection policy are scientific
+identity fields.
+
 The method registry contains:
 
 | Method | Registry name | Multiple CFs | Optional runtime |
@@ -134,6 +139,17 @@ Available matrix files include:
 - `one_factual_compat.yaml`: a fast compatibility matrix across all methods.
 - `countercontex_ablation_example.yaml`: CounterContEx search and backend ablations.
 - `full_reference.yaml`: four datasets, all six methods, and 1,000 factuals.
+- `campaign_e11_distribution_sampling*.yaml`: controlled TabICL grid, IID,
+  top-k, and top-p decoder studies.
+- `campaign_e13_classifier_guidance*.yaml`: common-pool classifier-guided
+  sampling studies.
+- `configs/diagnostics/campaign_e12_pushforward*.yaml`: proposal-only
+  classifier-pushforward studies for LR, MLP, and XGBoost.
+
+The E11-E13 pilot matrices use 20 target-stratified validation factuals. Their
+confirmation matrices use 100 target-stratified test factuals and require a
+separate execution authorization. Partition and selection policy are part of
+scientific identity.
 
 The tracked `campaign_e1_main.yaml` through `campaign_e10_headline.yaml`
 matrices define the six-dataset paper campaign (E8 is a read-only rescoring

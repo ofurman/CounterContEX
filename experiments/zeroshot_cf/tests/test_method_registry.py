@@ -48,6 +48,13 @@ def test_registry_rejects_unknown_or_invalid_method_parameters() -> None:
     assert DEFAULT_METHOD_REGISTRY.entry("countercontex").supported_variants == (
         "default",
         "tabicl_sparse",
+        "tabicl_distribution",
+    )
+    assert (
+        DEFAULT_METHOD_REGISTRY.entry("countercontex").implementation_for_variant(
+            "tabicl_distribution"
+        )
+        == "countercontex-v4-distribution-sampling"
     )
     sparse = DEFAULT_METHOD_REGISTRY.create("countercontex", variant="tabicl_sparse")
     assert sparse.config.search.cf_mode == "sparse"
@@ -62,6 +69,10 @@ def test_registry_rejects_unknown_or_invalid_method_parameters() -> None:
             "countercontex",
             {"search": {"cf_mode": "data_plausible"}},
             variant="tabicl_sparse",
+        )
+    with pytest.raises(ValueError, match="strict_proposal_budget=true"):
+        DEFAULT_METHOD_REGISTRY.create(
+            "countercontex", variant="tabicl_distribution"
         )
 
 

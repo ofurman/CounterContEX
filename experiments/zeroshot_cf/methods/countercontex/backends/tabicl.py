@@ -25,7 +25,8 @@ from experiments.zeroshot_cf.methods.countercontex.backends.base import (
 )
 from experiments.zeroshot_cf.methods.countercontex.config import CounterContExConfig
 
-TABICL_BACKEND_IMPLEMENTATION_VERSION = "tabicl-proposal-v1"
+TABICL_BACKEND_HISTORICAL_IMPLEMENTATION_VERSION = "tabicl-proposal-v1"
+TABICL_BACKEND_IMPLEMENTATION_VERSION = "tabicl-proposal-v2-distributions"
 
 
 @dataclass(frozen=True)

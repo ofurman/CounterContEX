@@ -223,6 +223,7 @@ class FactualSelection:
     indices: np.ndarray
     values: np.ndarray
     true_labels: np.ndarray
+    partition: str = "test"
 
     def __post_init__(self) -> None:
         indices = readonly_array(self.indices, dtype=np.int64, ndim=1, name="indices")
@@ -234,9 +235,15 @@ class FactualSelection:
             )
         if np.any(indices < 0) or len(np.unique(indices)) != len(indices):
             raise ValueError("factual source indices must be non-negative and unique")
+        if self.partition not in {"validation", "test"}:
+            raise ValueError("factual partition must be validation or test")
         object.__setattr__(self, "indices", indices)
         object.__setattr__(self, "values", values)
         object.__setattr__(self, "true_labels", labels)
+
+    @property
+    def qualified_indices(self) -> tuple[tuple[str, int], ...]:
+        return tuple((self.partition, int(index)) for index in self.indices)
 
 
 @runtime_checkable
@@ -273,17 +280,26 @@ class BenchmarkCase:
             )
         if self.factuals.values.shape[1] != len(self.dataset.schema.names):
             raise ValueError("factual feature width must match dataset schema")
-        if np.any(self.factuals.indices >= len(self.dataset.X_test)):
-            raise ValueError("factual indices must refer to dataset test rows")
-        expected_values = self.dataset.X_test[self.factuals.indices]
+        protocol_partition = self.protocol.get("factual_partition", "test")
+        if protocol_partition != self.factuals.partition:
+            raise ValueError("factual partition must match benchmark protocol")
+        partition = self.factuals.partition
+        partition_values = getattr(self.dataset, f"X_{partition}")
+        partition_labels = getattr(self.dataset, f"y_{partition}")
+        if np.any(self.factuals.indices >= len(partition_values)):
+            raise ValueError(
+                f"factual indices must refer to dataset {partition} rows"
+            )
+        expected_values = partition_values[self.factuals.indices]
         if not np.array_equal(self.factuals.values, expected_values, equal_nan=True):
             raise ValueError(
-                "factual values must exactly match dataset test rows at source indices"
+                f"factual values must exactly match dataset {partition} rows "
+                "at source indices"
             )
-        expected_labels = self.dataset.y_test[self.factuals.indices]
+        expected_labels = partition_labels[self.factuals.indices]
         if not np.array_equal(self.factuals.true_labels, expected_labels):
             raise ValueError(
-                "factual true labels must exactly match dataset test rows "
+                f"factual true labels must exactly match dataset {partition} rows "
                 "at source indices"
             )
         object.__setattr__(self, "factual_predictions", predictions)

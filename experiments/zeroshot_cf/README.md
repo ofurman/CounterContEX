@@ -118,6 +118,13 @@ seed 42, classifier-prediction targets, atomic categorical edits, immutable
 feature preservation, and a shared result schema across TabICL and the
 baselines.
 
+Historical matrices select truth-label-stratified factuals from `test`. New
+pilot matrices can set `factual_partition: validation` and
+`test_selection: target_stratified`; this predicts the complete partition,
+derives opposite-class targets, and samples deterministically within target
+strata. Partition and local source index jointly identify a factual, and both
+fields enter case and run identity. Classifier training data is unchanged.
+
 Current actionability is intentionally narrow: immutable columns may not change,
 and one-hot categorical groups may change only atomically. The suite does not
 encode directional, monotonic, or causal constraints.
@@ -288,6 +295,17 @@ device scope. The search layer consumes only the proposal-session contract,
 including one paired batch operation used for beam expansion. This boundary
 keeps the generic runner, dataset preparation, and common evaluation free of
 foundation-model imports.
+
+Strict distribution studies expose a finite TabICL q interface. Numerical
+policies are exact quantile grids, IID draws, or fixed 256 equal-mass-bin top-k
+and top-p approximations; categorical policies use the exact learned support.
+Raw draws, projection no-ops, and duplicates consume budget and are never
+refilled. E13 draws a common pool from q and samples with
+`pi_beta(z) proportional to q(z) * p_clf(y_target | x_-j, z)^beta`. Because the
+pool already represents q, implementation weights are only `p_clf^beta`.
+The same classifier guides proposals and defines validity, so this evaluates
+algorithmic utility against that oracle, not independent calibration or full
+TabICL distribution quality.
 
 The deterministic `empirical` adapter supplies target-class numerical
 quantiles and categorical frequencies without checkpoints. It provides a
