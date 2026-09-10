@@ -21,7 +21,6 @@ from experiments.zeroshot_cf.analysis.proposal_pushforward import (
 )
 from experiments.zeroshot_cf.core.contracts import FeatureDomains, FeatureSchema
 from experiments.zeroshot_cf.diagnostics.proposal_pushforward import (
-    _reference_category_support,
     read_diagnostic_bundle,
     run_matrix_cell,
     trace_fixed_state_pushforward,
@@ -77,19 +76,6 @@ def _record(
         "crosses_generation_threshold": before < 0.5 <= before + delta,
         "crosses_evaluation_threshold": before < 0.7 <= before + delta,
     }
-
-
-def test_reference_category_support_allows_sparse_learned_classes() -> None:
-    group = OneHotActionGroup("segment", (0, 1, 2))
-    X_reference = np.array(
-        [
-            [1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0],
-            [1.0, 0.0, 0.0],
-        ]
-    )
-
-    assert _reference_category_support(X_reference, group) == [0, 2]
 
 
 def _unit(action_type: str, name: str, delta: float, count: int, **kwargs):
@@ -378,6 +364,7 @@ def test_real_matrix_driver_runs_and_resumes_without_repeating_backend_work(
         "prepare": 0,
         "session": 0,
         "distribution": 0,
+        "categorical": 0,
         "classifier": 0,
     }
 
@@ -399,6 +386,10 @@ def test_real_matrix_driver_runs_and_resumes_without_repeating_backend_work(
             values = quantiles[None, None, :]
             return NumericalDistribution(quantiles, values, np.zeros_like(values))
 
+        def categorical_distribution(self, row, group, *, confidence):
+            calls["categorical"] += 1
+            return CategoryProposals(np.array([0, 2]), np.array([0.75, 0.25]))
+
     class Backend:
         capabilities = SimpleNamespace(numerical_distribution=True)
 
@@ -416,26 +407,35 @@ def test_real_matrix_driver_runs_and_resumes_without_repeating_backend_work(
             calls["create"] += 1
             return Method()
 
+    group = OneHotActionGroup("segment", (1, 2, 3))
     schema = FeatureSchema(
-        names=("amount",),
+        names=("amount", "segment_a", "segment_b", "segment_c"),
         numerical=(0,),
-        categorical_groups=(),
+        categorical_groups=(group,),
         actionable_scalars=(0,),
-        actionable_groups=(),
+        actionable_groups=(group,),
         immutable=(),
-        domains=FeatureDomains(np.zeros(1), np.ones(1), {}),
+        domains=FeatureDomains(np.zeros(4), np.ones(4), {}),
     )
     oracle = Classifier()
     dataset = SimpleNamespace(
-        X_train=np.array([[0.0], [1.0]]),
-        y_train=np.array([0, 1]),
+        X_train=np.array(
+            [
+                [0.0, 1.0, 0.0, 0.0],
+                [0.5, 0.0, 1.0, 0.0],
+                [1.0, 0.0, 0.0, 1.0],
+            ]
+        ),
+        y_train=np.array([0, 1, 1]),
         schema=schema,
     )
     case = SimpleNamespace(
         case_id="case-v1",
         dataset=dataset,
         oracle=oracle,
-        factuals=SimpleNamespace(values=np.array([[0.2]]), indices=np.array([4])),
+        factuals=SimpleNamespace(
+            values=np.array([[0.2, 1.0, 0.0, 0.0]]), indices=np.array([4])
+        ),
         targets=np.array([1]),
     )
     spec = RunSpec(
@@ -505,12 +505,16 @@ def test_real_matrix_driver_runs_and_resumes_without_repeating_backend_work(
     )
     metadata, records = read_diagnostic_bundle(output / "00000")
     assert metadata["factual_partition"] == "validation"
-    assert len(records) == 256 + 2 * 3
+    assert len(records) == 256 + 2 * 3 + 2
+    categorical = metadata["action_unit_inventory"][-1]
+    assert categorical["categories"] == [0, 2]
+    assert categorical["draw_count"] == 2
     assert calls == {
         "create": 1,
         "prepare": 1,
         "session": 1,
         "distribution": 1,
+        "categorical": 1,
         "classifier": 1,
     }
 

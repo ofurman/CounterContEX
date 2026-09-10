@@ -128,17 +128,6 @@ def _validated_quantile_banks(
     return normalized
 
 
-def _reference_category_support(
-    X_reference: np.ndarray, group: OneHotActionGroup
-) -> list[int]:
-    values = np.asarray(X_reference, dtype=np.float64)[:, list(group.columns)]
-    if values.ndim != 2 or not len(values):
-        raise ValueError("categorical support requires non-empty reference rows")
-    if np.any(~np.isfinite(values)) or np.any(~np.isclose(values.sum(axis=1), 1.0)):
-        raise ValueError(f"reference group {group.name} must be atomic one-hot")
-    return sorted(np.unique(np.argmax(values, axis=1)).astype(int).tolist())
-
-
 def _validate_record_inventory(
     metadata: Mapping[str, Any], records: Sequence[Mapping[str, Any]]
 ) -> None:
@@ -580,7 +569,7 @@ def run_matrix_cell(
     partition = getattr(spec.protocol, "factual_partition", "test")
     integration = (np.arange(256, dtype=np.float64) + 0.5) / 256.0
     bank_names = ["integration-256", *[f"mc-{index}" for index in range(mc_bank_count)]]
-    action_inventory = [
+    numerical_inventory = [
         {
             "action_type": "numerical",
             "action_unit": context.feature_schema.names[column],
@@ -589,19 +578,7 @@ def run_matrix_cell(
         }
         for column in context.feature_schema.actionable_scalars
         for bank_name in bank_names
-    ] + [
-        {
-            "action_type": "categorical",
-            "action_unit": group.name,
-            "sampling_bank": "exact",
-            "draw_count": len(
-                _reference_category_support(context.X_reference, group)
-            ),
-            "categories": _reference_category_support(context.X_reference, group),
-        }
-        for group in context.feature_schema.actionable_groups
     ]
-    expected_count = sum(item["draw_count"] for item in action_inventory)
     expected_spec = {
         "diagnostic_version": PROPOSAL_DIAGNOSTIC_VERSION,
         "cell_id": spec.cell_id,
@@ -642,8 +619,6 @@ def run_matrix_cell(
         "rng_key_scheme": "sha256-canonical-v1",
         "generation_threshold": 0.5,
         "evaluation_threshold": spec.evaluation.probability_threshold,
-        "expected_record_count": expected_count,
-        "action_unit_inventory": action_inventory,
     }
     expected_point_metadata = [
         {
@@ -727,7 +702,33 @@ def run_matrix_cell(
                 factual_partition=partition,
                 factual_source_index=int(source_index),
             )
-        write_diagnostic_bundle(point_output, metadata, records)
+        categorical_inventory = []
+        for group in context.feature_schema.actionable_groups:
+            categories = [
+                int(record["category"])
+                for record in records
+                if record["action_type"] == "categorical"
+                and record["action_unit"] == group.name
+                and record["sampling_bank"] == "exact"
+            ]
+            categorical_inventory.append(
+                {
+                    "action_type": "categorical",
+                    "action_unit": group.name,
+                    "sampling_bank": "exact",
+                    "draw_count": len(categories),
+                    "categories": sorted(categories),
+                }
+            )
+        point_metadata = {
+            **metadata,
+            "expected_record_count": len(records),
+            "action_unit_inventory": [
+                *numerical_inventory,
+                *categorical_inventory,
+            ],
+        }
+        write_diagnostic_bundle(point_output, point_metadata, records)
 
     point_names = [f"{index:05d}" for index in range(len(expected_point_metadata))]
     temporary = output / ".COMPLETE.json.tmp"
