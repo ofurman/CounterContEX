@@ -30,6 +30,7 @@ from experiments.zeroshot_cf.methods.registry import DEFAULT_METHOD_REGISTRY
 from experiments.zeroshot_cf.orchestration.artifacts import ArtifactStore
 from experiments.zeroshot_cf.orchestration.matrix import load_matrix_config
 from experiments.zeroshot_cf.orchestration.runner import _default_case_loader
+from experiments.zeroshot_cf.orchestration.spec import canonical_json
 
 
 def serial(value):
@@ -125,6 +126,73 @@ def paired_runs(root, matrix):
             identities.append(identity)
         if identities[0] != identities[1]:
             raise ValueError("pair differs outside backend identity bundle")
+    return pairs
+
+
+def historical_e3_pairs(root, matrix):
+    """Authenticate legacy E3 runs before normalizing the new test-split field."""
+    config = load_matrix_config(matrix)
+    store = ArtifactStore(root)
+    if store.root.exists():
+        partial = [
+            path.name
+            for path in store.root.iterdir()
+            if path.is_dir()
+            and not path.name.startswith(".")
+            and not (path / "COMPLETE").is_file()
+        ]
+        if partial:
+            raise ValueError(f"historical E3 contains partial runs: {partial}")
+    runs = store.completed_runs()
+    if len(runs) != len(config.runs):
+        raise ValueError(
+            "historical E3 run count differs from its tracked matrix: "
+            f"expected={len(config.runs)}, actual={len(runs)}"
+        )
+    expected = {
+        canonical_json(spec.scientific_payload()): spec for spec in config.runs
+    }
+    matched = {}
+    for stored in runs:
+        manifest = stored.manifest
+        identity = manifest.get("identity")
+        scientific = manifest.get("scientific_spec")
+        if not isinstance(identity, dict) or not isinstance(scientific, dict):
+            raise ValueError("historical E3 manifest is missing identity")
+        if identity.get("scientific_spec") != scientific:
+            raise ValueError("historical E3 scientific identity link is broken")
+        resolved_run_id = hashlib.sha256(
+            canonical_json(identity).encode()
+        ).hexdigest()
+        if resolved_run_id != stored.run_id:
+            raise ValueError("historical E3 run identity is invalid")
+        cell_id = hashlib.sha256(canonical_json(scientific).encode()).hexdigest()
+        if manifest.get("cell_id") != cell_id:
+            raise ValueError("historical E3 cell identity is invalid")
+        normalized = deepcopy(scientific)
+        protocol = normalized.get("protocol")
+        if not isinstance(protocol, dict) or "factual_partition" in protocol:
+            raise ValueError(
+                "historical E3 fallback accepts only pre-partition manifests"
+            )
+        protocol["factual_partition"] = "test"
+        key = canonical_json(normalized)
+        if key not in expected or key in matched:
+            raise ValueError("historical E3 membership differs from its tracked matrix")
+        matched[key] = stored
+    if set(matched) != set(expected):
+        raise ValueError("historical E3 has missing or extra normalized cells")
+
+    pairs = defaultdict(dict)
+    for key, spec in expected.items():
+        stored = matched[key]
+        backend = spec.method.params["foundation"]["backend"]
+        pair_key = (spec.dataset.name, spec.seed)
+        if backend in pairs[pair_key]:
+            raise ValueError("historical E3 contains a duplicate backend cell")
+        pairs[pair_key][backend] = stored
+    if any(set(arms) != {"tabicl", "empirical"} for arms in pairs.values()):
+        raise ValueError("historical E3 backend pairs are incomplete")
     return pairs
 
 
@@ -343,7 +411,7 @@ def common_probe(session, states, schema, quantiles):
 def trace_dataset(root, matrix, output, dataset, count, device):
     """Trace first count E3 factuals in pinned source-index order (seed 42)."""
     output.mkdir(parents=True, exist_ok=False)
-    pairs = paired_runs(root, matrix)
+    pairs = historical_e3_pairs(root, matrix)
     arms = pairs[(dataset, 42)]
     matrix_config = load_matrix_config(matrix)
     specs = {
