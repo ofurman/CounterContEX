@@ -31,33 +31,65 @@ BLOCKED on B-3 even though all scientific and technical artifacts below are comp
   seed 101. Draw-vector SHA-256 values were `8e6a176f...f3c4a0c` and
   `60761ef7...97d3c3`.
 
+The expanded priority-metric tables below were recomputed without changing canonical outputs.
+Coverage and validity came from `common.*` arrays; Gower, action counts, LOF, and Isolation
+Forest came from authenticated candidate arrays. Numerical L2 and categorical Hamming counts
+were derived from those same canonical candidates and the identity-matched benchmark factuals
+and feature schema. Seeds were averaged inside factuals before dataset-equal aggregation.
+
 ## E11: q representation and decoding
 
 For quality metrics, sampling seeds are first averaged inside each factual, factuals are then
 averaged inside each dataset, and the four datasets receive equal weight. Repeated factuals
-across seeds are Monte Carlo repeats, not independent observations. `thr` is threshold-valid
-success per requested slot and `cov` is coverage. `Gower` is evaluated only for returned
-target-class candidates; `NN-5` and `actions` use all returned candidates. Runtime is the
-separate operational mean of total lifecycle seconds per 20-factual cell.
+across seeds are Monte Carlo repeats, not independent observations. `class val` and `thr val`
+use returned candidates; `thr/slot` includes unavailable requested slots. `Gower`, numerical
+L2, and categorical proximity use returned target-class candidates. Categorical proximity is
+the Hamming count of changed atomic one-hot groups. Sparsity is the count of changed original
+feature/action units and uses all returned candidates. Numerical changes use the configured
+`.05` tolerance for sparsity. Lower is better for all proximity and sparsity columns.
 
-| Numerical / categorical policy | thr | cov | Gower | NN-5 | actions | runtime s |
-|---|---:|---:|---:|---:|---:|---:|
-| mode-1 / iid-9 | .1625 | .7167 | .0602 | .0326 | 1.405 | 26.47 |
-| grid-9 / iid-9 | .0750 | .7792 | .0661 | .0352 | 1.450 | 21.39 |
-| iid-9 / iid-9 | .1042 | .8125 | .0575 | .0364 | 1.402 | 18.26 |
-| top-k-9 / iid-9 | .1375 | .7333 | .0594 | .0324 | 1.362 | 50.75 |
-| top-p-9 / iid-9 | .1042 | .7750 | .0625 | .0358 | 1.449 | 38.02 |
-| grid-49 / iid-9 | .0750 | .8208 | .0570 | .0355 | 1.348 | 18.69 |
-| iid-49 / iid-9 | .0875 | .8375 | .0516 | .0381 | 1.303 | 17.80 |
-| top-k-49 / iid-9 | .1417 | .7333 | .0554 | .0353 | 1.319 | 53.54 |
-| top-p-49 / iid-9 | .0750 | .7917 | .0651 | .0352 | 1.442 | 37.44 |
-| iid-9 / greedy-1 | .0708 | .7792 | .0472 | .0352 | 1.297 | 21.31 |
-| iid-9 / top-k-9 | .1042 | .8125 | .0568 | .0364 | 1.402 | 17.96 |
-| iid-9 / top-p-9 | .0917 | .7917 | .0524 | .0375 | 1.373 | 19.78 |
+| Numerical / categorical policy | coverage | class val | thr val | thr/slot | Gower | numerical L2 | categorical proximity | sparsity |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| mode-1 / iid-9 | .7167 | 1.0000 | .2004 | .1625 | .0602 | .1944 | .5245 | 1.405 |
+| grid-9 / iid-9 | .7792 | 1.0000 | .1018 | .0750 | .0661 | .1910 | .6053 | 1.450 |
+| iid-9 / iid-9 | .8125 | 1.0000 | .1250 | .1042 | .0575 | .1902 | .5021 | 1.402 |
+| top-k-9 / iid-9 | .7333 | 1.0000 | .1726 | .1375 | .0594 | .1889 | .5152 | 1.362 |
+| top-p-9 / iid-9 | .7750 | 1.0000 | .1310 | .1042 | .0625 | .1954 | .5768 | 1.449 |
+| grid-49 / iid-9 | .8208 | 1.0000 | .0944 | .0750 | .0570 | .1754 | .5096 | 1.348 |
+| iid-49 / iid-9 | .8375 | 1.0000 | .1104 | .0875 | .0516 | .1760 | .4495 | 1.303 |
+| top-k-49 / iid-9 | .7333 | 1.0000 | .1713 | .1417 | .0554 | .1883 | .4787 | 1.319 |
+| top-p-49 / iid-9 | .7917 | 1.0000 | .0958 | .0750 | .0651 | .1820 | .6090 | 1.442 |
+| iid-9 / greedy-1 | .7792 | 1.0000 | .0840 | .0708 | .0472 | .1989 | .3550 | 1.297 |
+| iid-9 / top-k-9 | .8125 | 1.0000 | .1250 | .1042 | .0568 | .1904 | .4938 | 1.402 |
+| iid-9 / top-p-9 | .7917 | 1.0000 | .1083 | .0917 | .0524 | .1970 | .4313 | 1.373 |
+
+LOF, Isolation Forest, diversity, neighbour support, and runtime use all returned candidates.
+Lower LOF means less outlying; higher Isolation Forest means more inlying. Pairwise diversity
+is `N/A` because E11 returns one final counterfactual per factual (`k=1`). Runtime is the
+operational mean total seconds per 20-factual cell.
+
+| Numerical / categorical policy | LOF | Isolation Forest | NN-5 | pairwise diversity | runtime s |
+|---|---:|---:|---:|---:|---:|
+| mode-1 / iid-9 | 1.3164 | .0716 | .0326 | N/A | 26.47 |
+| grid-9 / iid-9 | 1.3825 | .0656 | .0352 | N/A | 21.39 |
+| iid-9 / iid-9 | 1.4072 | .0635 | .0364 | N/A | 18.26 |
+| top-k-9 / iid-9 | 1.3118 | .0713 | .0324 | N/A | 50.75 |
+| top-p-9 / iid-9 | 1.6795 | .0671 | .0358 | N/A | 38.02 |
+| grid-49 / iid-9 | 1.3956 | .0631 | .0355 | N/A | 18.69 |
+| iid-49 / iid-9 | 1.3703 | .0607 | .0381 | N/A | 17.80 |
+| top-k-49 / iid-9 | 1.9415 | .0682 | .0353 | N/A | 53.54 |
+| top-p-49 / iid-9 | 1.3594 | .0659 | .0352 | N/A | 37.44 |
+| iid-9 / greedy-1 | 1.4008 | .0633 | .0352 | N/A | 21.31 |
+| iid-9 / top-k-9 | 1.3942 | .0635 | .0364 | N/A | 17.96 |
+| iid-9 / top-p-9 | 1.4123 | .0615 | .0375 | N/A | 19.78 |
 
 For the predeclared comparisons, IID improved `thr` over the grid by `+0.0292` at B=9 and
 `+0.0125` at B=49. Coverage changed by `+0.0333` and `+0.0167`, while grouped Gower improved by
-`0.0086` and `0.0054`; NN-5 worsened by `0.0012` and `0.0026`. The effect was heterogeneous:
+`0.0086` and `0.0054`; NN-5 worsened by `0.0012` and `0.0026`. IID reduced categorical
+proximity by `0.1031/0.0601` groups and sparsity by `0.0471/0.0445` units at B=9/49. Numerical
+L2 improved by only `0.0008` at B=9 and worsened by `0.0006` at B=49. LOF worsened by `0.0248`
+at B=9 but improved by `0.0252` at B=49; Isolation Forest worsened by `0.0021/0.0025`. The
+effect was heterogeneous:
 Give Me Some Credit and HELOC had zero threshold success in every arm, so this pilot does not
 establish a general decoder advantage. At B=9, the entire mean threshold gain came from Bank
 Marketing (`.0500 -> .1667`), with Lending Club unchanged at `.2500`; at B=49, Bank Marketing
@@ -73,6 +105,14 @@ The k=1 `search_depth` was always zero; validity search used a mean `3.483` step
 (`2,252` sparse-valid and `628` validity-not-reached factual-runs).
 
 ## E12: q-to-classifier pushforward
+
+E12 traces feature proposals through a classifier at a fixed factual state; it does not run the
+counterfactual search or return a final counterfactual set. Consequently, final-CF coverage,
+validity, Gower, numerical L2, categorical proximity, sparsity, LOF, Isolation Forest, and
+pairwise diversity are all `N/A`, not zero. The applicable quality outcome is the change in
+target probability reported below. The final resume took `495 s` for 27 new cells plus exact
+verification of all 36 cells; the diagnostic does not separate prepare/generate/evaluate/write
+phases, so comparable per-cell lifecycle time is `NOT MEASURED`.
 
 Sampling seeds were averaged inside each factual before the following estimates. `D` is the
 predeclared conditional absolute probability-change contrast: categorical minus numerical,
@@ -106,19 +146,32 @@ universal property of feature type or classifier.
 
 Quality metrics use the same factual-first, equal-dataset aggregation and candidate-population
 denominators as E11. ESS first averages action keys inside each factual before the same
-seed/factual/dataset hierarchy. Runtime is an operational per-cell mean.
+seed/factual/dataset hierarchy. Metric definitions and orientations are identical to E11.
 
-| Policy | thr | cov | Gower | NN-5 | actions | ESS | runtime s |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| beta=0 | .1083 | .8250 | .0589 | .0359 | 1.409 | 64.00 | 19.11 |
-| beta=.5 | .0958 | .8292 | .0550 | .0370 | 1.358 | 63.73 | 19.49 |
-| beta=1 | .1042 | .8250 | .0485 | .0363 | 1.278 | 63.18 | 18.90 |
-| beta=2 | .1042 | .8292 | .0513 | .0373 | 1.300 | 62.08 | 18.33 |
-| classifier-top-B | .2667 | .8625 | .0509 | .0385 | 1.269 | n/a | 16.27 |
+| Policy | coverage | class val | thr val | thr/slot | Gower | numerical L2 | categorical proximity | sparsity |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| beta=0 | .8250 | 1.0000 | .1306 | .1083 | .0589 | .1880 | .5194 | 1.409 |
+| beta=.5 | .8292 | 1.0000 | .1208 | .0958 | .0550 | .1896 | .4778 | 1.358 |
+| beta=1 | .8250 | 1.0000 | .1264 | .1042 | .0485 | .1858 | .3986 | 1.278 |
+| beta=2 | .8292 | 1.0000 | .1219 | .1042 | .0513 | .1906 | .4271 | 1.300 |
+| classifier-top-B | .8625 | 1.0000 | .2784 | .2667 | .0509 | .2047 | .4082 | 1.269 |
+
+Pairwise diversity is `N/A` because E13 also uses `k=1`. Runtime is the operational mean total
+seconds per 20-factual cell.
+
+| Policy | LOF | Isolation Forest | NN-5 | pairwise diversity | ESS | runtime s |
+|---|---:|---:|---:|---:|---:|---:|
+| beta=0 | 1.5993 | .0647 | .0359 | N/A | 64.00 | 19.11 |
+| beta=.5 | 1.3635 | .0633 | .0370 | N/A | 63.73 | 19.49 |
+| beta=1 | 1.3827 | .0635 | .0363 | N/A | 63.18 | 18.90 |
+| beta=2 | 1.3915 | .0618 | .0373 | N/A | 62.08 | 18.33 |
+| classifier-top-B | 1.4689 | .0598 | .0385 | N/A | N/A | 16.27 |
 
 The predeclared beta=1 contrast changed threshold success by `-0.0042` versus beta=0, with no
 coverage change. It improved grouped Gower by `0.0104` and reduced action units by `0.131`, but
-worsened NN-5 by `0.0005`. The weak ESS change shows that `p_clf^beta` only mildly reweighted
+worsened NN-5 by `0.0005`. Numerical L2 improved by `0.0023`, categorical proximity by `0.1208`
+groups, and LOF by `0.2167`; Isolation Forest worsened by `0.0013`. The weak ESS change shows
+that `p_clf^beta` only mildly reweighted
 most M=64 pools. Dataset threshold values for beta=0 versus beta=1 were `.1833 -> .1500` on Bank
 Marketing, `.0167 -> 0` on Give Me Some Credit, `0 -> 0` on HELOC, and `.2333 -> .2667` on
 Lending Club. At the exactly matched factual state, all `3300` action keys had identical q-pool

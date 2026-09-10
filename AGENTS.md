@@ -213,6 +213,32 @@ Do not compare result rows as if they shared a protocol when any of these differ
 
 ### Metric Semantics
 
+The priority metrics for research decisions and reports are:
+
+- **coverage**: fraction of factuals with at least one returned candidate;
+- **validity**: report both returned-class validity and returned-threshold
+  validity, plus per-requested-slot threshold success when unavailable slots
+  matter;
+- **mixed proximity**: grouped-Gower distance from the factual;
+- **numerical proximity**: L2 distance over normalized numerical features;
+- **categorical proximity**: Hamming count of changed atomic categorical
+  groups, where a one-hot group counts as one original feature;
+- **sparsity**: number of changed original feature/action units, counting each
+  numerical feature and each atomic categorical group once;
+- **plausibility**: LOF and Isolation Forest scores, always with their
+  orientations stated;
+- **diversity**: mean pairwise grouped-Gower distance between returned
+  counterfactuals for the same factual;
+- **time**: prepare, generate, evaluate, write, and total time, with per-cell
+  and aggregate scope stated.
+
+Report these metrics for every experiment where they are applicable. Use
+`NOT MEASURED` when an applicable metric is absent and `N/A` when it is
+mathematically undefined. In particular, pairwise diversity is `N/A` for
+`k=1`, not zero. Do not silently substitute neighbour support, changed dummy
+columns, an ungrouped categorical distance, or a per-requested-slot success
+rate for one of the priority metrics.
+
 Availability and validity have different denominators:
 
 - `coverage`: factuals with at least one returned candidate divided by factuals.
@@ -227,10 +253,10 @@ Availability and validity have different denominators:
 - `primary_*`: only the configured primary rank.
 - `set_*` and diversity metrics: the complete returned set.
 
-The current evaluator uses two candidate populations deliberately:
+The evaluation/reporting contract uses two candidate populations deliberately:
 
-- grouped-Gower and continuous proximity use returned candidates that reach the
-  target class;
+- grouped-Gower, numerical L2, and categorical proximity use returned
+  candidates that reach the target class;
 - sparsity, action-unit changes, immutable-feature actionability, out-of-bounds,
   LOF, and Isolation Forest use all available returned candidates.
 
