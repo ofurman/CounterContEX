@@ -21,6 +21,9 @@ NUMERICAL_DECODERS = ("historical", "mode", "grid", "iid", "top-k", "top-p")
 CATEGORICAL_DECODERS = ("historical", "greedy", "iid", "top-k", "top-p")
 PROPOSAL_RNG_SCHEME = "sha256-canonical-v1"
 PROJECTION_ACCOUNTING_POLICY = "project-first-no-refill-v1"
+GUIDANCE_POLICIES = ("none", "pi-beta", "classifier-top-b")
+GUIDANCE_RESAMPLING_POLICY = "sir-with-replacement-v1"
+GUIDANCE_COMMON_RNG_SCHEME = "identical-state-action-crn-v1"
 
 
 @dataclass(frozen=True)
@@ -45,6 +48,14 @@ class CounterContExSearchConfig:
     strict_proposal_budget: bool = False
     proposal_rng_scheme: str = PROPOSAL_RNG_SCHEME
     proposal_accounting_policy: str = PROJECTION_ACCOUNTING_POLICY
+    guidance_policy: str = "none"
+    guidance_beta: float = 0.0
+    guidance_pool_size: int = 64
+    guidance_epsilon: float = 1e-12
+    guidance_with_replacement: bool = True
+    guidance_score_cache: bool = True
+    guidance_resampling_policy: str = GUIDANCE_RESAMPLING_POLICY
+    guidance_common_rng_scheme: str = GUIDANCE_COMMON_RNG_SCHEME
 
     def __post_init__(self) -> None:
         if self.candidate_quantiles is not None:
@@ -109,12 +120,48 @@ class CounterContExSearchConfig:
                 "proposal_accounting_policy must be "
                 f"{PROJECTION_ACCOUNTING_POLICY!r}"
             )
+        if self.guidance_policy not in GUIDANCE_POLICIES:
+            raise ValueError(f"guidance_policy must be one of {GUIDANCE_POLICIES}")
+        if not np.isfinite(self.guidance_beta) or self.guidance_beta < 0.0:
+            raise ValueError("guidance_beta must be finite and non-negative")
+        if (
+            not isinstance(self.guidance_pool_size, int)
+            or isinstance(self.guidance_pool_size, bool)
+            or self.guidance_pool_size < 1
+        ):
+            raise ValueError("guidance_pool_size must be a positive integer")
+        if not np.isfinite(self.guidance_epsilon) or not (
+            0.0 < self.guidance_epsilon <= 1.0
+        ):
+            raise ValueError("guidance_epsilon must lie in (0, 1]")
+        if not self.guidance_with_replacement:
+            raise ValueError("classifier guidance requires with-replacement sampling")
+        if not self.guidance_score_cache:
+            raise ValueError("classifier guidance requires score caching")
+        if self.guidance_resampling_policy != GUIDANCE_RESAMPLING_POLICY:
+            raise ValueError(
+                f"guidance_resampling_policy must be {GUIDANCE_RESAMPLING_POLICY!r}"
+            )
+        if self.guidance_common_rng_scheme != GUIDANCE_COMMON_RNG_SCHEME:
+            raise ValueError(
+                f"guidance_common_rng_scheme must be {GUIDANCE_COMMON_RNG_SCHEME!r}"
+            )
+        if self.guidance_policy == "none" and (
+            self.guidance_beta != 0.0
+            or self.guidance_pool_size != 64
+            or self.guidance_epsilon != 1e-12
+        ):
+            raise ValueError(
+                "guidance beta, pool size, and epsilon require a guidance policy"
+            )
 
         decoders_are_historical = (
             self.numerical_decoder == "historical"
             and self.categorical_decoder == "historical"
         )
         if not self.strict_proposal_budget:
+            if self.guidance_policy != "none":
+                raise ValueError("classifier guidance requires strict proposal mode")
             if not decoders_are_historical:
                 raise ValueError(
                     "non-historical proposal decoders require "
@@ -165,6 +212,18 @@ class CounterContExSearchConfig:
                 "strict categorical decoding uses categorical_proposal_budget, not "
                 "categorical_proposal_count"
             )
+        if self.guidance_policy != "none":
+            if self.numerical_decoder != "iid" or self.categorical_decoder != "iid":
+                raise ValueError("classifier guidance requires IID q pool decoders")
+            if self.guidance_pool_size < max(
+                self.numerical_proposal_budget,
+                self.categorical_proposal_budget,
+            ):
+                raise ValueError(
+                    "guidance_pool_size must be at least proposal budget B"
+                )
+            if self.guidance_policy == "classifier-top-b" and self.guidance_beta != 0.0:
+                raise ValueError("classifier-top-b does not use guidance_beta")
 
 
 @dataclass(frozen=True)

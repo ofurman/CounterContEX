@@ -32,6 +32,7 @@ from experiments.zeroshot_cf.methods.countercontex.proposal_policy import (
     categorical_truncation,
     equal_mass_bin_truncation,
     keyed_uniform,
+    normalize_log_weights,
     sample_equal_mass_bins,
     weighted_resample,
 )
@@ -47,15 +48,20 @@ class _ProposalAccounting:
     raw_records: list[tuple[int, str, str, int, bytes | None]] = field(
         default_factory=list
     )
-    classifier_rows_by_key: dict[bytes, tuple[np.ndarray, float]] = field(
+    classifier_rows_by_key: dict[bytes, tuple[np.ndarray, float, int]] = field(
         default_factory=dict
     )
-    baseline_rows_by_key: dict[bytes, tuple[np.ndarray, float]] = field(
+    baseline_rows_by_key: dict[bytes, tuple[np.ndarray, float, int]] = field(
         default_factory=dict
     )
+    proposal_row_keys: set[bytes] = field(default_factory=set)
     tabicl_calls: int = 0
     tabicl_rows: int = 0
+    classifier_calls: int = 0
+    first_validity_classifier_calls: int | None = None
+    first_validity_classifier_rows: int | None = None
     action_traces: list[_ActionTrace] = field(default_factory=list)
+    guidance_traces: list[_GuidanceTrace] = field(default_factory=list)
 
     @property
     def raw_count(self) -> int:
@@ -67,7 +73,7 @@ class _ProposalAccounting:
 
     @property
     def unique_count(self) -> int:
-        return len(self.classifier_rows_by_key)
+        return len(self.proposal_row_keys)
 
     @property
     def no_op_count(self) -> int:
@@ -142,6 +148,26 @@ class _ActionTrace:
     selected_log_probabilities: np.ndarray
 
 
+@dataclass(frozen=True)
+class _GuidanceTrace:
+    key: tuple[int, str, str]
+    pool_id: str
+    policy: str
+    beta: float
+    raw_pool_size: int
+    unique_pool_size: int
+    log_normalizer: float
+    effective_sample_size: float
+    selection_uniforms: np.ndarray
+    raw_target_probabilities: np.ndarray
+    raw_weights: np.ndarray
+    selected_pool_indices: np.ndarray
+
+
+def _classifier_classes(discriminator: DiscriminatorProtocol) -> np.ndarray:
+    return np.asarray(discriminator.classes_)
+
+
 class _SessionSampler:
     """Legacy sampler surface implemented only through a proposal session."""
 
@@ -153,12 +179,14 @@ class _SessionSampler:
         seed: int = 0,
         factual_source_index: int = 0,
         target: int = 0,
+        discriminator: DiscriminatorProtocol | None = None,
     ) -> None:
         self._session = session
         self._config = CounterContExConfig() if config is None else config
         self._seed = seed
         self._factual_source_index = factual_source_index
         self._target = int(target)
+        self._discriminator = discriminator
         self.accounting = _ProposalAccounting()
 
     def sample_candidates(
@@ -346,7 +374,11 @@ class _SessionSampler:
     ) -> DecodedNumericalProposals:
         """Decode exactly B raw q proposals for every state/action pair."""
         search = self._config.search
-        budget = int(search.numerical_proposal_budget or 0)
+        budget = int(
+            search.guidance_pool_size
+            if search.guidance_policy != "none"
+            else search.numerical_proposal_budget or 0
+        )
         values = np.empty((len(columns), budget), dtype=np.float64)
         quantiles = np.empty_like(values)
         for pair_index, raw_column in enumerate(columns):
@@ -493,13 +525,23 @@ class _SessionSampler:
                 accounting.terminal_dispositions
             )
         )
+        self.accounting.proposal_row_keys.update(
+            np.ascontiguousarray(projected_rows[index], dtype=np.float64).tobytes()
+            for index, disposition in enumerate(accounting.terminal_dispositions)
+            if int(disposition) != DISPOSITION_NO_OP
+            and np.ascontiguousarray(
+                projected_rows[index], dtype=np.float64
+            ).tobytes()
+            not in self.accounting.baseline_rows_by_key
+        )
         return accounting
 
     def _record_scored_rows(
         self,
-        destination: dict[bytes, tuple[np.ndarray, float]],
+        destination: dict[bytes, tuple[np.ndarray, float, int]],
         rows: np.ndarray,
         target_probabilities: np.ndarray,
+        predictions: np.ndarray | None = None,
     ) -> None:
         matrix = np.atleast_2d(np.asarray(rows, dtype=np.float64))
         probabilities = np.asarray(target_probabilities, dtype=np.float64).reshape(-1)
@@ -507,11 +549,20 @@ class _SessionSampler:
             np.isfinite(probabilities)
         ):
             raise ValueError("classifier scores must align with scored rows")
+        predicted = (
+            np.where(probabilities >= 0.5, self._target, 1 - self._target)
+            if predictions is None
+            else np.asarray(predictions).reshape(-1)
+        )
+        if predicted.shape != (len(matrix),):
+            raise ValueError("classifier predictions must align with scored rows")
         known = (
             self.accounting.classifier_rows_by_key
             | self.accounting.baseline_rows_by_key
         )
-        for row, probability in zip(matrix, probabilities, strict=True):
+        for row, probability, prediction in zip(
+            matrix, probabilities, predicted, strict=True
+        ):
             canonical = np.ascontiguousarray(row, dtype=np.float64)
             key = canonical.tobytes()
             previous = known.get(key)
@@ -519,22 +570,208 @@ class _SessionSampler:
                 previous[1], probability, rtol=0.0, atol=1e-12
             ):
                 raise ValueError("classifier returned inconsistent scores for one row")
+            if previous is not None and previous[2] != int(prediction):
+                raise ValueError(
+                    "classifier returned inconsistent predictions for one row"
+                )
             if previous is None:
-                destination[key] = (canonical.copy(), float(probability))
+                destination[key] = (
+                    canonical.copy(),
+                    float(probability),
+                    int(prediction),
+                )
                 known[key] = destination[key]
 
+    def classifier_outputs(
+        self, rows: np.ndarray, *, baseline: bool = False
+    ) -> tuple[np.ndarray, np.ndarray]:
+        if self._discriminator is None:
+            raise RuntimeError("classifier scoring is unavailable for this sampler")
+        matrix = np.atleast_2d(np.asarray(rows, dtype=np.float64))
+        known = (
+            self.accounting.classifier_rows_by_key
+            | self.accounting.baseline_rows_by_key
+        )
+        missing: dict[bytes, np.ndarray] = {}
+        for row in matrix:
+            canonical = np.ascontiguousarray(row, dtype=np.float64)
+            if canonical.tobytes() not in known:
+                missing.setdefault(canonical.tobytes(), canonical)
+        if missing:
+            missing_rows = np.stack(list(missing.values()))
+            probability_matrix = np.asarray(
+                self._discriminator.predict_proba(missing_rows), dtype=np.float64
+            )
+            if (
+                probability_matrix.ndim != 2
+                or probability_matrix.shape[0] != len(missing_rows)
+                or probability_matrix.shape[1] < 2
+                or not np.all(np.isfinite(probability_matrix))
+                or np.any(
+                    (probability_matrix < 0.0) | (probability_matrix > 1.0)
+                )
+            ):
+                raise ValueError("classifier returned invalid probability rows")
+            classes = _classifier_classes(self._discriminator)
+            positions = np.flatnonzero(classes == self._target)
+            if len(positions) != 1:
+                raise ValueError(
+                    f"target class {self._target} is absent from classifier classes"
+                )
+            target_probabilities = probability_matrix[:, int(positions[0])]
+            predictions = classes[np.argmax(probability_matrix, axis=1)]
+            self.accounting.classifier_calls += 1
+            if baseline:
+                self.record_baseline_rows(
+                    missing_rows, target_probabilities, predictions
+                )
+            else:
+                self.record_classifier_rows(
+                    missing_rows, target_probabilities, predictions
+                )
+            known = (
+                self.accounting.classifier_rows_by_key
+                | self.accounting.baseline_rows_by_key
+            )
+        scores = np.asarray(
+            [known[np.ascontiguousarray(row).tobytes()][1] for row in matrix],
+            dtype=np.float64,
+        )
+        labels = np.asarray(
+            [known[np.ascontiguousarray(row).tobytes()][2] for row in matrix]
+        )
+        return scores, labels
+
+    def mark_first_validity(self) -> None:
+        if self.accounting.first_validity_classifier_calls is None:
+            self.accounting.first_validity_classifier_calls = (
+                self.accounting.classifier_calls
+            )
+            self.accounting.first_validity_classifier_rows = (
+                self.accounting.classifier_rows
+            )
+
+    def guide_projected_rows(
+        self,
+        factual: np.ndarray,
+        projected_pool: np.ndarray,
+        *,
+        action_unit_id: str,
+        state_depth: int,
+        proposal_budget: int,
+    ) -> np.ndarray:
+        """Select B pool rows using p(y_t|x)^beta without another q factor."""
+        search = self._config.search
+        pool = np.atleast_2d(np.asarray(projected_pool, dtype=np.float64))
+        if search.guidance_policy == "none":
+            return np.arange(len(pool), dtype=np.int64)
+        if len(pool) != search.guidance_pool_size:
+            raise ValueError("guided q pool does not match declared M")
+
+        unique: dict[bytes, np.ndarray] = {}
+        for row in pool:
+            canonical = np.ascontiguousarray(row, dtype=np.float64)
+            unique.setdefault(canonical.tobytes(), canonical)
+        unique_rows = np.stack([unique[key] for key in sorted(unique)])
+        self.classifier_outputs(unique_rows)
+        known = (
+            self.accounting.classifier_rows_by_key
+            | self.accounting.baseline_rows_by_key
+        )
+        raw_scores = np.asarray(
+            [known[np.ascontiguousarray(row).tobytes()][1] for row in pool],
+            dtype=np.float64,
+        )
+        parent = _parent_id(factual)
+        action_key = f"{action_unit_id}:target-{self._target}"
+        pool_hasher = hashlib.sha256()
+        pool_hasher.update(
+            SamplingKey(
+                run_seed=self._seed,
+                factual_source_index=self._factual_source_index,
+                state_depth=state_depth,
+                parent_id=parent,
+                action_unit_id=action_key,
+                draw_index=0,
+                stream="q-pool-id",
+            ).canonical_bytes()
+        )
+        pool_hasher.update(np.ascontiguousarray(pool).tobytes())
+        pool_id = pool_hasher.hexdigest()
+
+        if search.guidance_policy == "classifier-top-b":
+            first_positions: dict[bytes, int] = {}
+            for index, row in enumerate(pool):
+                first_positions.setdefault(np.ascontiguousarray(row).tobytes(), index)
+            ranked = sorted(
+                first_positions.values(),
+                key=lambda index: (-raw_scores[index], index),
+            )
+            selected = np.asarray(ranked[:proposal_budget], dtype=np.int64)
+            selection_uniforms = np.empty(0, dtype=np.float64)
+            weights = np.full(len(pool), np.nan)
+            log_normalizer = np.nan
+            ess = np.nan
+        else:
+            normalized = normalize_log_weights(
+                np.full(len(pool), -np.log(len(pool)), dtype=np.float64),
+                raw_scores,
+                beta=search.guidance_beta,
+                epsilon=search.guidance_epsilon,
+            )
+            selection_uniforms = self._uniforms(
+                row=factual,
+                column=action_unit_id,
+                state_depth=state_depth,
+                count=proposal_budget,
+                stream="pi-beta-resampling",
+            )
+            selected = weighted_resample(normalized.weights, selection_uniforms)
+            weights = normalized.weights
+            log_normalizer = normalized.log_normalizer
+            ess = normalized.effective_sample_size
+        self.accounting.guidance_traces.append(
+            _GuidanceTrace(
+                key=(state_depth, parent, action_unit_id),
+                pool_id=pool_id,
+                policy=search.guidance_policy,
+                beta=search.guidance_beta,
+                raw_pool_size=len(pool),
+                unique_pool_size=len(unique_rows),
+                log_normalizer=log_normalizer,
+                effective_sample_size=ess,
+                selection_uniforms=selection_uniforms.copy(),
+                raw_target_probabilities=raw_scores.copy(),
+                raw_weights=weights.copy(),
+                selected_pool_indices=selected.copy(),
+            )
+        )
+        return selected
+
     def record_classifier_rows(
-        self, rows: np.ndarray, target_probabilities: np.ndarray
+        self,
+        rows: np.ndarray,
+        target_probabilities: np.ndarray,
+        predictions: np.ndarray | None = None,
     ) -> None:
         self._record_scored_rows(
-            self.accounting.classifier_rows_by_key, rows, target_probabilities
+            self.accounting.classifier_rows_by_key,
+            rows,
+            target_probabilities,
+            predictions,
         )
 
     def record_baseline_rows(
-        self, rows: np.ndarray, target_probabilities: np.ndarray
+        self,
+        rows: np.ndarray,
+        target_probabilities: np.ndarray,
+        predictions: np.ndarray | None = None,
     ) -> None:
         self._record_scored_rows(
-            self.accounting.baseline_rows_by_key, rows, target_probabilities
+            self.accounting.baseline_rows_by_key,
+            rows,
+            target_probabilities,
+            predictions,
         )
 
 
@@ -568,7 +805,11 @@ class _CategoryDecoder:
         if np.any(support >= len(group.columns)):
             raise ValueError("categorical support is outside the one-hot group")
         search = self._sampler._config.search
-        budget = int(search.categorical_proposal_budget or 0)
+        budget = int(
+            search.guidance_pool_size
+            if search.guidance_policy != "none"
+            else search.categorical_proposal_budget or 0
+        )
         decoder = search.categorical_decoder
         truncation = categorical_truncation(
             q,
@@ -618,6 +859,24 @@ class _CategoryDecoder:
             support_size=len(support),
         )
 
+    def guide_projected_rows(
+        self,
+        factual,
+        projected_pool,
+        *,
+        action_unit_id,
+        state_depth,
+    ):
+        return self._sampler.guide_projected_rows(
+            factual,
+            projected_pool,
+            action_unit_id=action_unit_id,
+            state_depth=state_depth,
+            proposal_budget=int(
+                self._sampler._config.search.categorical_proposal_budget or 0
+            ),
+        )
+
 
 @dataclass
 class _SessionJointScorer:
@@ -646,6 +905,7 @@ class _JointScoreBatch:
 def _point_backend(
     session: ProposalSession,
     *,
+    discriminator: DiscriminatorProtocol,
     use_categorical_distribution: bool,
     use_joint_scoring: bool,
     config: CounterContExConfig,
@@ -659,6 +919,7 @@ def _point_backend(
         seed=seed,
         factual_source_index=factual_source_index,
         target=target,
+        discriminator=discriminator,
     )
     category_distribution = None
     if use_categorical_distribution:
@@ -760,6 +1021,91 @@ def _proposal_trace_arrays(
             np.float64,
         ),
     }
+
+
+def _guidance_trace_arrays(
+    samplers: Sequence[_SessionSampler],
+) -> dict[str, np.ndarray]:
+    records: list[tuple[int, int, _GuidanceTrace]] = []
+    for factual_position, sampler in enumerate(samplers):
+        records.extend(
+            (factual_position, sampler._factual_source_index, trace)
+            for trace in sorted(sampler.accounting.guidance_traces, key=lambda x: x.key)
+        )
+    pool_offsets = [0]
+    selected_offsets = [0]
+    for _, _, trace in records:
+        pool_offsets.append(pool_offsets[-1] + trace.raw_pool_size)
+        selected_offsets.append(
+            selected_offsets[-1] + len(trace.selected_pool_indices)
+        )
+
+    def concatenate(arrays: list[np.ndarray], dtype) -> np.ndarray:
+        values = [np.asarray(array, dtype=dtype) for array in arrays]
+        return np.concatenate(values) if values else np.empty(0, dtype=dtype)
+
+    return {
+        "action_factual_position": np.asarray(
+            [position for position, _, _ in records], dtype=np.int64
+        ),
+        "action_factual_source_index": np.asarray(
+            [source for _, source, _ in records], dtype=np.int64
+        ),
+        "action_depth": np.asarray(
+            [trace.key[0] for _, _, trace in records], dtype=np.int64
+        ),
+        "action_parent_id": np.asarray(
+            [trace.key[1] for _, _, trace in records], dtype="<U64"
+        ),
+        "action_unit_id": np.asarray(
+            [trace.key[2] for _, _, trace in records], dtype="<U128"
+        ),
+        "pool_id": np.asarray(
+            [trace.pool_id for _, _, trace in records], dtype="<U64"
+        ),
+        "policy": np.asarray(
+            [trace.policy for _, _, trace in records], dtype="<U32"
+        ),
+        "beta": np.asarray(
+            [trace.beta for _, _, trace in records], dtype=np.float64
+        ),
+        "pool_offsets": np.asarray(pool_offsets, dtype=np.int64),
+        "selected_offsets": np.asarray(selected_offsets, dtype=np.int64),
+        "raw_pool_size": np.asarray(
+            [trace.raw_pool_size for _, _, trace in records], dtype=np.int64
+        ),
+        "unique_pool_size": np.asarray(
+            [trace.unique_pool_size for _, _, trace in records], dtype=np.int64
+        ),
+        "log_normalizer": np.asarray(
+            [trace.log_normalizer for _, _, trace in records], dtype=np.float64
+        ),
+        "effective_sample_size": np.asarray(
+            [trace.effective_sample_size for _, _, trace in records],
+            dtype=np.float64,
+        ),
+        "selected_unique_fraction": np.asarray(
+            [
+                len(np.unique(trace.selected_pool_indices))
+                / len(trace.selected_pool_indices)
+                for _, _, trace in records
+            ],
+            dtype=np.float64,
+        ),
+        "selection_uniforms": concatenate(
+            [trace.selection_uniforms for _, _, trace in records], np.float64
+        ),
+        "raw_target_probabilities": concatenate(
+            [trace.raw_target_probabilities for _, _, trace in records],
+            np.float64,
+        ),
+        "raw_weights": concatenate(
+            [trace.raw_weights for _, _, trace in records], np.float64
+        ),
+        "selected_pool_indices": concatenate(
+            [trace.selected_pool_indices for _, _, trace in records], np.int64
+        ),
+    }
 def generate_with_backend(
     inputs: TabICLGeneratorInputs,
     *,
@@ -800,6 +1146,7 @@ def generate_with_backend(
         session = backend.for_factual(factual, target, seed=seed)
         point_backend = _point_backend(
             session,
+            discriminator=discriminator,
             use_categorical_distribution=bool(inputs.categorical_groups),
             use_joint_scoring=config.search.cf_mode == "data_plausible",
             config=config,
@@ -835,6 +1182,27 @@ def generate_with_backend(
     )
     classifier_rows = np.asarray(
         [sampler.accounting.classifier_rows for sampler in samplers], dtype=np.int64
+    )
+    classifier_calls = np.asarray(
+        [sampler.accounting.classifier_calls for sampler in samplers], dtype=np.int64
+    )
+    classifier_calls_to_first = np.asarray(
+        [
+            -1
+            if sampler.accounting.first_validity_classifier_calls is None
+            else sampler.accounting.first_validity_classifier_calls
+            for sampler in samplers
+        ],
+        dtype=np.int64,
+    )
+    classifier_rows_to_first = np.asarray(
+        [
+            -1
+            if sampler.accounting.first_validity_classifier_rows is None
+            else sampler.accounting.first_validity_classifier_rows
+            for sampler in samplers
+        ],
+        dtype=np.int64,
     )
     tabicl_calls = np.asarray(
         [sampler.accounting.tabicl_calls for sampler in samplers], dtype=np.int64
@@ -887,6 +1255,13 @@ def generate_with_backend(
         proposal_no_op_count_per_point=no_op_count,
         proposal_duplicate_count_per_point=duplicate_count,
         proposal_classifier_rows_per_point=classifier_rows,
+        proposal_classifier_calls_per_point=classifier_calls,
+        proposal_classifier_calls_to_first_validity_per_point=(
+            classifier_calls_to_first
+        ),
+        proposal_classifier_rows_to_first_validity_per_point=(
+            classifier_rows_to_first
+        ),
         proposal_tabicl_calls_per_point=tabicl_calls,
         proposal_tabicl_rows_per_point=tabicl_rows,
         proposal_terminal_dispositions=dispositions,
@@ -896,5 +1271,6 @@ def generate_with_backend(
         proposal_scored_rows=scored_rows,
         proposal_scored_target_probabilities=target_probabilities,
         proposal_trace_arrays=_proposal_trace_arrays(samplers),
+        proposal_guidance_trace_arrays=_guidance_trace_arrays(samplers),
     )
     return replace(result, diagnostics=diagnostics)

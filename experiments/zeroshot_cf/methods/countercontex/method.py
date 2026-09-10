@@ -216,6 +216,15 @@ def adapt_generator_result(
                 "method.proposal_classifier_rows": (
                     diagnostics.proposal_classifier_rows_per_point
                 ),
+                "method.proposal_classifier_calls": (
+                    diagnostics.proposal_classifier_calls_per_point
+                ),
+                "method.proposal_classifier_calls_to_first_validity": (
+                    diagnostics.proposal_classifier_calls_to_first_validity_per_point
+                ),
+                "method.proposal_classifier_rows_to_first_validity": (
+                    diagnostics.proposal_classifier_rows_to_first_validity_per_point
+                ),
                 "method.proposal_tabicl_calls": (
                     diagnostics.proposal_tabicl_calls_per_point
                 ),
@@ -244,6 +253,14 @@ def adapt_generator_result(
                 for name, values in diagnostics.proposal_trace_arrays.items()
             }
         )
+        artifacts.update(
+            {
+                f"method.guidance_trace_{name}": np.asarray(values)
+                for name, values in (
+                    diagnostics.proposal_guidance_trace_arrays.items()
+                )
+            }
+        )
         proposal_summary = {
             "raw": int(np.sum(diagnostics.proposal_raw_count_per_point)),
             "projected": int(
@@ -256,6 +273,9 @@ def adapt_generator_result(
             ),
             "classifier_rows": int(
                 np.sum(diagnostics.proposal_classifier_rows_per_point)
+            ),
+            "classifier_calls": int(
+                np.sum(diagnostics.proposal_classifier_calls_per_point)
             ),
             "tabicl_calls": int(
                 np.sum(diagnostics.proposal_tabicl_calls_per_point)

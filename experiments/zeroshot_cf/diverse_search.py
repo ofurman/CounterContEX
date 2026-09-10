@@ -208,6 +208,14 @@ def _numerical_trials_for_beam(
                 decoded.values[0],
                 feature_domains,
             )
+            selected_pool_indices = sampler.guide_projected_rows(
+                state.row,
+                raw_rows,
+                action_unit_id=str(column),
+                state_depth=state.depth,
+                proposal_budget=sampler._config.search.numerical_proposal_budget,
+            )
+            raw_rows = raw_rows[selected_pool_indices]
             accounting = sampler.record_projected_rows(
                 state.row,
                 raw_rows,
@@ -222,7 +230,8 @@ def _numerical_trials_for_beam(
                 )
                 rows.append(row)
                 parents.append(state)
-                quantile = decoded.quantiles[0, raw_index]
+                pool_index = int(selected_pool_indices[raw_index])
+                quantile = decoded.quantiles[0, pool_index]
                 metadata.append(
                     {
                         "action_type": "numerical",
@@ -230,6 +239,7 @@ def _numerical_trials_for_beam(
                         "quantile": None if np.isnan(quantile) else float(quantile),
                         "confidence": None,
                         "raw_proposal_index": raw_index,
+                        "guidance_pool_index": pool_index,
                     }
                 )
         return rows, parents, metadata
@@ -375,6 +385,13 @@ def _categorical_trials_for_beam(
                 for draw, category in enumerate(decoded.categories):
                     raw_rows[draw, columns] = 0.0
                     raw_rows[draw, group.columns[int(category)]] = 1.0
+                selected_pool_indices = category_distribution.guide_projected_rows(
+                    state.row,
+                    raw_rows,
+                    action_unit_id=group.name,
+                    state_depth=state.depth,
+                )
+                raw_rows = raw_rows[selected_pool_indices]
                 accounting = category_distribution.record_projected_rows(
                     state.row,
                     raw_rows,
@@ -389,7 +406,8 @@ def _categorical_trials_for_beam(
                             accounting.unique_index_by_raw == unique_index
                         )[0]
                     )
-                    category = int(decoded.categories[raw_index])
+                    pool_index = int(selected_pool_indices[raw_index])
+                    category = int(decoded.categories[pool_index])
                     rows.append(row)
                     parents.append(state)
                     metadata.append(
@@ -399,13 +417,14 @@ def _categorical_trials_for_beam(
                             "from_category": previous_category,
                             "to_category": category,
                             "tabicl_conditional_probability": float(
-                                decoded.probabilities[raw_index]
+                                decoded.probabilities[pool_index]
                             ),
                             "tabicl_confidence_anchor": None,
                             "tabicl_proposal_rank": raw_index + 1,
                             "in_tabicl_support": True,
                             "support_size": int(decoded.support_size),
                             "raw_proposal_index": raw_index,
+                            "guidance_pool_index": pool_index,
                         }
                     )
                 continue
@@ -872,11 +891,14 @@ def generate_diverse_counterfactuals(  # noqa: C901, PLR0912, PLR0913
     if confidences is not None and quantiles is None:
         raise ValueError("candidate_confidences require candidate_quantiles")
 
-    factual_probabilities, factual_predictions = _classifier_outputs(
-        disc, factual, y_target
-    )
     if strict_proposal_budget:
-        sampler.record_baseline_rows(factual, factual_probabilities)
+        factual_probabilities, factual_predictions = sampler.classifier_outputs(
+            factual, baseline=True
+        )
+    else:
+        factual_probabilities, factual_predictions = _classifier_outputs(
+            disc, factual, y_target
+        )
     initial = _BeamState(
         row=factual.copy(),
         probability=float(factual_probabilities[0]),
@@ -944,9 +966,12 @@ def generate_diverse_counterfactuals(  # noqa: C901, PLR0912, PLR0913
         trials = np.stack([item[0] for item in unique_trials.values()])
         parents = [item[1] for item in unique_trials.values()]
         metadata_items = [item[2] for item in unique_trials.values()]
-        probabilities, predictions = _classifier_outputs(disc, trials, y_target)
         if strict_proposal_budget:
-            sampler.record_classifier_rows(trials, probabilities)
+            probabilities, predictions = sampler.classifier_outputs(trials)
+        else:
+            probabilities, predictions = _classifier_outputs(
+                disc, trials, y_target
+            )
         next_states: list[_BeamState] = []
         for row, probability, prediction, parent, raw_metadata in zip(
             trials,
@@ -982,6 +1007,8 @@ def generate_diverse_counterfactuals(  # noqa: C901, PLR0912, PLR0913
             )
             if immediate_valid:
                 valid_candidates[state.row.tobytes()] = state
+                if strict_proposal_budget:
+                    sampler.mark_first_validity()
             if probability > parent.probability + 1e-12:
                 next_states.append(state)
 

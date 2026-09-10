@@ -33,6 +33,8 @@ CF_MODES = ("sparse", "data_plausible")
 class DiscriminatorProtocol(Protocol):
     """Target classifier interface required by the public generator API."""
 
+    classes_: np.ndarray
+
     def predict(self, X: np.ndarray) -> np.ndarray: ...
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray: ...
@@ -177,6 +179,15 @@ class TabICLGeneratorDiagnostics:
     proposal_classifier_rows_per_point: np.ndarray = field(
         default_factory=lambda: np.empty(0, dtype=np.int64)
     )
+    proposal_classifier_calls_per_point: np.ndarray = field(
+        default_factory=lambda: np.empty(0, dtype=np.int64)
+    )
+    proposal_classifier_calls_to_first_validity_per_point: np.ndarray = field(
+        default_factory=lambda: np.empty(0, dtype=np.int64)
+    )
+    proposal_classifier_rows_to_first_validity_per_point: np.ndarray = field(
+        default_factory=lambda: np.empty(0, dtype=np.int64)
+    )
     proposal_tabicl_calls_per_point: np.ndarray = field(
         default_factory=lambda: np.empty(0, dtype=np.int64)
     )
@@ -202,6 +213,9 @@ class TabICLGeneratorDiagnostics:
         default_factory=lambda: np.empty(0, dtype=np.float64)
     )
     proposal_trace_arrays: Mapping[str, np.ndarray] = field(default_factory=dict)
+    proposal_guidance_trace_arrays: Mapping[str, np.ndarray] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True)

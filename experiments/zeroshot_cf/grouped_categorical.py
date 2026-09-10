@@ -271,59 +271,14 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     search_passes_used = 0
     flipped = False
 
-    classifier_cache: dict[bytes, tuple[float, int]] = {}
-
     def classifier_outputs(
         rows: np.ndarray, *, count_proposal_rows: bool = True
     ) -> tuple[np.ndarray, np.ndarray]:
         """Return target probabilities and labels from one classifier call."""
         matrix = np.atleast_2d(rows)
         if strict_proposal_budget:
-            missing: dict[bytes, np.ndarray] = {}
-            for row in matrix:
-                key = np.ascontiguousarray(row).tobytes()
-                if key not in classifier_cache:
-                    missing.setdefault(key, row)
-            if missing:
-                missing_rows = np.stack(list(missing.values()))
-                probability_matrix = np.asarray(disc.predict_proba(missing_rows))
-                classes = np.asarray(
-                    getattr(
-                        disc,
-                        "classes_",
-                        np.arange(probability_matrix.shape[1]),
-                    )
-                )
-                target_positions = np.flatnonzero(classes == y_target)
-                if len(target_positions) != 1:
-                    raise ValueError(
-                        f"target class {y_target} is absent from classifier classes"
-                    )
-                predictions = classes[np.argmax(probability_matrix, axis=1)]
-                target_position = int(target_positions[0])
-                for key, probability, prediction in zip(
-                    missing,
-                    probability_matrix[:, target_position],
-                    predictions,
-                    strict=True,
-                ):
-                    classifier_cache[key] = (float(probability), int(prediction))
-                target_probabilities = probability_matrix[:, target_position]
-                if count_proposal_rows:
-                    sampler.record_classifier_rows(
-                        missing_rows, target_probabilities
-                    )
-                else:
-                    sampler.record_baseline_rows(
-                        missing_rows, target_probabilities
-                    )
-            cached = [
-                classifier_cache[np.ascontiguousarray(row).tobytes()]
-                for row in matrix
-            ]
-            return (
-                np.asarray([item[0] for item in cached], dtype=np.float64),
-                np.asarray([item[1] for item in cached]),
+            return sampler.classifier_outputs(
+                matrix, baseline=not count_proposal_rows
             )
 
         probability_matrix = np.asarray(disc.predict_proba(matrix))
@@ -552,19 +507,34 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                             feature_domains,
                         )
                         raw_rows[:, column] = raw_values
+                        selected_pool_indices = sampler.guide_projected_rows(
+                            current,
+                            raw_rows,
+                            action_unit_id=str(column),
+                            state_depth=validity_steps + refinement_steps,
+                            proposal_budget=(
+                                sampler._config.search.numerical_proposal_budget
+                            ),
+                        )
+                        raw_rows = raw_rows[selected_pool_indices]
                         raw_metadata = [
                             {
                                 "action_type": "numerical",
                                 "feature": int(column),
                                 "quantile": (
                                     None
-                                    if np.isnan(decoded.quantiles[pair_index, draw])
-                                    else float(decoded.quantiles[pair_index, draw])
+                                    if np.isnan(
+                                        decoded.quantiles[pair_index, pool_index]
+                                    )
+                                    else float(
+                                        decoded.quantiles[pair_index, pool_index]
+                                    )
                                 ),
                                 "confidence": None,
                                 "raw_proposal_index": draw,
+                                "guidance_pool_index": int(pool_index),
                             }
-                            for draw in range(budget)
+                            for draw, pool_index in enumerate(selected_pool_indices)
                         ]
                         append_strict_proposals(
                             raw_rows,
@@ -770,6 +740,23 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                                 ),
                             }
                         )
+                    selected_pool_indices = (
+                        category_distribution.guide_projected_rows(
+                            current,
+                            raw_rows,
+                            action_unit_id=group.name,
+                            state_depth=validity_steps + refinement_steps,
+                        )
+                    )
+                    raw_rows = raw_rows[selected_pool_indices]
+                    raw_metadata = [
+                        {
+                            **raw_metadata[int(pool_index)],
+                            "raw_proposal_index": draw,
+                            "guidance_pool_index": int(pool_index),
+                        }
+                        for draw, pool_index in enumerate(selected_pool_indices)
+                    ]
                     append_strict_proposals(
                         raw_rows,
                         raw_metadata,
@@ -1084,6 +1071,8 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
             if was_flipped:
                 refinement_steps += 1
             elif flipped and initial_valid_step is None:
+                if strict_proposal_budget:
+                    sampler.mark_first_validity()
                 initial_valid_step = len(history)
                 initial_sparse_action_count = int(counterfactual_costs(current)[0][0])
                 initial_sparse_row = current.copy()
