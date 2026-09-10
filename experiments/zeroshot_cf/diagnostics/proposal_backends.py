@@ -200,7 +200,7 @@ def historical_e3_case_id(case):
     """Rebuild the pre-partition case fingerprint from an equivalent test case."""
     if case.factuals.partition != "test":
         raise ValueError("historical E3 compatibility requires test factuals")
-    protocol = dict(case.protocol)
+    protocol = serial(case.protocol)
     if protocol.pop("factual_partition", None) != "test":
         raise ValueError("historical E3 compatibility requires the test protocol")
     identity = {
