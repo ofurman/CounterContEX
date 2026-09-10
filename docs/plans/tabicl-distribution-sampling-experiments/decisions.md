@@ -62,4 +62,14 @@ Append-only. **<=15 lines per entry** -- detail goes in `resources/`.
 **Chosen**: C.
 **Rationale**: Current canonical `COMPLETE` markers carry no payload digests. An atomically published external inventory adds mutation detection without rewriting historical or newly completed run directories.
 
+### D-11: Record the user-approved Stage-7 pilot scope
+**Date**: 2026-09-10 - **Stage**: 7 retrospective scope record
+**Authority**: User request: "after fixes are applied execute the plan using ssh ofurman@gx10-bdc5 host for running experiments".
+**Approved host**: `ofurman@gx10-bdc5`; clean isolated source snapshot at Stage-6 commit `52fabf6` plus pilot diagnostic fixes through `2509e7b`.
+**Approved specs**: E11 pilot (144 cells), E13 pilot (60 cells), E12 pilot (36 cells), each with 20 target-stratified validation factuals and seeds 17/42/101 where stochastic.
+**Approved outputs**: only the fresh pilot roots declared by those three tracked YAMLs plus new Stage-7 replay/operational logs.
+**Maximum scope**: Stage 7 environment checks, authenticated E3 real-adapter replay, and validation pilots. No test-partition confirmation or k=3 execution.
+**Boundary**: Stage 8 still requires a separate post-pilot authorization that cites the measured cost range.
+**Protocol deviation**: This entry and its companion file were created after the first remote checkpoint/GPU command, so they document user intent but do not satisfy Stage 7's frozen pre-execution-record GATE.
+
 ---
