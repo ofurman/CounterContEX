@@ -6,6 +6,7 @@ import hashlib
 from copy import deepcopy
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from experiments.zeroshot_cf.diagnostics import proposal_backends
 from experiments.zeroshot_cf.evaluation import EvaluationSpec
@@ -81,3 +82,40 @@ def test_historical_e3_replay_rejects_identity_drift(tmp_path, monkeypatch) -> N
 
     with pytest.raises(ValueError, match="identity"):
         proposal_backends.historical_e3_pairs(tmp_path, "matrix.yaml")
+
+
+def test_historical_case_fingerprint_reconstructs_pre_partition_identity() -> None:
+    factuals = SimpleNamespace(
+        partition="test",
+        indices=np.array([0]),
+        values=np.array([[0.1]]),
+        true_labels=np.array([0]),
+    )
+    case = SimpleNamespace(
+        dataset=SimpleNamespace(
+            provenance=SimpleNamespace(fingerprint="dataset-v1"),
+            y_test=np.array([0, 1]),
+        ),
+        factuals=factuals,
+        factual_predictions=np.array([0]),
+        targets=np.array([1]),
+        oracle=SimpleNamespace(classes_=np.array([0, 1])),
+        protocol={
+            "max_test": 1,
+            "test_selection": "first",
+            "factual_partition": "test",
+            "selection_seed": 42,
+            "target_policy": "opposite_classifier_prediction",
+            "target_model": {"kind": "fixture"},
+            "resolved_target_model": {"kind": "fixture"},
+            "target_model_fingerprint": "model-v1",
+            "target_model_implementation_fingerprint": "implementation-v1",
+        },
+    )
+
+    assert proposal_backends.historical_e3_case_id(case) == (
+        "847f936423cbfdcbb74a541b5018008a7a70689be322cb256d6e6a87ebc0e56f"
+    )
+    case.factuals = SimpleNamespace(**{**vars(factuals), "partition": "validation"})
+    with pytest.raises(ValueError, match="test factuals"):
+        proposal_backends.historical_e3_case_id(case)

@@ -25,7 +25,7 @@ from experiments.zeroshot_cf import diverse_search as beam
 from experiments.zeroshot_cf.analysis.core import load_published_cells
 from experiments.zeroshot_cf.candidate_domains import project_candidate_values
 from experiments.zeroshot_cf.core.contracts import GenerationRequest
-from experiments.zeroshot_cf.datasets.benchmark import method_context
+from experiments.zeroshot_cf.datasets.benchmark import _array_digest, method_context
 from experiments.zeroshot_cf.methods.registry import DEFAULT_METHOD_REGISTRY
 from experiments.zeroshot_cf.orchestration.artifacts import ArtifactStore
 from experiments.zeroshot_cf.orchestration.matrix import load_matrix_config
@@ -194,6 +194,39 @@ def historical_e3_pairs(root, matrix):
     if any(set(arms) != {"tabicl", "empirical"} for arms in pairs.values()):
         raise ValueError("historical E3 backend pairs are incomplete")
     return pairs
+
+
+def historical_e3_case_id(case):
+    """Rebuild the pre-partition case fingerprint from an equivalent test case."""
+    if case.factuals.partition != "test":
+        raise ValueError("historical E3 compatibility requires test factuals")
+    protocol = dict(case.protocol)
+    if protocol.pop("factual_partition", None) != "test":
+        raise ValueError("historical E3 compatibility requires the test protocol")
+    identity = {
+        "dataset_fingerprint": case.dataset.provenance.fingerprint,
+        "selection_inputs": {
+            "max_test": protocol["max_test"],
+            "test_selection": protocol["test_selection"],
+            "selection_seed": protocol["selection_seed"],
+            "test_pool_size": len(case.dataset.y_test),
+            "test_labels": _array_digest(case.dataset.y_test),
+        },
+        "factual_indices": _array_digest(case.factuals.indices),
+        "factual_values": _array_digest(case.factuals.values),
+        "factual_true_labels": _array_digest(case.factuals.true_labels),
+        "factual_predictions": _array_digest(case.factual_predictions),
+        "targets": _array_digest(case.targets),
+        "classes": np.asarray(case.oracle.classes_).tolist(),
+        "target_policy": protocol["target_policy"],
+        "target_model_fingerprint": protocol["target_model_fingerprint"],
+        "protocol": protocol,
+    }
+    return hashlib.sha256(
+        json.dumps(
+            identity, sort_keys=True, separators=(",", ":"), default=str
+        ).encode()
+    ).hexdigest()
 
 
 def audit(root, matrix, output):
@@ -421,10 +454,10 @@ def trace_dataset(root, matrix, output, dataset, count, device):
     }
     start = time.perf_counter()
     case = _default_case_loader(specs["empirical"]).case
-    if (
-        case.case_id
-        != arms["empirical"].manifest["identity"]["resolved"]["case_fingerprint"]
-    ):
+    legacy_case_id = historical_e3_case_id(case)
+    if legacy_case_id != arms["empirical"].manifest["identity"]["resolved"][
+        "case_fingerprint"
+    ]:
         raise ValueError("reconstructed case differs from historical E3 case")
     context = method_context(case)
     prepared, runtimes = {}, {}
@@ -443,6 +476,7 @@ def trace_dataset(root, matrix, output, dataset, count, device):
     metadata = {
         "diagnostic_source_sha256": digest(__file__),
         "case_id": case.case_id,
+        "historical_case_id": legacy_case_id,
         "dataset": dataset,
         "seed": 42,
         "selection": "first N source-ordered factuals of authenticated E3 case",
