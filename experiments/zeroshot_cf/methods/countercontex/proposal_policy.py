@@ -21,6 +21,60 @@ EqualMassPolicy = Literal["iid", "top-k", "top-p"]
 CategoricalPolicy = Literal["iid", "greedy", "top-k", "top-p"]
 
 
+@dataclass(frozen=True)
+class DecodedNumericalProposals:
+    """Raw numerical values and the exact q coordinate of every draw."""
+
+    values: np.ndarray
+    quantiles: np.ndarray
+
+    def __post_init__(self) -> None:
+        values = np.asarray(self.values, dtype=np.float64)
+        quantiles = np.asarray(self.quantiles, dtype=np.float64)
+        if values.ndim != 2 or quantiles.shape != values.shape:
+            raise ValueError(
+                "decoded numerical values and quantiles must share a 2D shape"
+            )
+        if not np.all(np.isfinite(values)):
+            raise ValueError("decoded numerical values must be finite")
+        finite_quantiles = quantiles[np.isfinite(quantiles)]
+        if np.any(np.isinf(quantiles)) or np.any(
+            (finite_quantiles <= 0.0) | (finite_quantiles >= 1.0)
+        ):
+            raise ValueError(
+                "decoded quantiles must be NaN or lie strictly inside (0, 1)"
+            )
+        object.__setattr__(self, "values", _readonly(values, dtype=np.float64))
+        object.__setattr__(
+            self, "quantiles", _readonly(quantiles, dtype=np.float64)
+        )
+
+
+@dataclass(frozen=True)
+class DecodedCategoricalProposals:
+    """Raw category draws, including repeated categories and the current value."""
+
+    categories: np.ndarray
+    probabilities: np.ndarray
+    support_size: int
+
+    def __post_init__(self) -> None:
+        categories = np.asarray(self.categories, dtype=np.int64)
+        probabilities = np.asarray(self.probabilities, dtype=np.float64)
+        if categories.ndim != 1 or probabilities.shape != categories.shape:
+            raise ValueError("decoded categorical arrays must share a 1D shape")
+        if len(categories) == 0 or np.any(categories < 0):
+            raise ValueError("decoded categorical proposals must be non-empty")
+        if not np.all(np.isfinite(probabilities)) or np.any(probabilities < 0.0):
+            raise ValueError("decoded categorical probabilities must be non-negative")
+        if not isinstance(self.support_size, int) or self.support_size < 1:
+            raise ValueError("support_size must be a positive integer")
+        object.__setattr__(self, "categories", _readonly(categories, dtype=np.int64))
+        object.__setattr__(
+            self, "probabilities", _readonly(probabilities, dtype=np.float64)
+        )
+
+
 def _readonly(array: np.ndarray, *, dtype: np.dtype | type) -> np.ndarray:
     result = np.array(array, dtype=dtype, copy=True)
     result.setflags(write=False)

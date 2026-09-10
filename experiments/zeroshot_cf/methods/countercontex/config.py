@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from experiments.zeroshot_cf.diverse_search import DiverseBeamSearchConfig
 from experiments.zeroshot_cf.generator import (
     CF_MODES,
@@ -15,6 +16,11 @@ from experiments.zeroshot_cf.generator import (
     TabICLGeneratorConfig,
 )
 from experiments.zeroshot_cf.retained_config import TAU
+
+NUMERICAL_DECODERS = ("historical", "mode", "grid", "iid", "top-k", "top-p")
+CATEGORICAL_DECODERS = ("historical", "greedy", "iid", "top-k", "top-p")
+PROPOSAL_RNG_SCHEME = "sha256-canonical-v1"
+PROJECTION_ACCOUNTING_POLICY = "project-first-no-refill-v1"
 
 
 @dataclass(frozen=True)
@@ -30,8 +36,32 @@ class CounterContExSearchConfig:
     max_extra_actions: int = 1
     min_joint_log_gain: float = 0.0
     categorical_proposal_count: int = DEFAULT_CATEGORICAL_PROPOSAL_COUNT
+    numerical_decoder: str = "historical"
+    numerical_proposal_budget: int | None = None
+    categorical_decoder: str = "historical"
+    categorical_proposal_budget: int | None = None
+    truncation_k: int = 5
+    truncation_p: float = 0.9
+    strict_proposal_budget: bool = False
+    proposal_rng_scheme: str = PROPOSAL_RNG_SCHEME
+    proposal_accounting_policy: str = PROJECTION_ACCOUNTING_POLICY
 
     def __post_init__(self) -> None:
+        if self.candidate_quantiles is not None:
+            quantiles = tuple(float(value) for value in self.candidate_quantiles)
+            if (
+                not quantiles
+                or any(not np.isfinite(value) for value in quantiles)
+                or any(not 0.0 < value < 1.0 for value in quantiles)
+                or any(
+                    right <= left
+                    for left, right in zip(quantiles, quantiles[1:], strict=False)
+                )
+            ):
+                raise ValueError(
+                    "candidate_quantiles must be strictly increasing inside (0, 1)"
+                )
+            object.__setattr__(self, "candidate_quantiles", quantiles)
         if not 0 <= self.tau <= 1:
             raise ValueError("tau must be between zero and one")
         if self.cf_mode not in CF_MODES:
@@ -46,6 +76,95 @@ class CounterContExSearchConfig:
             raise ValueError("min_joint_log_gain must be non-negative")
         if self.categorical_proposal_count < 1:
             raise ValueError("categorical_proposal_count must be at least 1")
+        if self.numerical_decoder not in NUMERICAL_DECODERS:
+            raise ValueError(
+                f"numerical_decoder must be one of {NUMERICAL_DECODERS}"
+            )
+        if self.categorical_decoder not in CATEGORICAL_DECODERS:
+            raise ValueError(
+                f"categorical_decoder must be one of {CATEGORICAL_DECODERS}"
+            )
+        for name, value in (
+            ("numerical_proposal_budget", self.numerical_proposal_budget),
+            ("categorical_proposal_budget", self.categorical_proposal_budget),
+        ):
+            if value is not None and (
+                not isinstance(value, int)
+                or isinstance(value, bool)
+                or value < 1
+            ):
+                raise ValueError(f"{name} must be a positive integer")
+        if not isinstance(self.truncation_k, int) or isinstance(
+            self.truncation_k, bool
+        ) or self.truncation_k < 1:
+            raise ValueError("truncation_k must be a positive integer")
+        if not 0.0 < self.truncation_p <= 1.0:
+            raise ValueError("truncation_p must lie in (0, 1]")
+        if self.proposal_rng_scheme != PROPOSAL_RNG_SCHEME:
+            raise ValueError(
+                f"proposal_rng_scheme must be {PROPOSAL_RNG_SCHEME!r}"
+            )
+        if self.proposal_accounting_policy != PROJECTION_ACCOUNTING_POLICY:
+            raise ValueError(
+                "proposal_accounting_policy must be "
+                f"{PROJECTION_ACCOUNTING_POLICY!r}"
+            )
+
+        decoders_are_historical = (
+            self.numerical_decoder == "historical"
+            and self.categorical_decoder == "historical"
+        )
+        if not self.strict_proposal_budget:
+            if not decoders_are_historical:
+                raise ValueError(
+                    "non-historical proposal decoders require "
+                    "strict_proposal_budget=True"
+                )
+            if (
+                self.numerical_proposal_budget is not None
+                or self.categorical_proposal_budget is not None
+            ):
+                raise ValueError(
+                    "proposal budgets require strict_proposal_budget=True"
+                )
+            return
+        if decoders_are_historical or "historical" in {
+            self.numerical_decoder,
+            self.categorical_decoder,
+        }:
+            raise ValueError(
+                "strict proposal mode requires explicit numerical and categorical "
+                "decoders"
+            )
+        if self.numerical_proposal_budget is None:
+            raise ValueError("strict proposal mode requires numerical_proposal_budget")
+        if self.categorical_proposal_budget is None:
+            raise ValueError(
+                "strict proposal mode requires categorical_proposal_budget"
+            )
+        if self.numerical_decoder == "mode" and self.numerical_proposal_budget != 1:
+            raise ValueError("mode is a one-proposal numerical reference")
+        if self.numerical_decoder == "top-k" and self.truncation_k > 256:
+            raise ValueError("numerical top-k cannot retain more than 256 bins")
+        if self.numerical_decoder == "grid":
+            if self.candidate_quantiles is None:
+                raise ValueError("grid decoder requires candidate_quantiles")
+            if len(self.candidate_quantiles) != self.numerical_proposal_budget:
+                raise ValueError(
+                    "grid candidate_quantiles must match numerical_proposal_budget"
+                )
+        elif self.candidate_quantiles is not None:
+            raise ValueError("candidate_quantiles apply only to the grid decoder")
+        if (
+            self.categorical_decoder == "greedy"
+            and self.categorical_proposal_budget != 1
+        ):
+            raise ValueError("greedy is a one-proposal categorical reference")
+        if self.categorical_proposal_count != DEFAULT_CATEGORICAL_PROPOSAL_COUNT:
+            raise ValueError(
+                "strict categorical decoding uses categorical_proposal_budget, not "
+                "categorical_proposal_count"
+            )
 
 
 @dataclass(frozen=True)
@@ -124,6 +243,21 @@ class CounterContExConfig:
             and self.search.candidate_quantiles is None
         ):
             raise ValueError("confidence_quantiles require candidate_quantiles")
+        if self.search.strict_proposal_budget:
+            if self.foundation.confidence_quantiles is not None:
+                raise ValueError(
+                    "strict proposal experiments disable confidence conditioning"
+                )
+            if self.search.cf_mode != "sparse":
+                raise ValueError("strict proposal experiments require sparse search")
+            if self.search.numerical_decoder in {
+                "iid",
+                "top-k",
+                "top-p",
+            } and not np.isclose(self.foundation.temperature, 1.0):
+                raise ValueError(
+                    "full-distribution numerical sampling requires temperature=1.0"
+                )
 
     def generator_config(
         self, n_counterfactuals: int, *, seed: int = 0
@@ -145,6 +279,7 @@ class CounterContExConfig:
                 n_counterfactuals, selection_seed=seed
             ),
             categorical_proposal_count=self.search.categorical_proposal_count,
+            strict_proposal_budget=self.search.strict_proposal_budget,
         )
 
     def as_dict(self) -> dict[str, Any]:

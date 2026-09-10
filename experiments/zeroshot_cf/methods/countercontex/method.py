@@ -180,24 +180,114 @@ def adapt_generator_result(
         ),
         "method.available_count": counts,
     }
+    proposal_policy = getattr(diagnostics, "proposal_policy", "historical")
+    proposal_summary = None
+    if proposal_policy != "historical":
+        numerical_codes = {"mode": 1, "grid": 2, "iid": 3, "top-k": 4, "top-p": 5}
+        categorical_codes = {"greedy": 1, "iid": 2, "top-k": 3, "top-p": 4}
+        try:
+            numerical_policy, categorical_policy = proposal_policy.split("/", 1)
+            policy_code = (
+                10 * numerical_codes[numerical_policy]
+                + categorical_codes[categorical_policy]
+            )
+        except (KeyError, ValueError) as error:
+            raise ValueError(
+                f"unknown strict proposal policy: {proposal_policy}"
+            ) from error
+        artifacts.update(
+            {
+                "method.proposal_policy_code": np.full(
+                    len(counts), policy_code, dtype=np.int16
+                ),
+                "method.proposal_raw_count": diagnostics.proposal_raw_count_per_point,
+                "method.proposal_projected_count": (
+                    diagnostics.proposal_projected_count_per_point
+                ),
+                "method.proposal_unique_count": (
+                    diagnostics.proposal_unique_count_per_point
+                ),
+                "method.proposal_no_op_count": (
+                    diagnostics.proposal_no_op_count_per_point
+                ),
+                "method.proposal_duplicate_count": (
+                    diagnostics.proposal_duplicate_count_per_point
+                ),
+                "method.proposal_classifier_rows": (
+                    diagnostics.proposal_classifier_rows_per_point
+                ),
+                "method.proposal_tabicl_calls": (
+                    diagnostics.proposal_tabicl_calls_per_point
+                ),
+                "method.proposal_tabicl_rows": (
+                    diagnostics.proposal_tabicl_rows_per_point
+                ),
+                "method.proposal_terminal_disposition": (
+                    diagnostics.proposal_terminal_dispositions
+                ),
+                "method.proposal_unique_index_by_raw": (
+                    diagnostics.proposal_unique_index_by_raw
+                ),
+                "method.proposal_raw_offsets": diagnostics.proposal_raw_offsets,
+                "method.proposal_classifier_row_offsets": (
+                    diagnostics.proposal_classifier_row_offsets
+                ),
+                "method.proposal_scored_rows": diagnostics.proposal_scored_rows,
+                "method.proposal_scored_target_probability": (
+                    diagnostics.proposal_scored_target_probabilities
+                ),
+            }
+        )
+        artifacts.update(
+            {
+                f"method.proposal_trace_{name}": np.asarray(values)
+                for name, values in diagnostics.proposal_trace_arrays.items()
+            }
+        )
+        proposal_summary = {
+            "raw": int(np.sum(diagnostics.proposal_raw_count_per_point)),
+            "projected": int(
+                np.sum(diagnostics.proposal_projected_count_per_point)
+            ),
+            "unique": int(np.sum(diagnostics.proposal_unique_count_per_point)),
+            "no_op": int(np.sum(diagnostics.proposal_no_op_count_per_point)),
+            "duplicate": int(
+                np.sum(diagnostics.proposal_duplicate_count_per_point)
+            ),
+            "classifier_rows": int(
+                np.sum(diagnostics.proposal_classifier_rows_per_point)
+            ),
+            "tabicl_calls": int(
+                np.sum(diagnostics.proposal_tabicl_calls_per_point)
+            ),
+            "tabicl_rows": int(np.sum(diagnostics.proposal_tabicl_rows_per_point)),
+        }
+    run_diagnostics = {
+        "seed": seed,
+        "proposal_backend": proposal_backend,
+        "actionable_idx": [int(column) for column in actionable_idx],
+        "immutable_idx": [int(column) for column in immutable_idx],
+        "joint_scoring": (
+            "one_shot" if diagnostics.cf_mode == "data_plausible" else "disabled"
+        ),
+        "cache": {
+            "conditional_estimator": diagnostics.conditional_estimator_cache,
+            "key_value": diagnostics.tabicl_kv_cache,
+        },
+        "runtime_s": float(diagnostics.runtime_s),
+    }
+    if proposal_policy != "historical":
+        run_diagnostics.update(
+            {
+                "proposal_policy": proposal_policy,
+                "proposal_accounting": proposal_summary,
+            }
+        )
     return GenerationResult(
         candidates=candidates,
         available=available,
         point_diagnostics=tuple(point_diagnostics),
-        run_diagnostics={
-            "seed": seed,
-            "proposal_backend": proposal_backend,
-            "actionable_idx": [int(column) for column in actionable_idx],
-            "immutable_idx": [int(column) for column in immutable_idx],
-            "joint_scoring": (
-                "one_shot" if diagnostics.cf_mode == "data_plausible" else "disabled"
-            ),
-            "cache": {
-                "conditional_estimator": diagnostics.conditional_estimator_cache,
-                "key_value": diagnostics.tabicl_kv_cache,
-            },
-            "runtime_s": float(diagnostics.runtime_s),
-        },
+        run_diagnostics=run_diagnostics,
         artifacts=artifacts,
     )
 
@@ -229,6 +319,8 @@ class CounterContExMethod:
                     context.feature_schema.actionable_groups
                 ),
                 needs_joint=self.config.search.cf_mode == "data_plausible",
+                needs_numerical_distribution=self.config.search.numerical_decoder
+                in {"iid", "top-k", "top-p"},
             )
 
         if self.proposal_backend is None:
@@ -310,6 +402,13 @@ class PreparedCounterContExMethod:
                     schema.domains.lower,
                     schema.domains.upper,
                     dict(schema.domains.discrete),
+                ),
+                factual_source_indices=(
+                    None
+                    if request.factual_source_indices is None
+                    else tuple(
+                        int(value) for value in request.factual_source_indices
+                    )
                 ),
             ),
             discriminator=self.context.oracle,

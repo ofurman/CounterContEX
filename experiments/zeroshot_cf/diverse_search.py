@@ -88,6 +88,7 @@ class DiverseCounterfactualResult:
     candidate_pool_count: int
     search_depth: int
     dpp_logdet: float | None
+    factual_target_probability: float = float("nan")
 
     @property
     def available_count(self) -> int:
@@ -176,6 +177,7 @@ def _numerical_trials_for_beam(
     temperature: float,
     *,
     allow_revisits: bool,
+    strict_proposal_budget: bool = False,
 ) -> tuple[list[np.ndarray], list[_BeamState], list[dict[str, Any]]]:
     """Expand numerical branches in one TabICL call when supported."""
     pair_states: list[_BeamState] = []
@@ -190,6 +192,47 @@ def _numerical_trials_for_beam(
         pair_columns.extend(columns)
     if not pair_columns:
         return [], [], []
+
+    if strict_proposal_budget:
+        rows: list[np.ndarray] = []
+        parents: list[_BeamState] = []
+        metadata: list[dict[str, Any]] = []
+        for state, column in zip(pair_states, pair_columns, strict=True):
+            decoded = sampler.sample_budgeted_candidates(
+                state.row, [column], state_depth=state.depth
+            )
+            budget = decoded.values.shape[1]
+            raw_rows = np.repeat(state.row.reshape(1, -1), budget, axis=0)
+            raw_rows[:, column] = project_candidate_values(
+                [column] * budget,
+                decoded.values[0],
+                feature_domains,
+            )
+            accounting = sampler.record_projected_rows(
+                state.row,
+                raw_rows,
+                action_unit_id=str(column),
+                state_depth=state.depth,
+            )
+            for unique_index, row in enumerate(accounting.unique_classifier_rows):
+                raw_index = int(
+                    np.flatnonzero(
+                        accounting.unique_index_by_raw == unique_index
+                    )[0]
+                )
+                rows.append(row)
+                parents.append(state)
+                quantile = decoded.quantiles[0, raw_index]
+                metadata.append(
+                    {
+                        "action_type": "numerical",
+                        "feature": int(column),
+                        "quantile": None if np.isnan(quantile) else float(quantile),
+                        "confidence": None,
+                        "raw_proposal_index": raw_index,
+                    }
+                )
+        return rows, parents, metadata
 
     queries = np.stack([state.row for state in pair_states])
     columns_array = np.asarray(pair_columns, dtype=int)
@@ -296,6 +339,7 @@ def _categorical_trials_for_beam(
     proposal_count: int | None,
     *,
     allow_revisits: bool,
+    strict_proposal_budget: bool = False,
 ) -> tuple[list[np.ndarray], list[_BeamState], list[dict[str, Any]]]:
     rows: list[np.ndarray] = []
     parents: list[_BeamState] = []
@@ -312,6 +356,59 @@ def _categorical_trials_for_beam(
             if not np.isclose(values.sum(), 1.0):
                 raise ValueError(f"one-hot group {group.name!r} is invalid")
             previous_category = int(np.argmax(values))
+            if strict_proposal_budget:
+                if category_distribution is None or not hasattr(
+                    category_distribution, "budgeted"
+                ):
+                    raise ValueError(
+                        "strict proposal mode requires a budgeted category decoder"
+                    )
+                decoded = category_distribution.budgeted(
+                    state.row,
+                    group,
+                    None,
+                    state_depth=state.depth,
+                )
+                raw_rows = np.repeat(
+                    state.row.reshape(1, -1), len(decoded.categories), axis=0
+                )
+                for draw, category in enumerate(decoded.categories):
+                    raw_rows[draw, columns] = 0.0
+                    raw_rows[draw, group.columns[int(category)]] = 1.0
+                accounting = category_distribution.record_projected_rows(
+                    state.row,
+                    raw_rows,
+                    action_unit_id=group.name,
+                    state_depth=state.depth,
+                )
+                for unique_index, row in enumerate(
+                    accounting.unique_classifier_rows
+                ):
+                    raw_index = int(
+                        np.flatnonzero(
+                            accounting.unique_index_by_raw == unique_index
+                        )[0]
+                    )
+                    category = int(decoded.categories[raw_index])
+                    rows.append(row)
+                    parents.append(state)
+                    metadata.append(
+                        {
+                            "action_type": "categorical",
+                            "group": group.name,
+                            "from_category": previous_category,
+                            "to_category": category,
+                            "tabicl_conditional_probability": float(
+                                decoded.probabilities[raw_index]
+                            ),
+                            "tabicl_confidence_anchor": None,
+                            "tabicl_proposal_rank": raw_index + 1,
+                            "in_tabicl_support": True,
+                            "support_size": int(decoded.support_size),
+                            "raw_proposal_index": raw_index,
+                        }
+                    )
+                continue
             scores: dict[int, tuple[float, float | None]] = {}
             if category_distribution is None:
                 scores = dict.fromkeys(range(len(columns)), (1.0, None))
@@ -745,6 +842,7 @@ def generate_diverse_counterfactuals(  # noqa: C901, PLR0912, PLR0913
     tau: float = 0.5,
     temperature: float = 1e-9,
     category_distribution: ConditionedCategoryDistribution | None = None,
+    strict_proposal_budget: bool = False,
 ) -> DiverseCounterfactualResult:
     """Generate a valid beam pool and jointly select a diverse subset.
 
@@ -777,6 +875,8 @@ def generate_diverse_counterfactuals(  # noqa: C901, PLR0912, PLR0913
     factual_probabilities, factual_predictions = _classifier_outputs(
         disc, factual, y_target
     )
+    if strict_proposal_budget:
+        sampler.record_baseline_rows(factual, factual_probabilities)
     initial = _BeamState(
         row=factual.copy(),
         probability=float(factual_probabilities[0]),
@@ -810,6 +910,7 @@ def generate_diverse_counterfactuals(  # noqa: C901, PLR0912, PLR0913
                 feature_domains,
                 temperature,
                 allow_revisits=allow_revisits,
+                strict_proposal_budget=strict_proposal_budget,
             )
         )
         categorical_rows, categorical_parents, categorical_metadata = (
@@ -820,6 +921,7 @@ def generate_diverse_counterfactuals(  # noqa: C901, PLR0912, PLR0913
                 category_distribution,
                 config.categorical_proposal_count,
                 allow_revisits=allow_revisits,
+                strict_proposal_budget=strict_proposal_budget,
             )
         )
         trial_rows = numerical_rows + categorical_rows
@@ -843,6 +945,8 @@ def generate_diverse_counterfactuals(  # noqa: C901, PLR0912, PLR0913
         parents = [item[1] for item in unique_trials.values()]
         metadata_items = [item[2] for item in unique_trials.values()]
         probabilities, predictions = _classifier_outputs(disc, trials, y_target)
+        if strict_proposal_budget:
+            sampler.record_classifier_rows(trials, probabilities)
         next_states: list[_BeamState] = []
         for row, probability, prediction, parent, raw_metadata in zip(
             trials,
@@ -926,4 +1030,5 @@ def generate_diverse_counterfactuals(  # noqa: C901, PLR0912, PLR0913
         candidate_pool_count=len(pool),
         search_depth=search_depth,
         dpp_logdet=dpp_logdet,
+        factual_target_probability=float(factual_probabilities[0]),
     )

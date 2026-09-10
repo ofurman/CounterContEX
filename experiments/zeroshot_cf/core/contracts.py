@@ -319,6 +319,7 @@ class GenerationRequest:
     targets: np.ndarray
     n_counterfactuals: int
     seed: int
+    factual_source_indices: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         factuals = readonly_array(
@@ -333,8 +334,23 @@ class GenerationRequest:
             raise ValueError("n_counterfactuals must be positive")
         if self.seed < 0:
             raise ValueError("seed must be non-negative")
+        source_indices = self.factual_source_indices
+        if source_indices is not None:
+            source_indices = readonly_array(
+                source_indices,
+                dtype=np.int64,
+                ndim=1,
+                name="factual_source_indices",
+            )
+            if source_indices.shape != (len(factuals),):
+                raise ValueError(
+                    "factual_source_indices must match the factual row count"
+                )
+            if np.any(source_indices < 0):
+                raise ValueError("factual_source_indices must be non-negative")
         object.__setattr__(self, "factuals", factuals)
         object.__setattr__(self, "targets", targets)
+        object.__setattr__(self, "factual_source_indices", source_indices)
 
 
 def _validate_json_value(value: Any, *, path: str) -> None:

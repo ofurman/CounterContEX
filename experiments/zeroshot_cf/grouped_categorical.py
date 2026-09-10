@@ -210,6 +210,7 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     temperature: float = 1e-9,
     category_distribution: ConditionedCategoryDistribution | None = None,
     categorical_proposal_count: int = 1,
+    strict_proposal_budget: bool = False,
 ) -> tuple[np.ndarray, list[int], dict[str, Any]]:
     """Greedily select the best action across numerical and categorical types.
 
@@ -270,9 +271,62 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
     search_passes_used = 0
     flipped = False
 
-    def classifier_outputs(rows: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    classifier_cache: dict[bytes, tuple[float, int]] = {}
+
+    def classifier_outputs(
+        rows: np.ndarray, *, count_proposal_rows: bool = True
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Return target probabilities and labels from one classifier call."""
-        probability_matrix = np.asarray(disc.predict_proba(np.atleast_2d(rows)))
+        matrix = np.atleast_2d(rows)
+        if strict_proposal_budget:
+            missing: dict[bytes, np.ndarray] = {}
+            for row in matrix:
+                key = np.ascontiguousarray(row).tobytes()
+                if key not in classifier_cache:
+                    missing.setdefault(key, row)
+            if missing:
+                missing_rows = np.stack(list(missing.values()))
+                probability_matrix = np.asarray(disc.predict_proba(missing_rows))
+                classes = np.asarray(
+                    getattr(
+                        disc,
+                        "classes_",
+                        np.arange(probability_matrix.shape[1]),
+                    )
+                )
+                target_positions = np.flatnonzero(classes == y_target)
+                if len(target_positions) != 1:
+                    raise ValueError(
+                        f"target class {y_target} is absent from classifier classes"
+                    )
+                predictions = classes[np.argmax(probability_matrix, axis=1)]
+                target_position = int(target_positions[0])
+                for key, probability, prediction in zip(
+                    missing,
+                    probability_matrix[:, target_position],
+                    predictions,
+                    strict=True,
+                ):
+                    classifier_cache[key] = (float(probability), int(prediction))
+                target_probabilities = probability_matrix[:, target_position]
+                if count_proposal_rows:
+                    sampler.record_classifier_rows(
+                        missing_rows, target_probabilities
+                    )
+                else:
+                    sampler.record_baseline_rows(
+                        missing_rows, target_probabilities
+                    )
+            cached = [
+                classifier_cache[np.ascontiguousarray(row).tobytes()]
+                for row in matrix
+            ]
+            return (
+                np.asarray([item[0] for item in cached], dtype=np.float64),
+                np.asarray([item[1] for item in cached]),
+            )
+
+        probability_matrix = np.asarray(disc.predict_proba(matrix))
         classes = np.asarray(
             getattr(disc, "classes_", np.arange(probability_matrix.shape[1]))
         )
@@ -285,7 +339,9 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         return probability_matrix[:, int(target_positions[0])], predictions
 
     def flip_state(row: np.ndarray) -> tuple[bool, float]:
-        probabilities, predictions = classifier_outputs(row.reshape(1, -1))
+        probabilities, predictions = classifier_outputs(
+            row.reshape(1, -1), count_proposal_rows=False
+        )
         probability = float(probabilities[0])
         prediction = int(predictions[0])
         return prediction == y_target and probability >= tau, probability
@@ -296,6 +352,29 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
             action_unit_change_count(rows, factual, numerical, groups),
             grouped_gower_distance(rows, factual, numerical, groups),
         )
+
+    def append_strict_proposals(
+        raw_rows: np.ndarray,
+        raw_metadata: Sequence[dict[str, Any]],
+        trial_rows: list[np.ndarray],
+        metadata: list[dict[str, Any]],
+        *,
+        action_unit_id: str,
+        state_depth: int,
+    ) -> None:
+        """Project-account raw draws and expose each changed row once."""
+        accounting = sampler.record_projected_rows(
+            current,
+            raw_rows,
+            action_unit_id=action_unit_id,
+            state_depth=state_depth,
+        )
+        for unique_index, row in enumerate(accounting.unique_classifier_rows):
+            raw_index = int(
+                np.flatnonzero(accounting.unique_index_by_raw == unique_index)[0]
+            )
+            trial_rows.append(row)
+            metadata.append(dict(raw_metadata[raw_index]))
 
     def proposal_supports(candidate_metadata: Sequence[dict]) -> np.ndarray:
         """Return comparable local-support ranks for cheap prescreening."""
@@ -374,13 +453,29 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
         _, candidate_gower = counterfactual_costs(rows)
         proposal_support = proposal_supports(candidate_metadata)
         support_penalty = -np.log(np.clip(proposal_support, 1e-12, 1.0))
-        ranked = np.lexsort(
-            (
-                -probabilities[eligible],
-                support_penalty[eligible],
-                candidate_gower[eligible],
+        if strict_proposal_budget:
+            canonical_rows = np.asarray(
+                [
+                    np.ascontiguousarray(rows[index]).tobytes().hex()
+                    for index in eligible
+                ]
             )
-        )
+            ranked = np.lexsort(
+                (
+                    canonical_rows,
+                    -probabilities[eligible],
+                    support_penalty[eligible],
+                    candidate_gower[eligible],
+                )
+            )
+        else:
+            ranked = np.lexsort(
+                (
+                    -probabilities[eligible],
+                    support_penalty[eligible],
+                    candidate_gower[eligible],
+                )
+            )
         return int(eligible[ranked[0]])
 
     flipped, current_probability = flip_state(current)
@@ -436,7 +531,50 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                 and (not flipped or column not in refined_numerical)
             ]
             if available_numerical:
-                if quantiles is None:
+                if strict_proposal_budget:
+                    decoded = sampler.sample_budgeted_candidates(
+                        current,
+                        available_numerical,
+                        state_depth=validity_steps + refinement_steps,
+                    )
+                    budget = decoded.values.shape[1]
+                    if decoded.values.shape != decoded.quantiles.shape or budget < 1:
+                        raise ValueError(
+                            "budgeted numerical decoder returned an invalid shape"
+                        )
+                    for pair_index, column in enumerate(available_numerical):
+                        raw_rows = np.repeat(
+                            current.reshape(1, -1), budget, axis=0
+                        )
+                        raw_values = project_candidate_values(
+                            [column] * budget,
+                            decoded.values[pair_index],
+                            feature_domains,
+                        )
+                        raw_rows[:, column] = raw_values
+                        raw_metadata = [
+                            {
+                                "action_type": "numerical",
+                                "feature": int(column),
+                                "quantile": (
+                                    None
+                                    if np.isnan(decoded.quantiles[pair_index, draw])
+                                    else float(decoded.quantiles[pair_index, draw])
+                                ),
+                                "confidence": None,
+                                "raw_proposal_index": draw,
+                            }
+                            for draw in range(budget)
+                        ]
+                        append_strict_proposals(
+                            raw_rows,
+                            raw_metadata,
+                            trial_rows,
+                            metadata,
+                            action_unit_id=str(column),
+                            state_depth=validity_steps + refinement_steps,
+                        )
+                elif quantiles is None:
                     numerical_values = np.asarray(
                         sampler.sample_candidates(
                             current.reshape(1, -1),
@@ -528,19 +666,20 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                         for position, column in enumerate(expanded_columns)
                     ]
 
-                numerical_trials = np.repeat(
-                    current.reshape(1, -1),
-                    len(flat_values),
-                    axis=0,
-                )
-                numerical_trials[
-                    np.arange(len(flat_values)),
-                    expanded_columns,
-                ] = flat_values
-                trial_rows.extend(numerical_trials)
-                metadata.extend(numerical_metadata)
+                if not strict_proposal_budget:
+                    numerical_trials = np.repeat(
+                        current.reshape(1, -1),
+                        len(flat_values),
+                        axis=0,
+                    )
+                    numerical_trials[
+                        np.arange(len(flat_values)),
+                        expanded_columns,
+                    ] = flat_values
+                    trial_rows.extend(numerical_trials)
+                    metadata.extend(numerical_metadata)
 
-                if flipped:
+                if flipped and not strict_proposal_budget:
                     reversion_columns = [
                         column
                         for column in available_numerical
@@ -581,6 +720,65 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                 if not np.isclose(group_values.sum(), 1.0):
                     raise ValueError(f"one-hot group {group.name!r} is invalid")
                 previous_category = int(np.argmax(group_values))
+                if strict_proposal_budget:
+                    if category_distribution is None or not hasattr(
+                        category_distribution, "budgeted"
+                    ):
+                        raise ValueError(
+                            "strict proposal mode requires a budgeted category decoder"
+                        )
+                    decoded = category_distribution.budgeted(
+                        current,
+                        group,
+                        None,
+                        state_depth=validity_steps + refinement_steps,
+                    )
+                    raw_rows = np.repeat(
+                        current.reshape(1, -1), len(decoded.categories), axis=0
+                    )
+                    raw_metadata: list[dict[str, Any]] = []
+                    factual_category = int(np.argmax(factual[columns]))
+                    for proposal_rank, (category, probability) in enumerate(
+                        zip(
+                            decoded.categories,
+                            decoded.probabilities,
+                            strict=True,
+                        ),
+                        start=1,
+                    ):
+                        raw_rows[proposal_rank - 1, columns] = 0.0
+                        raw_rows[
+                            proposal_rank - 1, group.columns[int(category)]
+                        ] = 1.0
+                        raw_metadata.append(
+                            {
+                                "action_type": "categorical",
+                                "group": group.name,
+                                "group_object": group,
+                                "from_category": previous_category,
+                                "to_category": int(category),
+                                "tabicl_conditional_probability": float(probability),
+                                "tabicl_confidence_anchor": None,
+                                "tabicl_proposal_rank": proposal_rank,
+                                "in_tabicl_support": True,
+                                "support_size": int(decoded.support_size),
+                                "raw_proposal_index": proposal_rank - 1,
+                                "proposal_kind": (
+                                    "revert"
+                                    if flipped and int(category) == factual_category
+                                    else "conditional"
+                                ),
+                            }
+                        )
+                    append_strict_proposals(
+                        raw_rows,
+                        raw_metadata,
+                        trial_rows,
+                        metadata,
+                        action_unit_id=group.name,
+                        state_depth=validity_steps + refinement_steps,
+                    )
+                    continue
                 category_scores: dict[int, tuple[float, float | None]] = {}
                 if category_distribution is not None:
                     anchors = [None] if confidences is None else confidences.tolist()
@@ -663,6 +861,15 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                     joint_rerank_attempted = True
                     refinement_stopping_reason = "no_candidates"
                 break
+            if strict_proposal_budget:
+                unique_trial_indices: dict[bytes, int] = {}
+                for index, row in enumerate(trial_rows):
+                    unique_trial_indices.setdefault(
+                        np.ascontiguousarray(row).tobytes(), index
+                    )
+                kept = list(unique_trial_indices.values())
+                trial_rows = [trial_rows[index] for index in kept]
+                metadata = [metadata[index] for index in kept]
             trials = np.stack(trial_rows)
             probabilities, predictions = classifier_outputs(trials)
             valid = (predictions == y_target) & (probabilities >= tau)
@@ -741,7 +948,19 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                     metadata,
                 )
             else:
-                best = int(np.argmax(probabilities))
+                maximum_probability = float(np.max(probabilities))
+                tied = np.flatnonzero(
+                    np.isclose(probabilities, maximum_probability, atol=1e-15)
+                )
+                if strict_proposal_budget and len(tied) > 1:
+                    best = min(
+                        (int(index) for index in tied),
+                        key=lambda index: np.ascontiguousarray(
+                            trials[index]
+                        ).tobytes(),
+                    )
+                else:
+                    best = int(tied[0])
 
             if best is None:
                 break
@@ -750,6 +969,7 @@ def greedy_mixed_counterfactual(  # noqa: PLR0913
                 not flipped
                 and selected_probability <= current_probability + 1e-12
                 and category_distribution is not None
+                and not strict_proposal_budget
             ):
                 # The ranked shortlist is the normal path. If it cannot make
                 # progress, expose every remaining legal category once so

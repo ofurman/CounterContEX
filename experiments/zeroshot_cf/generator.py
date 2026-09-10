@@ -8,8 +8,6 @@ from time import perf_counter
 from typing import Any, Protocol
 
 import numpy as np
-from sklearn.model_selection import train_test_split
-
 from experiments.zeroshot_cf.action_space import OneHotActionGroup
 from experiments.zeroshot_cf.candidate_domains import FeatureDomains
 from experiments.zeroshot_cf.diverse_search import (
@@ -21,6 +19,7 @@ from experiments.zeroshot_cf.grouped_categorical import (
     greedy_mixed_counterfactual,
 )
 from experiments.zeroshot_cf.mixed_distance import action_unit_change_count
+from sklearn.model_selection import train_test_split
 
 ATHENA_CONTEXT_SIZE = 512
 ATHENA_CONTEXT_STRATEGY = "gower_knn_both"
@@ -58,6 +57,7 @@ class TabICLGeneratorConfig:
         default_factory=lambda: DiverseBeamSearchConfig(n_counterfactuals=1)
     )
     categorical_proposal_count: int = DEFAULT_CATEGORICAL_PROPOSAL_COUNT
+    strict_proposal_budget: bool = False
 
     def __post_init__(self) -> None:
         if self.cf_mode not in CF_MODES:
@@ -96,6 +96,7 @@ class TabICLGeneratorInputs:
     categorical_groups: tuple[OneHotActionGroup, ...]
     immutable_idx: tuple[int, ...] = ()
     feature_domains: FeatureDomains | None = None
+    factual_source_indices: tuple[int, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -127,6 +128,7 @@ class TabICLGeneratorDiagnostics:
     n_counterfactuals: int
     diversity_config: DiverseBeamSearchConfig
     categorical_proposal_count: int
+    strict_proposal_budget: bool
     categorical_confidence_batching: bool
     conditional_estimator_cache: bool
     tabicl_kv_cache: bool
@@ -156,6 +158,50 @@ class TabICLGeneratorDiagnostics:
     diverse_search_depth_per_point: np.ndarray
     diverse_histories_per_point: tuple[tuple[tuple[Any, ...], ...], ...]
     target_probability_per_point: np.ndarray
+    proposal_policy: str = "historical"
+    proposal_raw_count_per_point: np.ndarray = field(
+        default_factory=lambda: np.empty(0, dtype=np.int64)
+    )
+    proposal_projected_count_per_point: np.ndarray = field(
+        default_factory=lambda: np.empty(0, dtype=np.int64)
+    )
+    proposal_unique_count_per_point: np.ndarray = field(
+        default_factory=lambda: np.empty(0, dtype=np.int64)
+    )
+    proposal_no_op_count_per_point: np.ndarray = field(
+        default_factory=lambda: np.empty(0, dtype=np.int64)
+    )
+    proposal_duplicate_count_per_point: np.ndarray = field(
+        default_factory=lambda: np.empty(0, dtype=np.int64)
+    )
+    proposal_classifier_rows_per_point: np.ndarray = field(
+        default_factory=lambda: np.empty(0, dtype=np.int64)
+    )
+    proposal_tabicl_calls_per_point: np.ndarray = field(
+        default_factory=lambda: np.empty(0, dtype=np.int64)
+    )
+    proposal_tabicl_rows_per_point: np.ndarray = field(
+        default_factory=lambda: np.empty(0, dtype=np.int64)
+    )
+    proposal_terminal_dispositions: np.ndarray = field(
+        default_factory=lambda: np.empty(0, dtype=np.int8)
+    )
+    proposal_unique_index_by_raw: np.ndarray = field(
+        default_factory=lambda: np.empty(0, dtype=np.int64)
+    )
+    proposal_raw_offsets: np.ndarray = field(
+        default_factory=lambda: np.empty(0, dtype=np.int64)
+    )
+    proposal_classifier_row_offsets: np.ndarray = field(
+        default_factory=lambda: np.empty(0, dtype=np.int64)
+    )
+    proposal_scored_rows: np.ndarray = field(
+        default_factory=lambda: np.empty((0, 0), dtype=np.float64)
+    )
+    proposal_scored_target_probabilities: np.ndarray = field(
+        default_factory=lambda: np.empty(0, dtype=np.float64)
+    )
+    proposal_trace_arrays: Mapping[str, np.ndarray] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -234,7 +280,9 @@ def _freeze_items(items: Sequence[Any]) -> tuple[Any, ...]:
     return tuple(frozen)
 
 
-def _freeze_nested_histories(histories: Sequence[Sequence[Any]]) -> tuple[tuple[Any, ...], ...]:
+def _freeze_nested_histories(
+    histories: Sequence[Sequence[Any]],
+) -> tuple[tuple[Any, ...], ...]:
     return tuple(_freeze_items(history) for history in histories)
 
 
@@ -256,11 +304,15 @@ def _target_probabilities(
             raise ValueError(
                 f"target class {target} is absent from classifier classes"
             )
-        probabilities[index] = float(probability_matrix[index, int(target_positions[0])])
+        probabilities[index] = float(
+            probability_matrix[index, int(target_positions[0])]
+        )
     return probabilities
 
 
-def _metadata_bool(metadata: Mapping[str, Any], key: str, default: bool = False) -> bool:
+def _metadata_bool(
+    metadata: Mapping[str, Any], key: str, default: bool = False
+) -> bool:
     if key not in metadata:
         return default
     return bool(metadata[key])
@@ -280,6 +332,16 @@ def generate_counterfactual_batch(
         raise ValueError(f"factuals must be 2D, got shape {factuals.shape}")
     if targets.shape != (len(factuals),):
         raise ValueError("targets must contain one label per factual row")
+    if inputs.factual_source_indices is not None:
+        source_indices = np.asarray(inputs.factual_source_indices)
+        if source_indices.shape != (len(factuals),) or not np.issubdtype(
+            source_indices.dtype, np.integer
+        ):
+            raise ValueError(
+                "factual_source_indices must contain one integer per factual row"
+            )
+        if np.any(source_indices < 0):
+            raise ValueError("factual_source_indices must be non-negative")
 
     numerical_columns = tuple(int(column) for column in inputs.numerical_columns)
     categorical_groups = tuple(inputs.categorical_groups)
@@ -306,9 +368,13 @@ def generate_counterfactual_batch(
     flipped_per_point = [False] * len(factuals)
     steps_per_point = [0] * len(factuals)
     history_per_point: list[tuple[Any, ...]] = [() for _ in range(len(factuals))]
-    attempt_history_per_point: list[tuple[Any, ...]] = [() for _ in range(len(factuals))]
+    attempt_history_per_point: list[tuple[Any, ...]] = [
+        () for _ in range(len(factuals))
+    ]
     validity_steps_per_point = [0] * len(factuals)
-    initial_valid_step_per_point: list[int | None] = [None for _ in range(len(factuals))]
+    initial_valid_step_per_point: list[int | None] = [
+        None for _ in range(len(factuals))
+    ]
     refinement_steps_per_point = [0] * len(factuals)
     accepted_refinement_count_per_point = [0] * len(factuals)
     initial_sparse_action_count_per_point = np.full(len(factuals), -1, dtype=int)
@@ -322,17 +388,25 @@ def generate_counterfactual_batch(
     refinement_stopping_reason_per_point = ["not_started"] * len(factuals)
     point_runtime_s = np.zeros(len(factuals), dtype=np.float64)
     joint_scoring_runtime_s_per_point = np.zeros(len(factuals), dtype=np.float64)
+    target_probability_per_point = np.empty(len(factuals), dtype=np.float64)
 
     started = perf_counter()
     metadata: Mapping[str, Any] = {}
-    for index, (factual, target_class) in enumerate(zip(factuals, targets, strict=True)):
+    for index, (factual, target_class) in enumerate(
+        zip(factuals, targets, strict=True)
+    ):
         point_started = perf_counter()
-        point_backend = point_backend_factory(np.asarray(factual).copy(), int(target_class))
+        point_backend = point_backend_factory(
+            np.asarray(factual).copy(), int(target_class)
+        )
         if index == 0:
             metadata = point_backend.metadata
 
         if config.n_counterfactuals == 1:
-            if config.cf_mode == "data_plausible" and point_backend.joint_scorer is None:
+            if (
+                config.cf_mode == "data_plausible"
+                and point_backend.joint_scorer is None
+            ):
                 raise ValueError("data_plausible mode requires a prepared joint scorer")
             x_cf, changed, greedy_info = greedy_mixed_counterfactual(
                 point_backend.sampler,
@@ -355,6 +429,7 @@ def generate_counterfactual_batch(
                 temperature=config.temperature,
                 category_distribution=point_backend.category_distribution,
                 categorical_proposal_count=config.categorical_proposal_count,
+                strict_proposal_budget=config.strict_proposal_budget,
             )
             if greedy_info["flipped"]:
                 X_cf_sets[index, 0] = x_cf
@@ -377,6 +452,7 @@ def generate_counterfactual_batch(
                 tau=config.tau,
                 temperature=config.temperature,
                 category_distribution=point_backend.category_distribution,
+                strict_proposal_budget=config.strict_proposal_budget,
             )
             available_count = diverse_result.available_count
             if available_count:
@@ -426,6 +502,11 @@ def generate_counterfactual_batch(
                 "joint_scoring_batch_count": 0,
                 "joint_rows_scored": 0,
                 "joint_scoring_runtime_s": 0.0,
+                "best_target_probability": (
+                    float(diverse_result.target_probabilities[0])
+                    if available_count
+                    else diverse_result.factual_target_probability
+                ),
             }
 
         X_cf[index] = x_cf
@@ -453,7 +534,9 @@ def generate_counterfactual_batch(
         )
         initial_joint_score = greedy_info.get("initial_tabicl_joint_log_density")
         if initial_joint_score is not None:
-            initial_tabicl_joint_log_density_per_point[index] = float(initial_joint_score)
+            initial_tabicl_joint_log_density_per_point[index] = float(
+                initial_joint_score
+            )
         final_joint_score = greedy_info.get("final_tabicl_joint_log_density")
         if final_joint_score is not None:
             final_tabicl_joint_log_density_per_point[index] = float(final_joint_score)
@@ -474,9 +557,15 @@ def generate_counterfactual_batch(
             greedy_info.get("joint_scoring_runtime_s", 0.0)
         )
         point_runtime_s[index] = perf_counter() - point_started
+        target_probability_per_point[index] = float(
+            greedy_info["best_target_probability"]
+        )
 
     runtime_s = perf_counter() - started
-    target_probability_per_point = _target_probabilities(discriminator, X_cf, targets)
+    if not config.strict_proposal_budget:
+        target_probability_per_point = _target_probabilities(
+            discriminator, X_cf, targets
+        )
     diagnostics = TabICLGeneratorDiagnostics(
         tau=config.tau,
         temperature=config.temperature,
@@ -496,6 +585,7 @@ def generate_counterfactual_batch(
         n_counterfactuals=config.n_counterfactuals,
         diversity_config=config.diversity_config,
         categorical_proposal_count=config.categorical_proposal_count,
+        strict_proposal_budget=config.strict_proposal_budget,
         categorical_confidence_batching=_metadata_bool(
             metadata, "categorical_confidence_batching"
         ),

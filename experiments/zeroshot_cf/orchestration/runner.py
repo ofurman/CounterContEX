@@ -318,6 +318,7 @@ class GenericRunner:
                 targets=case.targets,
                 n_counterfactuals=spec.method.n_counterfactuals,
                 seed=spec.seed,
+                factual_source_indices=case.factuals.indices,
             )
         )
         generated.validate_for_factuals(case.factuals.values)
