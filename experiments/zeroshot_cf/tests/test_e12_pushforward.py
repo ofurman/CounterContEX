@@ -26,10 +26,17 @@ from experiments.zeroshot_cf.diagnostics.proposal_pushforward import (
     trace_fixed_state_pushforward,
     write_diagnostic_bundle,
 )
-from experiments.zeroshot_cf.evaluation import METRIC_SCHEMA_VERSION
+from experiments.zeroshot_cf.evaluation import METRIC_SCHEMA_VERSION, EvaluationSpec
 from experiments.zeroshot_cf.methods.countercontex.backends.base import (
     CategoryProposals,
     NumericalDistribution,
+)
+from experiments.zeroshot_cf.orchestration.spec import (
+    DatasetSpec,
+    MethodSpec,
+    ProtocolSpec,
+    RunSpec,
+    TargetModelSpec,
 )
 
 
@@ -417,10 +424,11 @@ def test_real_matrix_driver_runs_and_resumes_without_repeating_backend_work(
         factuals=SimpleNamespace(values=np.array([[0.2]]), indices=np.array([4])),
         targets=np.array([1]),
     )
-    spec = SimpleNamespace(
-        method=SimpleNamespace(name="countercontex", variant="default"),
-        dataset=SimpleNamespace(name="synthetic"),
-        protocol=SimpleNamespace(
+    spec = RunSpec(
+        dataset=DatasetSpec("synthetic"),
+        protocol=ProtocolSpec(
+            max_test=1,
+            test_selection="first",
             factual_partition="validation",
             params={
                 "proposal_pushforward": {
@@ -433,10 +441,10 @@ def test_real_matrix_driver_runs_and_resumes_without_repeating_backend_work(
                 }
             },
         ),
-        evaluation=SimpleNamespace(probability_threshold=0.7),
+        target_model=TargetModelSpec(),
+        method=MethodSpec("countercontex"),
+        evaluation=EvaluationSpec(probability_threshold=0.7),
         seed=17,
-        cell_id="cell-v1",
-        scientific_payload=lambda: {"cell": "synthetic"},
     )
     runtime = SimpleNamespace(
         params={"foundation": {"backend": "tabicl"}},

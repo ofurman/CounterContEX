@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
@@ -538,7 +539,15 @@ def run_matrix_cell(
     mc_bank_count = configured_bank_count
     mc_bank_size = configured_bank_size
     runner = GenericRunner(matrix.execution)
-    case = runner._case(spec)
+    case_protocol = replace(
+        spec.protocol,
+        params={
+            key: value
+            for key, value in spec.protocol.params.items()
+            if key != "proposal_pushforward"
+        },
+    )
+    case = runner._case(replace(spec, protocol=case_protocol))
     runtime = runner._method_runtime(spec)
     versions = runner._versions(spec, case)
     context = method_context(case)
