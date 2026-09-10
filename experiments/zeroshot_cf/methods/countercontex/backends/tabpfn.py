@@ -12,6 +12,7 @@ from experiments.zeroshot_cf.action_space import OneHotActionGroup
 from experiments.zeroshot_cf.core.contracts import MethodContext
 from experiments.zeroshot_cf.methods.countercontex.backends.base import (
     CategoryProposals,
+    NumericalDistribution,
     ProposalCapabilities,
 )
 
@@ -153,6 +154,17 @@ class TabPFNProposalSession:
             temperature=temperature,
         )
         return values[:, None, :] if quantiles is not None else values
+
+    def numerical_distribution_batch(
+        self,
+        rows: np.ndarray,
+        columns: Sequence[int],
+        *,
+        quantiles: Sequence[float],
+        confidences: float | Sequence[float] | np.ndarray | None,
+    ) -> NumericalDistribution:
+        del rows, columns, quantiles, confidences
+        raise ValueError("TabPFN backend does not support numerical distributions")
 
     def _multiclass_probabilities(
         self, row: np.ndarray, group: OneHotActionGroup, targets: np.ndarray

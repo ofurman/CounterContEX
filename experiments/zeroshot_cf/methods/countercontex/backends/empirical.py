@@ -10,6 +10,7 @@ from experiments.zeroshot_cf.action_space import OneHotActionGroup
 from experiments.zeroshot_cf.core.contracts import MethodContext
 from experiments.zeroshot_cf.methods.countercontex.backends.base import (
     CategoryProposals,
+    NumericalDistribution,
     ProposalCapabilities,
 )
 
@@ -115,6 +116,17 @@ class EmpiricalProposalSession:
         # Unit smoothing retains complete category support deterministically.
         probabilities = (counts + 1.0) / (counts.sum() + len(categories))
         return CategoryProposals(categories, probabilities)
+
+    def numerical_distribution_batch(
+        self,
+        rows: np.ndarray,
+        columns: Sequence[int],
+        *,
+        quantiles: Sequence[float],
+        confidences: float | Sequence[float] | np.ndarray | None,
+    ) -> NumericalDistribution:
+        del rows, columns, quantiles, confidences
+        raise ValueError("empirical backend does not support numerical distributions")
 
     def score_joint(self, rows: np.ndarray, target: int) -> np.ndarray:
         del rows, target

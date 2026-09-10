@@ -2,6 +2,7 @@
 
 from experiments.zeroshot_cf.methods.countercontex.backends.base import (
     CategoryProposals,
+    NumericalDistribution,
     PreparedBackend,
     ProposalBackend,
     ProposalCapabilities,
@@ -15,6 +16,7 @@ from experiments.zeroshot_cf.methods.countercontex.backends.empirical import (
 __all__ = [
     "CategoryProposals",
     "EmpiricalBackend",
+    "NumericalDistribution",
     "PreparedBackend",
     "ProposalBackend",
     "ProposalCapabilities",

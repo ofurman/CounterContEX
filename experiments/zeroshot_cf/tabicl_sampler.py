@@ -17,9 +17,10 @@ low-cardinality scaled columns to class labels would destroy their support.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar, Literal, overload
-from typing_extensions import override
+from threading import RLock
+from typing import Any, ClassVar, Literal, overload, override
 
 import numpy as np
 import torch
@@ -31,6 +32,43 @@ from tabicl._sklearn.preprocessing import Shuffler
 from tabicl._unsupervised.unsupervised import TabICLUnsupervised
 
 ModelFactory = Callable[..., Any]
+_NUMERICAL_DISTRIBUTION_LOCK = RLock()
+
+
+@dataclass
+class _NumericalDistributionRequest:
+    """Process-local bridge used only while one mutable model call is active."""
+
+    row_indices: tuple[np.ndarray, ...]
+    alphas: tuple[np.ndarray, ...]
+    log_probabilities: np.ndarray
+    cursor: int = 0
+    _active_rows: np.ndarray | None = field(default=None, init=False, repr=False)
+
+    def next_alphas(self, batch_rows: int) -> np.ndarray:
+        if self._active_rows is not None or self.cursor >= len(self.alphas):
+            raise RuntimeError("unexpected numerical distribution callback")
+        rows = self.row_indices[self.cursor]
+        levels = self.alphas[self.cursor]
+        if len(rows) != batch_rows or len(levels) != batch_rows:
+            raise RuntimeError("numerical distribution callback batch drifted")
+        self._active_rows = rows
+        return levels
+
+    def record(self, log_probabilities: np.ndarray) -> None:
+        values = np.asarray(log_probabilities, dtype=np.float64)
+        if self._active_rows is None or values.shape != self._active_rows.shape:
+            raise RuntimeError("numerical log-probability callback shape drifted")
+        self.log_probabilities[self._active_rows] = values
+        self._active_rows = None
+        self.cursor += 1
+
+    def finish(self) -> np.ndarray:
+        if self._active_rows is not None or self.cursor != len(self.alphas):
+            raise RuntimeError("not all numerical distributions were evaluated")
+        if np.any(np.isnan(self.log_probabilities)):
+            raise RuntimeError("numerical log probabilities contain unfilled rows")
+        return self.log_probabilities
 
 
 def quantile_mode(dist: Any) -> np.ndarray:
@@ -196,7 +234,9 @@ def _local_tabicl_model_factory(
     """
 
     class _LocalCheckpointTabICLUnsupervised(TabICLUnsupervised):
-        _numerical_quantile_grid: ClassVar[np.ndarray | None] = None
+        _numerical_distribution_request: ClassVar[
+            _NumericalDistributionRequest | None
+        ] = None
         _conditional_estimator_cache: (
             dict[
                 tuple[int, tuple[int, ...], bytes, bytes],
@@ -231,24 +271,19 @@ def _local_tabicl_model_factory(
             temperature: float,
             rng: np.random.Generator,
         ) -> np.ndarray:
-            quantile_grid = _LocalCheckpointTabICLUnsupervised._numerical_quantile_grid
-            if quantile_grid is not None:
+            request = _LocalCheckpointTabICLUnsupervised._numerical_distribution_request
+            if request is not None:
                 batch_rows = dist.quantiles.shape[0]
-                if batch_rows % len(quantile_grid) != 0:
-                    raise ValueError(
-                        "the numerical distribution batch must contain a "
-                        "whole number of quantile grids"
-                    )
-                quantile_grid = np.tile(
-                    quantile_grid,
-                    batch_rows // len(quantile_grid),
-                )
+                quantile_grid = request.next_alphas(batch_rows)
                 alphas = torch.as_tensor(
                     quantile_grid,
                     device=dist.quantiles.device,
                     dtype=dist.quantiles.dtype,
                 ).unsqueeze(-1)
-                return dist.icdf(alphas).squeeze(-1).cpu().numpy()
+                values = dist.icdf(alphas).squeeze(-1)
+                log_probabilities = dist.log_prob(values.unsqueeze(-1)).squeeze(-1)
+                request.record(log_probabilities.detach().cpu().numpy())
+                return values.detach().cpu().numpy()
             if numerical_point_estimate == "mode" and temperature <= 1e-8:
                 return quantile_mode(dist)
             return TabICLUnsupervised._sample_numerical(dist, temperature, rng)
@@ -430,7 +465,7 @@ class TabICLConditionalDensitySampler:
         max_context: int | None = None,
         selection: str = "random",
         query: np.ndarray | None = None,
-    ) -> "TabICLConditionalDensitySampler":
+    ) -> TabICLConditionalDensitySampler:
         """Select context rows, append Y, and prepare TabICL for imputation."""
         X, y, selected_indices = _select_context(
             X_context,
@@ -788,6 +823,33 @@ class TabICLConditionalDensitySampler:
         with its own query row. This is the fast path used to expand an entire
         counterfactual beam level at once.
         """
+        alphas = np.asarray(quantiles, dtype=np.float64)
+        if alphas.ndim != 1 or len(alphas) == 0 or np.any(np.diff(alphas) <= 0):
+            raise ValueError("quantiles must be strictly increasing and unique")
+        values, _ = self.numerical_distribution_batch(
+            X_queries,
+            candidate_cols,
+            quantiles=alphas,
+            fixed_target=fixed_target,
+            confidences=confidences,
+        )
+        return values
+
+    def numerical_distribution_batch(  # noqa: C901, PLR0912
+        self,
+        X_queries: np.ndarray,
+        candidate_cols: Sequence[int],
+        *,
+        quantiles: Sequence[float],
+        fixed_target: int,
+        confidences: Sequence[float] | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Evaluate conditional ICDF values and log density in one model call.
+
+        The fitted sampler is mutable, so distribution evaluations are guarded
+        and factual sessions must remain serial. The returned NumPy arrays both
+        have shape ``(query/feature pairs, confidences, quantiles)``.
+        """
         candidates = np.asarray(candidate_cols, dtype=int)
         queries = np.asarray(X_queries)
         alphas = np.asarray(quantiles, dtype=np.float64)
@@ -799,9 +861,6 @@ class TabICLConditionalDensitySampler:
             raise ValueError("quantiles must be a non-empty 1D sequence")
         if not np.all(np.isfinite(alphas)) or np.any((alphas <= 0) | (alphas >= 1)):
             raise ValueError("quantiles must be finite values strictly between 0 and 1")
-        if np.any(np.diff(alphas) <= 0):
-            raise ValueError("quantiles must be strictly increasing and unique")
-
         confidence_values = None
         n_confidences = 1
         if confidences is not None:
@@ -840,33 +899,49 @@ class TabICLConditionalDensitySampler:
         model = self._require_model()
         model_type = type(model)
         sentinel = object()
-        previous = getattr(model_type, "_numerical_quantile_grid", sentinel)
-        model_type._numerical_quantile_grid = np.tile(
-            alphas,
-            n_confidences,
-        ).astype(np.float32)
-        try:
-            filled = np.asarray(
-                model.impute(
-                    X_aug,
-                    temperature=float(self.temperature),
-                    n_iterations=1,
+        expanded_alphas = np.tile(alphas, len(candidates) * n_confidences)
+        columns_with_nan = sorted(
+            (
+                column
+                for column in range(X_aug.shape[1])
+                if np.any(np.isnan(X_aug[:, column]))
+            ),
+            key=lambda column: np.isnan(X_aug[:, column]).mean(),
+        )
+        row_indices = tuple(
+            np.flatnonzero(np.isnan(X_aug[:, column])) for column in columns_with_nan
+        )
+        request = _NumericalDistributionRequest(
+            row_indices=row_indices,
+            alphas=tuple(expanded_alphas[rows] for rows in row_indices),
+            log_probabilities=np.full(len(X_aug), np.nan, dtype=np.float64),
+        )
+        with _NUMERICAL_DISTRIBUTION_LOCK:
+            previous = getattr(model_type, "_numerical_distribution_request", sentinel)
+            model_type._numerical_distribution_request = request
+            try:
+                filled = np.asarray(
+                    model.impute(
+                        X_aug,
+                        temperature=float(self.temperature),
+                        n_iterations=1,
+                    )
                 )
-            )
-        finally:
-            if previous is sentinel:
-                delattr(model_type, "_numerical_quantile_grid")
-            else:
-                model_type._numerical_quantile_grid = previous
+                log_probabilities = request.finish()
+            finally:
+                if previous is sentinel:
+                    delattr(model_type, "_numerical_distribution_request")
+                else:
+                    model_type._numerical_distribution_request = previous
 
         values = filled[
             np.arange(len(expanded_candidates)),
             expanded_candidates,
         ]
-        return values.astype(np.float64).reshape(
-            len(candidates),
-            n_confidences,
-            len(alphas),
+        result_shape = (len(candidates), n_confidences, len(alphas))
+        return (
+            values.astype(np.float64).reshape(result_shape),
+            log_probabilities.reshape(result_shape),
         )
 
     def sample_feature(

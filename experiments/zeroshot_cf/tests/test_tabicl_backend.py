@@ -10,14 +10,21 @@ from __future__ import annotations
 
 import numpy as np
 import torch
+from experiments.zeroshot_cf.action_space import OneHotActionGroup
 from experiments.zeroshot_cf.data import get_actionable_immutable
 from experiments.zeroshot_cf.generator import (
     empirical_confidence_grid,
     select_test_rows,
 )
+from experiments.zeroshot_cf.grouped_categorical import (
+    CompactMixedSampler,
+    GroupedCategoricalCodec,
+)
 from experiments.zeroshot_cf.tabicl_sampler import (
     TabICLConditionalDensitySampler,
     _knn_indices,
+    _local_tabicl_model_factory,
+    _NumericalDistributionRequest,
     quantile_mode,
 )
 from tabicl._model.quantile_dist import QuantileDistribution
@@ -74,18 +81,19 @@ class _FakeTabICLUnsupervised:
             else np.zeros(len(out), dtype=np.float32)
         )
         missing_rows, missing_cols = np.where(np.isnan(out))
-        quantile_grid = getattr(self, "_numerical_quantile_grid", None)
-        for col in np.unique(missing_cols):
+        distribution_request = getattr(self, "_numerical_distribution_request", None)
+        columns_with_nan = sorted(
+            np.unique(missing_cols),
+            key=lambda col: np.isnan(out[:, col]).mean(),
+        )
+        for col in columns_with_nan:
             rows = missing_rows[missing_cols == col]
             # Deterministic and class-conditional. Candidate j gets
             # 0.1*(j+1) under class 0 and an additional 0.5 under class 1.
-            values = (
-                0.1 * (col + 1)
-                + 0.5 * target[rows]
-                + 0.2 * confidence[rows]
-            )
-            if quantile_grid is not None:
-                values = values + np.resize(np.asarray(quantile_grid), len(rows))
+            values = 0.1 * (col + 1) + 0.5 * target[rows] + 0.2 * confidence[rows]
+            if distribution_request is not None:
+                values = values + distribution_request.next_alphas(len(rows))
+                distribution_request.record(np.zeros(len(rows), dtype=np.float64))
             out[rows, col] = values
         return out
 
@@ -340,6 +348,116 @@ def test_quantile_grid_batches_multiple_query_feature_pairs():
     assert sampler.model.impute_calls == before + 1
 
 
+def test_numerical_distribution_returns_icdf_and_log_probability_in_one_call():
+    X, y = _context()
+    sampler = _sampler().set_context(
+        X, y_context=y, max_context=8, selection="knn", query=X[10]
+    )
+    before = sampler.model.impute_calls
+
+    values, log_probabilities = sampler.numerical_distribution_batch(
+        X[[0, 1, 2]],
+        [0, 0, 2],
+        quantiles=[0.2, 0.8],
+        fixed_target=1,
+    )
+
+    assert values.shape == (3, 1, 2)
+    np.testing.assert_allclose(
+        values[:, 0],
+        [[0.8, 1.4], [0.8, 1.4], [1.0, 1.6]],
+        atol=1e-6,
+    )
+    np.testing.assert_array_equal(log_probabilities, np.zeros((3, 1, 2)))
+    assert sampler.model.impute_calls == before + 1
+    assert not hasattr(type(sampler.model), "_numerical_distribution_request")
+
+
+def test_numerical_distribution_preserves_iid_uniform_order_and_repetition():
+    X, y = _context()
+    sampler = _sampler().set_context(X, y_context=y)
+
+    values, _ = sampler.numerical_distribution_batch(
+        X[[0]],
+        [0],
+        quantiles=[0.8, 0.2, 0.8],
+        fixed_target=1,
+    )
+
+    np.testing.assert_allclose(values[0, 0], [1.4, 0.8, 1.4], atol=1e-6)
+
+
+def test_real_distribution_callback_evaluates_matching_log_density(tmp_path):
+    model = _local_tabicl_model_factory(
+        classifier_path=tmp_path / "classifier.ckpt",
+        regressor_path=tmp_path / "regressor.ckpt",
+        numerical_point_estimate="median",
+        n_estimators=1,
+        categorical_features=[],
+        batch_size=2,
+        random_state=7,
+        device="cpu",
+        estimator_params={},
+    )
+    model_type = type(model)
+    request = _NumericalDistributionRequest(
+        row_indices=(np.array([0, 1]),),
+        alphas=(np.array([0.2, 0.8]),),
+        log_probabilities=np.full(2, np.nan),
+    )
+    distribution = QuantileDistribution(
+        torch.tensor(
+            [
+                [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 2.9, 5.2],
+                [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 2.9, 5.2],
+            ]
+        )
+    )
+    model_type._numerical_distribution_request = request
+    try:
+        values = model_type._sample_numerical(
+            distribution, 1.0, np.random.default_rng(99)
+        )
+    finally:
+        delattr(model_type, "_numerical_distribution_request")
+
+    np.testing.assert_allclose(values, [0.1, 2.9], atol=1e-6)
+    np.testing.assert_allclose(request.finish(), [0.0, -np.log(23.0)], atol=1e-5)
+
+
+def test_mixed_distribution_codec_matches_historical_grid_column_mapping():
+    group = OneHotActionGroup("segment", (1, 2))
+    rows = np.array([[0.1, 1.0, 0.0, 0.7], [0.2, 0.0, 1.0, 0.8]])
+    codec = GroupedCategoricalCodec.from_matrix(rows, [group])
+
+    class RecordingSampler:
+        def __init__(self):
+            self.calls = []
+
+        def sample_candidate_grid_batch(self, encoded, columns, **kwargs):
+            self.calls.append(("grid", np.asarray(encoded).copy(), tuple(columns)))
+            return np.array([[[0.25, 0.75]], [[1.25, 1.75]]])
+
+        def numerical_distribution_batch(self, encoded, columns, **kwargs):
+            self.calls.append(("full", np.asarray(encoded).copy(), tuple(columns)))
+            values = np.array([[[0.25, 0.75]], [[1.25, 1.75]]])
+            return values, np.zeros_like(values)
+
+    native = RecordingSampler()
+    compact = CompactMixedSampler(native, codec)
+    grid = compact.sample_candidate_grid_batch(
+        rows, [0, 3], quantiles=[0.25, 0.75], fixed_target=1
+    )
+    values, log_probabilities = compact.numerical_distribution_batch(
+        rows, [0, 3], quantiles=[0.25, 0.75], fixed_target=1
+    )
+
+    np.testing.assert_array_equal(values, grid)
+    np.testing.assert_array_equal(log_probabilities, np.zeros_like(values))
+    assert native.calls[0][2] == native.calls[1][2] == (0, 1)
+    np.testing.assert_array_equal(native.calls[0][1], native.calls[1][1])
+
+
 def test_confidence_conditioning_uses_empirical_grid_in_one_call():
     X, y = _context()
     confidence = np.linspace(0.1, 0.9, len(X))
@@ -412,6 +530,4 @@ def test_quantile_grid_rejects_invalid_probability_levels():
     sampler = _sampler().set_context(X, y_context=y)
 
     with np.testing.assert_raises_regex(ValueError, "strictly between"):
-        sampler.sample_candidate_grid(
-            X[[0]], [0], quantiles=[0.0, 0.5], fixed_target=1
-        )
+        sampler.sample_candidate_grid(X[[0]], [0], quantiles=[0.0, 0.5], fixed_target=1)

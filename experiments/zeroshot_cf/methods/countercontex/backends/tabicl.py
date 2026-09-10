@@ -20,6 +20,7 @@ from experiments.zeroshot_cf.grouped_categorical import (
 )
 from experiments.zeroshot_cf.methods.countercontex.backends.base import (
     CategoryProposals,
+    NumericalDistribution,
     ProposalCapabilities,
 )
 from experiments.zeroshot_cf.methods.countercontex.config import CounterContExConfig
@@ -210,6 +211,33 @@ class TabICLProposalSession:
         )
         return CategoryProposals(categories, probabilities)
 
+    def numerical_distribution_batch(
+        self,
+        rows: np.ndarray,
+        columns: Sequence[int],
+        *,
+        quantiles: Sequence[float],
+        confidences: float | Sequence[float] | np.ndarray | None,
+    ) -> NumericalDistribution:
+        confidence_values = None
+        if confidences is not None:
+            values = np.asarray(confidences, dtype=np.float64)
+            confidence_values = (
+                np.asarray([float(values)]) if values.ndim == 0 else values
+            )
+        proposed, log_probabilities = self.state.sampler.numerical_distribution_batch(
+            rows,
+            columns,
+            quantiles=quantiles,
+            fixed_target=self.target,
+            confidences=confidence_values,
+        )
+        return NumericalDistribution(
+            quantiles=np.asarray(quantiles, dtype=np.float64),
+            values=proposed,
+            log_probabilities=log_probabilities,
+        )
+
     def score_joint(self, rows: np.ndarray, target: int) -> np.ndarray:
         if self.state.joint_scorer is None:
             raise ValueError("TabICL joint scoring was not prepared")
@@ -235,6 +263,7 @@ class PreparedTabICLBackend:
     backend_id: str = "tabicl"
     capabilities: ProposalCapabilities = ProposalCapabilities(
         numerical_proposals=True,
+        numerical_distribution=True,
         confidence_conditioning=True,
         categorical_distribution=True,
         joint_scoring=True,
@@ -385,6 +414,7 @@ class TabICLBackend:
     backend_id: str = "tabicl"
     capabilities: ProposalCapabilities = ProposalCapabilities(
         numerical_proposals=True,
+        numerical_distribution=True,
         confidence_conditioning=True,
         categorical_distribution=True,
         joint_scoring=True,

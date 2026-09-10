@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+import hashlib
+import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,15 +25,19 @@ from experiments.zeroshot_cf.generator import (
 )
 from experiments.zeroshot_cf.methods.countercontex.backends.base import (
     CategoryProposals,
+    NumericalDistribution,
     PreparedBackend,
     ProposalBackend,
     ProposalCapabilities,
     ProposalSession,
+    validate_backend_capabilities,
 )
 from experiments.zeroshot_cf.methods.countercontex.backends.empirical import (
     EmpiricalBackend,
 )
 from experiments.zeroshot_cf.methods.countercontex.backends.tabicl import (
+    PreparedTabICLBackend,
+    TabICLBackend,
     TabICLProposalSession,
 )
 from experiments.zeroshot_cf.methods.countercontex.backends.tabpfn import (
@@ -117,6 +123,16 @@ class _FakeSession:
         del row, confidence
         probability = np.full(len(group.columns), 1.0 / len(group.columns))
         return CategoryProposals(np.arange(len(group.columns)), probability)
+
+    def numerical_distribution_batch(self, rows, columns, *, quantiles, confidences):
+        del rows
+        n_confidences = 1 if confidences is None else np.asarray(confidences).size
+        shape = (len(columns), n_confidences, len(quantiles))
+        return NumericalDistribution(
+            np.asarray(quantiles),
+            np.full(shape, 0.9),
+            np.zeros(shape),
+        )
 
     def score_joint(self, rows, target):
         del target
@@ -205,6 +221,7 @@ def _fake_config(*, search=None, confidence_quantiles=None) -> CounterContExConf
 def test_fake_backend_conforms_to_explicit_protocols() -> None:
     backend = _FakeBackend(
         ProposalCapabilities(
+            numerical_distribution=True,
             confidence_conditioning=True,
             categorical_distribution=True,
             joint_scoring=True,
@@ -227,6 +244,13 @@ def test_fake_backend_conforms_to_explicit_protocols() -> None:
         [[0.9, 0.9]],
     )
     np.testing.assert_array_equal(session.score_joint(np.array([[0.2]]), 1), [0.2])
+    distribution = session.numerical_distribution_batch(
+        np.array([[0.1]]),
+        [0],
+        quantiles=(0.25, 0.75),
+        confidences=None,
+    )
+    np.testing.assert_array_equal(distribution.values, [[[0.9, 0.9]]])
 
 
 def test_tabicl_beam_grid_uses_one_native_batch_call() -> None:
@@ -257,6 +281,180 @@ def test_tabicl_beam_grid_uses_one_native_batch_call() -> None:
 
     assert values.shape == (2, 2, 3)
     assert len(calls) == 1
+
+
+def test_tabicl_full_distribution_is_numpy_only_and_uses_one_native_call() -> None:
+    calls = []
+
+    class NativeSampler:
+        def numerical_distribution_batch(self, rows, columns, **kwargs):
+            calls.append((np.asarray(rows).copy(), tuple(columns), kwargs))
+            shape = (len(columns), 1, len(kwargs["quantiles"]))
+            return np.full(shape, 0.75), np.full(shape, -0.5)
+
+    session = TabICLProposalSession(
+        SimpleNamespace(
+            sampler=NativeSampler(),
+            candidate_confidences=None,
+            metadata={},
+        ),
+        target=1,
+    )
+
+    result = session.numerical_distribution_batch(
+        np.array([[0.1, 0.2], [0.3, 0.4]]),
+        [0, 1],
+        quantiles=(0.25, 0.75),
+        confidences=None,
+    )
+
+    assert isinstance(result.values, np.ndarray)
+    assert isinstance(result.log_probabilities, np.ndarray)
+    assert result.values.shape == (2, 1, 2)
+    assert len(calls) == 1
+
+
+def test_authenticated_nine_quantile_offline_proposal_replay() -> None:
+    diagnostic_root = (
+        Path(__file__).parents[1]
+        / "results"
+        / "diagnostics"
+        / "tabicl-empirical-20260908"
+        / "heloc-v2"
+    )
+    trace_path = diagnostic_root / "00_tabicl_trace.json"
+    complete_path = diagnostic_root / "COMPLETE.json"
+    metadata_path = diagnostic_root / "metadata.json"
+    if not all(path.exists() for path in (trace_path, complete_path, metadata_path)):
+        pytest.skip("authenticated E3 diagnostic bundle is not staged")
+
+    expected_sha256 = "a3b14d0fc9de1417e7fc574eaef6dd3cd86b80de1037ddc277ab33e8256b5995"
+    assert hashlib.sha256(trace_path.read_bytes()).hexdigest() == expected_sha256
+    complete = json.loads(complete_path.read_text(encoding="utf-8"))
+    assert complete["files"][trace_path.name] == expected_sha256
+    trace = json.loads(trace_path.read_text(encoding="utf-8"))
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+    numerical_events = [
+        event for event in trace["search"] if event["stage"] == "numerical_trials"
+    ]
+    classifier_events = [
+        event for event in trace["search"] if event["stage"] == "classifier"
+    ]
+
+    class ReplaySampler:
+        def __init__(self):
+            self.call_index = 0
+
+        def sample_candidate_grid_batch(self, rows, columns, **kwargs):
+            proposal = trace["proposals"][self.call_index]
+            np.testing.assert_array_equal(rows, proposal["rows"])
+            np.testing.assert_array_equal(columns, proposal["columns"])
+            np.testing.assert_array_equal(kwargs["quantiles"], proposal["quantiles"])
+            assert kwargs["fixed_target"] == 1
+            assert kwargs["confidences"] is None
+            self.call_index += 1
+            return np.asarray(proposal["values"], dtype=np.float64)
+
+    class ReplayOracle:
+        classes_ = np.array([0, 1])
+
+        def __init__(self):
+            self.call_index = 0
+            self.probabilities_by_row = {
+                np.asarray(row, dtype=np.float64).tobytes(): float(probability)
+                for event in classifier_events
+                for row, probability in zip(
+                    event["rows"], event["probabilities"], strict=True
+                )
+            }
+
+        def predict_proba(self, rows):
+            rows = np.atleast_2d(np.asarray(rows, dtype=np.float64))
+            if self.call_index == len(classifier_events):
+                probabilities = np.asarray(
+                    [self.probabilities_by_row[row.tobytes()] for row in rows]
+                )
+                return np.column_stack((1.0 - probabilities, probabilities))
+            event = classifier_events[self.call_index]
+            np.testing.assert_array_equal(rows, event["rows"])
+            probabilities = np.asarray(event["probabilities"], dtype=np.float64)
+            self.call_index += 1
+            return np.column_stack((1.0 - probabilities, probabilities))
+
+        def predict(self, rows):
+            return self.classes_[np.argmax(self.predict_proba(rows), axis=1)]
+
+    factual = np.asarray(classifier_events[0]["rows"], dtype=np.float64)
+    numerical_columns = tuple(int(column) for column in metadata["numerical_columns"])
+    n_features = factual.shape[1]
+    discrete = {}
+    for column in metadata["discrete_columns"]:
+        supports = {float(factual[0, column])}
+        for proposal, event in zip(trace["proposals"], numerical_events, strict=True):
+            proposal_columns = np.asarray(proposal["columns"], dtype=int)
+            trial_rows = np.asarray(event["rows"], dtype=np.float64).reshape(
+                len(proposal_columns), len(proposal["quantiles"]), n_features
+            )
+            matches = np.flatnonzero(proposal_columns == column)
+            for match in matches:
+                supports.update(trial_rows[match, :, column].tolist())
+        discrete[int(column)] = tuple(sorted(supports))
+    domains = FeatureDomains(
+        lower=np.zeros(n_features),
+        upper=np.ones(n_features),
+        discrete=discrete,
+    )
+    sampler = ReplaySampler()
+    oracle = ReplayOracle()
+    config = CounterContExConfig(
+        search=CounterContExSearchConfig(
+            candidate_quantiles=tuple(trace["proposals"][0]["quantiles"]),
+            max_validity_steps=100,
+        ),
+        foundation=CounterContExFoundationConfig(
+            backend="tabicl", n_estimators=1, temperature=1e-9
+        ),
+    )
+    result = generate_counterfactual_batch(
+        TabICLGeneratorInputs(
+            factuals=factual,
+            targets=np.array([1]),
+            numerical_columns=numerical_columns,
+            categorical_groups=(),
+            feature_domains=(domains.lower, domains.upper, dict(domains.discrete)),
+        ),
+        discriminator=oracle,
+        config=config.generator_config(3, seed=42),
+        point_backend_factory=lambda _factual, _target: TabICLGeneratorPointBackend(
+            sampler=sampler
+        ),
+    )
+
+    assert sampler.call_index == len(trace["proposals"])
+    assert oracle.call_index == len(classifier_events)
+    np.testing.assert_array_equal(result.counterfactual_sets, trace["candidates"])
+    expected_available = np.asarray(trace["available"], dtype=bool)
+    actual_available = np.all(np.isfinite(result.counterfactual_sets), axis=2)
+    np.testing.assert_array_equal(actual_available, expected_available)
+    assert np.all(np.isnan(result.counterfactual_sets[~expected_available]))
+
+
+def test_tabicl_backend_declares_full_distribution_capability() -> None:
+    assert TabICLBackend(CounterContExConfig()).capabilities.numerical_distribution
+    default = PreparedTabICLBackend.__dataclass_fields__["capabilities"].default
+    assert default.numerical_distribution
+
+
+def test_full_distribution_requires_declared_capability() -> None:
+    with pytest.raises(ValueError, match="numerical distributions"):
+        validate_backend_capabilities(
+            ProposalCapabilities(),
+            needs_confidence=False,
+            needs_categorical=False,
+            needs_joint=False,
+            needs_numerical_distribution=True,
+        )
 
 
 def test_empirical_backend_is_deterministic_and_conforms() -> None:
@@ -294,7 +492,9 @@ def test_empirical_backend_is_deterministic_and_conforms() -> None:
 
 def test_empirical_backend_runs_complete_countercontex_sparse_search() -> None:
     method = CounterContExMethod(
-        CounterContExConfig(foundation=CounterContExFoundationConfig(backend="empirical"))
+        CounterContExConfig(
+            foundation=CounterContExFoundationConfig(backend="empirical")
+        )
     )
     prepared = method.prepare(_context())
 
@@ -343,9 +543,7 @@ def test_tabpfn_backend_proposes_target_conditioned_quantiles_and_categories() -
         classifier_factory=FakeClassifier,
         regressor_factory=FakeRegressor,
     ).prepare(_categorical_context())
-    session = backend.for_factual(
-        np.array([0.2, 1.0, 0.0]), target=1, seed=17
-    )
+    session = backend.for_factual(np.array([0.2, 1.0, 0.0]), target=1, seed=17)
 
     numerical = session.propose_numerical(
         np.array([[0.2, 1.0, 0.0]]),
@@ -570,6 +768,29 @@ def test_search_contract_has_no_dynamic_capability_probes() -> None:
         ]
         assert calls == []
         assert any_names == []
+
+
+def test_distribution_contract_stays_portable_and_runner_backend_neutral() -> None:
+    root = Path(__file__).resolve().parents[1]
+    base_tree = ast.parse(
+        (root / "methods/countercontex/backends/base.py").read_text()
+    )
+    imported_roots = {
+        alias.name.split(".", 1)[0]
+        for node in ast.walk(base_tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+    imported_roots.update(
+        node.module.split(".", 1)[0]
+        for node in ast.walk(base_tree)
+        if isinstance(node, ast.ImportFrom) and node.module and not node.level
+    )
+    assert imported_roots.isdisjoint({"torch", "tabicl", "tabpfn"})
+
+    runner = (root / "orchestration/runner.py").read_text()
+    assert "countercontex.backends" not in runner
+    assert "TabICL" not in runner
 
 
 def test_portable_layers_do_not_import_foundation_or_concrete_methods() -> None:

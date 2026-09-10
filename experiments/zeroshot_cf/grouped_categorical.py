@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Any, Callable, Sequence
+from typing import Any
 
 import numpy as np
 from experiments.zeroshot_cf.action_space import OneHotActionGroup
@@ -28,7 +29,7 @@ class GroupedCategoricalCodec:
         cls,
         X: np.ndarray,
         groups: Sequence[OneHotActionGroup],
-    ) -> "GroupedCategoricalCodec":
+    ) -> GroupedCategoricalCodec:
         matrix = np.asarray(X)
         if matrix.ndim != 2:
             raise ValueError(f"X must be 2D, got shape {matrix.shape}")
@@ -146,6 +147,19 @@ class CompactMixedSampler:
     ) -> np.ndarray:
         """Evaluate original-space query/feature quantile grids in one batch."""
         return self.sampler.sample_candidate_grid_batch(
+            self.codec.encode(X_queries),
+            self._encoded_candidates(candidate_cols),
+            **kwargs,
+        )
+
+    def numerical_distribution_batch(
+        self,
+        X_queries: np.ndarray,
+        candidate_cols: Sequence[int],
+        **kwargs: Any,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Evaluate compact-space ICDF values and log densities."""
+        return self.sampler.numerical_distribution_batch(
             self.codec.encode(X_queries),
             self._encoded_candidates(candidate_cols),
             **kwargs,

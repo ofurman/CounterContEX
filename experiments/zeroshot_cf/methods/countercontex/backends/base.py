@@ -16,6 +16,7 @@ class ProposalCapabilities:
     """Proposal semantics a backend explicitly guarantees."""
 
     numerical_proposals: bool = True
+    numerical_distribution: bool = False
     confidence_conditioning: bool = False
     categorical_distribution: bool = False
     joint_scoring: bool = False
@@ -49,6 +50,49 @@ class CategoryProposals:
         object.__setattr__(self, "probabilities", probabilities)
 
 
+@dataclass(frozen=True)
+class NumericalDistribution:
+    """NumPy-only conditional ICDF values and their log densities."""
+
+    quantiles: np.ndarray
+    values: np.ndarray
+    log_probabilities: np.ndarray
+
+    def __post_init__(self) -> None:
+        quantiles = np.array(self.quantiles, dtype=np.float64, copy=True)
+        values = np.array(self.values, dtype=np.float64, copy=True)
+        log_probabilities = np.array(
+            self.log_probabilities, dtype=np.float64, copy=True
+        )
+        if quantiles.ndim != 1 or len(quantiles) == 0:
+            raise ValueError(
+                "distribution quantiles must be non-empty and one-dimensional"
+            )
+        if not np.all(np.isfinite(quantiles)) or np.any(
+            (quantiles <= 0.0) | (quantiles >= 1.0)
+        ):
+            raise ValueError("distribution quantiles must lie strictly inside (0, 1)")
+        if values.ndim != 3 or values.shape != log_probabilities.shape:
+            raise ValueError(
+                "distribution values and log probabilities must share a 3D shape"
+            )
+        if values.shape[-1] != len(quantiles):
+            raise ValueError("distribution value width must match quantile count")
+        if not np.all(np.isfinite(values)):
+            raise ValueError("distribution values must be finite")
+        if np.any(np.isnan(log_probabilities)) or np.any(
+            np.isposinf(log_probabilities)
+        ):
+            raise ValueError(
+                "log probabilities must not contain NaN or positive infinity"
+            )
+        for array in (quantiles, values, log_probabilities):
+            array.setflags(write=False)
+        object.__setattr__(self, "quantiles", quantiles)
+        object.__setattr__(self, "values", values)
+        object.__setattr__(self, "log_probabilities", log_probabilities)
+
+
 @runtime_checkable
 class ProposalSession(Protocol):
     """Factual-specific proposal and optional scoring operations."""
@@ -75,6 +119,15 @@ class ProposalSession(Protocol):
         confidences: float | Sequence[float] | np.ndarray | None,
         temperature: float,
     ) -> np.ndarray: ...
+
+    def numerical_distribution_batch(
+        self,
+        rows: np.ndarray,
+        columns: Sequence[int],
+        *,
+        quantiles: Sequence[float],
+        confidences: float | Sequence[float] | np.ndarray | None,
+    ) -> NumericalDistribution: ...
 
     def categorical_distribution(
         self,
@@ -119,11 +172,14 @@ def validate_backend_capabilities(
     needs_confidence: bool,
     needs_categorical: bool,
     needs_joint: bool,
+    needs_numerical_distribution: bool = False,
 ) -> None:
     """Reject unsupported search/backend combinations before generation."""
     missing: list[str] = []
     if not capabilities.numerical_proposals:
         missing.append("numerical proposals")
+    if needs_numerical_distribution and not capabilities.numerical_distribution:
+        missing.append("numerical distributions")
     if needs_confidence and not capabilities.confidence_conditioning:
         missing.append("confidence conditioning")
     if needs_categorical and not capabilities.categorical_distribution:
