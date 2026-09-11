@@ -167,6 +167,10 @@ uv run python -m experiments.zeroshot_cf.cli analyze \
   --output experiments/zeroshot_cf/results/local/analysis
 ```
 
+Without `--output`, products go to the sibling directory `<output_root>_analysis`. They must
+never be written inside `output_root`: strict aggregation treats any directory there without a
+`COMPLETE` marker as a partial run and refuses the whole matrix.
+
 Analysis refuses partial, missing, extra, duplicate, or identity-mismatched cells. Seed groups
 are keyed by the complete scientific specification except seed and report mean, sample standard
 deviation, and the actual finite `n` for each metric. Historical evaluation-v1 artifacts remain

@@ -49,7 +49,10 @@ def _analyze(path: str, output: str | None) -> int:
     config = _config(path)
     from experiments.zeroshot_cf.analysis.builders import build_all
 
-    destination = Path(output) if output else config.execution.output_root / "analysis"
+    # Products must not land inside output_root: strict aggregation rejects any
+    # non-run directory there, so the default is a sibling directory.
+    root = config.execution.output_root
+    destination = Path(output) if output else root.with_name(f"{root.name}_analysis")
     products = build_all(config.execution.output_root, Path(path), destination)
     print(f"wrote {len(products)} analysis products into {destination}")
     return 0
