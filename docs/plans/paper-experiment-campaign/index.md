@@ -146,3 +146,5 @@ jq -r '.stages[] | "\(.id)  \(.status)  \(.title)"' state.json
 - [compute-budget.md](resources/compute-budget.md) — measured per-factual costs and the campaign estimate
 - [experiment-catalog.md](resources/experiment-catalog.md) — E1–E10 mapped to stages, matrices, and output roots
 - [dgx-runbook.md](resources/dgx-runbook.md) — provisioning, environment, and the detached launch pattern
+- [e2b-results.md](resources/e2b-results.md) — E2b diversity-budget sweep results and interpretation
+- [e3-clean-backend-results.md](resources/e3-clean-backend-results.md) — E3 clean proposal-backend attribution (empirical / empirical_local / tabicl)

@@ -19,7 +19,8 @@ rescoring gate must pass before the plan stage itself is complete.
 `launch_stage08b.sh` runs the prepared E2b diversity-budget sweep
 (`campaign_e2b_budget.yaml`, 36 cells, marker `stage08b.DONE`, log `stage08b.log`). It is not
 part of any plan stage and costs an estimated 6 to 9 GPU hours, so launch it only on an explicit
-instruction.
+instruction. E2b was executed on Helios instead (see `plgrid/README.md`); its 1.5 point is the
+E2 CounterContEx arm, which lives only on this host.
 
 ```bash
 bash experiments/zeroshot_cf/dgx/launch_stage07.sh

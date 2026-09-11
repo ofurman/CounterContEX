@@ -37,7 +37,9 @@ same place.
 
 E2b is a prepared extension rather than a plan stage: 36 cells (six datasets x three seeds x
 `diversity.max_gower_ratio` in {2.5, 4.0}), with the E2 CounterContEx cells supplying the 1.5
-point (see D-13). It must not be launched without an explicit instruction.
+point (see D-13). Executed on Helios on 2026-09-04 (36/36, 7.132 h of cell time); artifacts are
+in `campaign/e2b_budget` on the workstation, analysis in `campaign/e2b_budget_analysis`. See the
+2026-09-07 journal entry.
 
 B12 (directional constraints), B13 (multiclass), B14 (formal statement) and B15 (human
 evaluation) are **out of scope for this plan** — B12 and B13 are method extensions rather than

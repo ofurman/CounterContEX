@@ -485,3 +485,63 @@ artifacts and is recorded as NOT MEASURED rather than approximated. Matched-popu
 is deferred as B-3.
 
 **Commit**: `HEAD` (this erratum commit)
+
+## 2026-09-07 19:25 -- E2b diversity-budget sweep executed on Helios and pulled -- DONE
+**Did**: Ran `campaign_e2b_budget.yaml` (six datasets x three seeds x `max_gower_ratio`
+{2.5, 4.0}, CounterContEx/TabICL, k=3, evaluation v2) on Helios GH200 as Slurm job 21880998
+(`plgrid/run_matrix.sbatch`, 2026-09-04, 7 h 09 min wall). Generation finished all 36 cells in
+25722 s and the strict aggregate accepted 36/36; the job then exited 1 in `cli analyze` because
+the default analysis destination was `<output_root>/analysis`, so the first builder's F3 output
+made the second builder's strict `aggregate_expected` reject `analysis` as a partial run
+directory. The DGX launchers never hit this because `run_stage.sh` does not call `analyze`.
+Fixed in `cli.py`: the default destination is now the sibling `<output_root>_analysis`.
+
+Pulled the 36 run directories and `aggregate_summary.csv` (37 MB) to
+`experiments/zeroshot_cf/results/campaign/e2b_budget/` and the job logs to
+`results/campaign/launch/e2b_budget-21880998.{out,err}`; the remote partial `analysis/` directory
+was not pulled and still sits inside the Helios output root, so a future strict aggregate there
+will fail until it is moved out. A local strict re-aggregate reproduced the Helios
+`aggregate_summary.csv` byte for byte (SHA-256
+`49c4ffa2cf866b04942ea3e684f92f65a8648867e0dda78ba061355d6e617f24`), and the analysis layer
+wrote 18 products into `results/campaign/e2b_budget_analysis/` (T2 SHA-256
+`82276eb86a35ddfa1eea5a0768137bf8b9e37fe11a71bc4c6525562338959039`). Every manifest carries
+`countercontex.evaluation.v2`; every seed triple has zero spread on the set metrics, consistent
+with the Stage 1 zero-spread finding (temperature 1e-9, deterministic proposals).
+
+**Report**: six-dataset means, in the Stage 8 order set coverage, threshold validity,
+grouped-Gower proximity, action Jaccard distance, pairwise Gower, with the published E2
+CounterContEx (ratio 1.5) and DiCE rows for reference:
+
+| arm | cov@k | v_thr | proximity | action Jaccard | pairwise Gower |
+|-----|-------|-------|-----------|----------------|----------------|
+| CounterContEx 1.5 (E2, DGX) | .999333 | .134516 | .056624 | .601143 | .056783 |
+| CounterContEx 2.5 (E2b) | .999333 | .141998 | .057968 | .627041 | .060658 |
+| CounterContEx 4.0 (E2b) | 1.000000 | .149130 | .058992 | .652316 | .063792 |
+| DiCE (E2, DGX) | .665778 | .108628 | .099626 | .467239 | .087085 |
+
+Both diversity axes rise monotonically with the budget and the guardrails do not degrade:
+proximity worsens by +.001344 (2.5) and +.002368 (4.0), threshold validity improves, coverage is
+unchanged, actionability stays 1.0, and the out-of-bounds fraction is .010548 / .010537 (German
+Credit .0139 and Lending Club .049 on both arms). The value-diversity gap to DiCE narrows from
+-.030302 at 1.5 to -.023293 at 4.0 but does not close, while the proximity-normalized spread as a
+ratio of six-dataset means is 1.0028 (1.5, published means), 1.0464 (2.5) and 1.0814 (4.0)
+against DiCE's roughly .8741; the T2 per-cell `set_pairwise_gower_ratio` averaged over the six
+dataset rows is 1.0368 (2.5) and 1.0644 (4.0). The budget is therefore not the lever that
+would make CounterContEx sets spread as far as DiCE's in raw Gower; it buys a modest, cheap gain.
+Per dataset the pairwise-Gower response is smallest on Bank Marketing and HELOC (+.0006 and
++.0001 from 2.5 to 4.0) and largest on Give Me Some Credit and Lending Club (+.0081, +.0023).
+Runtime: 3.793 h (2.5) and 3.339 h (4.0) of cell total time, 7.132 h together, Lending Club
+2786 s and 2519 s per cell; the larger budget is not slower. The E2b 1.5 point is the E2 arm on
+`gx10-bdc5`, so a joint three-point T2 needs both trees on one host; the Stage 8 erratum's Step 4
+rebuild of E2 remains NOT MEASURED here.
+
+**Provenance**: per-arm values were computed from `aggregate_summary.csv` joined to each
+manifest's `resolved_method_config.diversity.max_gower_ratio` and `timings`; T2 rows carry both
+arms as `method_variant: default` and are distinguishable only through the manifest, which is
+why the table above is not read from T2 directly. E2 and DiCE rows are the Stage 8 REPORT
+values re-quoted, not recomputed.
+
+**Problems**: `cli analyze` default destination broke the Helios job after generation; fixed
+with no scientific change. T2 cannot label the budget arms (B-4 candidate: carry the swept
+parameter into `method_variant` or a T2 column). Remote `analysis/` partial left in place.
+**Commit**: `HEAD`
